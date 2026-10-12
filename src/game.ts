@@ -1215,7 +1215,7 @@ export class Game {
       ].filter(Boolean),
     });
     if (full) {
-      this.ui.weapons(this.save.weapons, this.save.active, (it) => this.itemDamage(it));
+      this.ui.weapons(this.save.weapons, this.save.active, (it) => this.itemDamage(it), this.save.equip);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
     }
     this.ui.minimap(this.hero.position, this.hero.facing, this.mobs.filter((m) => m.alive && m.pos.distanceTo(this.hero.position) < 45).map((m) => m.pos), this.world, this.mobs.filter((m) => m.def.boss).map((m) => ({ pos: m.spawn, alive: m.alive })));

@@ -1,16 +1,17 @@
 import * as THREE from 'three';
 import {
-  DAMAGE_TYPE_COLOR, DAMAGE_TYPE_NAME, FACTIONS, ORBS, RARITY, SHARPEN, WEAPONS, WORLD, ZONES,
+  DAMAGE_TYPE_NAME, FACTIONS, ORBS, RARITY, SHARPEN, WEAPONS, WORLD, ZONES,
   type FactionId, type OrbKind, type ZoneDef,
 } from './config';
-import { scrapValue, type Item } from './items';
-import { resistIcons, rewardChips } from './icons';
+import { ARMOR_SLOTS, cellHtml, scrapValue, type ArmorSlot, type Item } from './items';
+import { fmtK, icon, resistIcons, rewardChips } from './icons';
 import type { MobDef } from './config';
 import { sfx } from './audio';
 import type { World } from './world';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toString();
+const STAT_ICON: Record<OrbKind, string> = { power: 'sword', hp: 'heart', regen: 'plus', speed: 'boot' };
 
 export interface HudState {
   hp: number; maxHp: number; shield: number; shieldMax: number; gold: number;
@@ -30,6 +31,7 @@ export class UI {
   onCharacter: () => void = () => {};
   onBag: () => void = () => {};
   onMap: () => void = () => {};
+  onArmor: () => void = () => {};
   private swapCb: () => void = () => {};
   private mm = $<HTMLCanvasElement>('minimap').getContext('2d')!;
 
@@ -39,9 +41,19 @@ export class UI {
     $('btn-char').addEventListener('click', () => { sfx.click(); this.onCharacter(); });
     $('btn-bag').addEventListener('click', () => { sfx.click(); this.onBag(); });
     $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
+    $('btn-settings').innerHTML = icon('gear', '#d9dde3', 30);
+    $('btn-char').insertAdjacentHTML('afterbegin', icon('hero', '#fff', 34));
+    $('btn-bag').insertAdjacentHTML('afterbegin', icon('bag', '#fff', 34));
+    $('btn-smith').insertAdjacentHTML('afterbegin', icon('anvil', '#fff', 22) + ' ');
+    $('gold').querySelector('i')!.outerHTML = icon('coin', '#ffd23f', 20);
+    $('armorbar').addEventListener('click', (e) => {
+      if (!(e.target as HTMLElement).closest('[data-armor]')) return;
+      sfx.click();
+      this.onArmor();
+    });
     const stats = $('stats');
     stats.innerHTML = (['power', 'hp', 'regen', 'speed'] as OrbKind[])
-      .map((k) => `<div class="st" data-k="${k}"><i style="background:${ORBS[k].css}"></i><span></span></div>`)
+      .map((k) => `<div class="st" data-k="${k}">${icon(STAT_ICON[k], ORBS[k].css, 18)}<span></span></div>`)
       .join('');
   }
 
@@ -65,10 +77,10 @@ export class UI {
     (hp.querySelector('.fill') as HTMLElement).style.width = `${(s.hp / s.maxHp) * 100}%`;
     (hp.querySelector('.shield') as HTMLElement).style.width = `${(s.shield / Math.max(1, total)) * 100}%`;
     (hp.querySelector('span') as HTMLElement).textContent = `${Math.ceil(s.hp)} / ${s.maxHp}${s.shield > 0 ? `  +${Math.ceil(s.shield)}🛡` : ''}`;
-    $('gold').textContent = String(s.gold);
+    ($('gold').querySelector('span') as HTMLElement).textContent = fmtK(s.gold);
     const st = s.stats;
     const vals: Record<OrbKind, string> = {
-      power: `Урон ${st.power}`, hp: `HP ${st.hp}`, regen: `Реген ${fmt1(st.regen)}%/с`, speed: `Бег ${fmt1(st.speed)} м/с`,
+      power: fmtK(st.power), hp: fmtK(st.hp), regen: `${fmt1(st.regen)}%`, speed: fmt1(st.speed),
     };
     $('stats').querySelectorAll<HTMLElement>('.st').forEach((el) => {
       (el.querySelector('span') as HTMLElement).textContent = vals[el.dataset.k as OrbKind];
@@ -97,30 +109,24 @@ export class UI {
     b.dataset.badge = full ? '!' : n > 0 ? String(n) : '';
   }
 
-  weapons(items: (Item | null)[], active: number, dmg: (it: Item) => number) {
+  /** Bottom "equipped" bar: two weapons (tap the other one to swap) and the six armour slots. */
+  weapons(items: (Item | null)[], active: number, dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>) {
     const box = $('weapons');
-    box.innerHTML = '';
-    // inactive slot first so the active one sits in the corner under the thumb
-    const order = active === 0 ? [1, 0] : [0, 1];
-    for (const i of order) {
+    box.innerHTML = [0, 1].map((i) => {
       const it = items[i];
-      const b = document.createElement('button');
-      b.className = 'wslot' + (i === active ? ' active' : '') + (it ? '' : ' empty');
-      if (it) {
-        const w = WEAPONS[it.def];
-        b.style.borderColor = RARITY[it.rarity].color;
-        b.innerHTML = `${w.icon}<span class="t" style="color:${DAMAGE_TYPE_COLOR[w.type]}">${DAMAGE_TYPE_NAME[w.type]}</span>` +
-          (it.sharpen ? `<span class="lvl">+${it.sharpen}</span>` : '') + (i !== active ? '<span class="swap">⇄</span>' : '');
-        b.title = `${w.name}: ${Math.round(dmg(it))} урона`;
-      } else {
-        b.textContent = 'пусто';
-      }
-      if (i !== active && it) b.addEventListener('click', () => this.swapCb());
-      box.appendChild(b);
-    }
+      const on = i === active;
+      const tag = !on && it ? '<span class="swap">⇄</span>' : '';
+      const title = it ? `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"` : '';
+      return cellHtml(it, `data-w="${i}" ${title}`, 'sword', tag, on ? 'wslot active' : 'wslot');
+    }).join('');
+    box.querySelectorAll<HTMLElement>('[data-w]').forEach((b) => {
+      if (+b.dataset.w! !== active && items[+b.dataset.w!]) b.addEventListener('click', () => this.swapCb());
+    });
+    $('armorbar').innerHTML = ARMOR_SLOTS.map((x) => cellHtml(equip[x.id], `data-armor="${x.id}" title="${x.name}"`, x.icon)).join('');
   }
 
   zoneBanner(z: ZoneDef) {
+    $('zone-label').textContent = z.name;
     const el = $('zone-banner');
     el.innerHTML = z.name + (z.recommend ? `<small>Рекомендуемый урон: ${DAMAGE_TYPE_NAME[z.recommend]}</small>` : '<small>Безопасная зона</small>');
     el.classList.add('show');

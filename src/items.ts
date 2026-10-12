@@ -112,10 +112,10 @@ export function itemIcon(it: Item, size = 24) {
 }
 
 /** Butcher-style item cell: rarity background, damage-type badge, level, sharpening. Empty cells show a faded slot icon. */
-export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = '', extra = '') {
-  if (!it) return `<button class="cell empty" ${attrs}>${placeholder ? icon(placeholder, '#ffffff55', 30, 'ic') : ''}${extra}</button>`;
+export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = '', extra = '', cls = '') {
+  if (!it) return `<button class="cell empty ${cls}" ${attrs}>${placeholder ? icon(placeholder, '#ffffff55', 30, 'ic') : ''}${extra}</button>`;
   const badge = it.kind === 'weapon' ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 12)}</span>` : '';
-  return `<button class="cell r${it.rarity}" ${attrs}>${icon(itemIconId(it), '#fff', 34, 'ic')}${badge}` +
+  return `<button class="cell r${it.rarity} ${cls}" ${attrs}>${icon(itemIconId(it), '#fff', 34, 'ic')}${badge}` +
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }
 

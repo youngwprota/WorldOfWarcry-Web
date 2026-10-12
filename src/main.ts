@@ -88,6 +88,7 @@ function startGame(faction: FactionId, fresh: boolean) {
   const inv = new Inventory(ui, game);
   ui.onCharacter = game.onOpenCharacter = () => { input.reset(); inv.openCharacter(); };
   ui.onBag = game.onOpenBag = () => { input.reset(); inv.openBag(); };
+  ui.onArmor = ui.onCharacter;
   const map = new MapView(game);
   ui.onMap = game.onOpenMap = () => { if (inv.isOpen || ui.modalOpen) return; map.toggle(); };
   addEventListener('keydown', (e) => {
