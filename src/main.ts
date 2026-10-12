@@ -103,6 +103,8 @@ function startGame(faction: FactionId, fresh: boolean) {
       applyGfx(!!save!.lowGfx);
       game?.persist();
     }, () => {
+      // Drop the game first: reload fires visibilitychange(hidden), whose persist() would rewrite the save.
+      game = null;
       clearSave();
       location.reload();
     }, () => { if (game) game.paused = false; });
