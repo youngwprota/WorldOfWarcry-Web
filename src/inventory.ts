@@ -6,6 +6,7 @@ import {
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
+import { fmtK, icon } from './icons';
 import type { Game } from './game';
 import type { UI } from './ui';
 
@@ -87,19 +88,21 @@ class HeroPreview {
   }
 }
 
+type BagFilter = 'all' | 'weapon' | 'armor';
 type Source = { at: 'bag'; index: number } | { at: 'armor'; slot: ArmorSlot } | { at: 'weapon'; slot: 0 | 1 };
 
 /** Character sheet (paper doll) and bags. */
 export class Inventory {
   private preview: HeroPreview | null = null;
   private view: 'char' | 'bag' | null = null;
+  private bagFilter: BagFilter = 'all';
 
   constructor(private ui: UI, private game: Game) {}
 
   get isOpen() { return this.view !== null; }
 
-  private cell(it: Item | null | undefined, attrs: string, placeholder = '', extra = '') {
-    return cellHtml(it, attrs, placeholder, extra);
+  private cell(it: Item | null | undefined, attrs: string, placeholder = '', extra = '', cls = '') {
+    return cellHtml(it, attrs, placeholder, extra, cls);
   }
 
   private pause() {
@@ -175,35 +178,50 @@ export class Inventory {
     g.newItems = 0;
   }
 
-  // ---------- bags ----------
+  // ---------- bags: Butcher-style bottom sheet ----------
   openBag() {
     this.preview?.dispose();
     this.preview = null;
     this.pause();
     this.view = 'bag';
-    this.ui.open(`<div class="inv bag">
-      <div class="inv-head">
-        <div class="portrait">🎒</div>
-        <div class="title"><b>Сумка</b><small id="b-sub"></small></div>
-        <button class="hbtn" id="b-char" title="Персонаж">👤</button>
-        <button class="hbtn x" id="i-close" title="Закрыть">✕</button>
+    const tab = (f: BagFilter, ic: string) => `<button class="tab ${this.bagFilter === f ? 'on' : ''}" data-filter="${f}">${icon(ic, '#fff', 22)}</button>`;
+    this.ui.open(`<div class="sheet inv bag">
+      <div class="sheet-head"><div class="sheet-title">Инвентарь</div><button class="xbtn" id="i-close" title="Закрыть">✕</button></div>
+      <div class="sheet-body">
+        <div class="tabs">${tab('all', 'bag')}${tab('weapon', 'sword')}${tab('armor', 'chest')}
+          <span class="cap" id="b-sub"></span>
+          <button class="tab hero" id="b-char" title="Персонаж">${icon('hero', '#fff', 22)}</button></div>
+        <div id="b-grid"></div>
+        <p class="hint-line">Нажми на предмет: надеть, сравнить или разобрать на золото</p>
       </div>
-      <div class="grid" id="b-grid"></div>
-      <p class="hint-line">Нажми на предмет: надеть, сравнить или разобрать на золото</p>
+      <div class="equipped"><div class="eq-title">Экипировано</div><div class="eq-row" id="b-eq"></div></div>
       <div class="tip hidden" id="i-tip"></div>
     </div>`);
     this.ui.on('#i-close', () => this.close());
     this.ui.on('#b-char', () => this.openCharacter());
+    this.ui.modal.querySelectorAll<HTMLElement>('[data-filter]').forEach((b) => b.addEventListener('click', () => {
+      sfx.click();
+      this.bagFilter = b.dataset.filter as BagFilter;
+      this.ui.modal.querySelectorAll('[data-filter]').forEach((x) => x.classList.toggle('on', x === b));
+      this.renderBag();
+    }));
     this.ui.modal.addEventListener('click', this.onClick);
     this.renderBag();
   }
 
   private renderBag() {
     const s = this.game.save;
-    this.ui.modal.querySelector('#b-sub')!.innerHTML = `${s.bag.length}/${BAG_SIZE} · <span style="color:var(--gold)">${s.gold} 🪙</span>`;
-    const cells: string[] = [];
-    for (let i = 0; i < BAG_SIZE; i++) cells.push(this.cell(s.bag[i], s.bag[i] ? `data-bag="${i}"` : 'disabled'));
-    this.ui.modal.querySelector('#b-grid')!.innerHTML = cells.join('');
+    const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
+    q('#b-sub').innerHTML = `${s.bag.length}/${BAG_SIZE} · ${icon('coin', '#ffd23f', 16)}<b>${fmtK(s.gold)}</b>`;
+    const section = (kind: 'weapon' | 'armor', title: string) => {
+      const cells = s.bag.map((it, i) => (it.kind === kind ? this.cell(it, `data-bag="${i}"`) : '')).join('');
+      return cells ? `<div class="divider"><span>${title}</span></div><div class="grid">${cells}</div>` : '';
+    };
+    const f = this.bagFilter;
+    const html = (f !== 'armor' ? section('weapon', 'Оружие') : '') + (f !== 'weapon' ? section('armor', 'Броня') : '');
+    q('#b-grid').innerHTML = html || '<div class="none">Пусто. Предметы падают с мобов, боссов и из разрушаемых объектов</div>';
+    q('#b-eq').innerHTML = ([0, 1] as const).map((i) => this.cell(s.weapons[i], `data-weapon="${i}"`, 'sword', '', s.active === i ? 'active' : '')).join('') +
+      '<div class="sep"></div>' + ARMOR_SLOTS.map((x) => this.cell(s.equip[x.id], `data-armor="${x.id}" title="${x.name}"`, x.icon)).join('');
     this.game.newItems = 0;
   }
 
