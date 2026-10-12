@@ -70,9 +70,9 @@ export interface ComboDef {
   color: number;
 }
 export const COMBOS: Record<string, ComboDef> = {
-  sword: { name: 'Вихрь', hits: 3, window: 0.35, mult: 1.8, rangeAdd: 0.9, shape: 'circle', arc: 360, knock: 7, stun: 0, spin: true, color: 0x9fe3ff },
-  axe: { name: 'Раскол', hits: 3, window: 0.35, mult: 2.3, rangeAdd: 1.2, shape: 'arc', arc: 220, knock: 11, stun: 0.4, spin: false, color: 0xff8a5a },
-  hammer: { name: 'Землетрясение', hits: 3, window: 0.4, mult: 1.6, rangeAdd: 1.0, shape: 'circle', arc: 360, knock: 5, stun: 1.6, spin: false, color: 0xffc95a },
+  sword: { name: 'Вихрь', hits: 3, window: 0.35, mult: 1.3, rangeAdd: 0.5, shape: 'circle', arc: 360, knock: 7, stun: 0, spin: true, color: 0x9fe3ff },
+  axe: { name: 'Раскол', hits: 3, window: 0.35, mult: 1.6, rangeAdd: 0.8, shape: 'arc', arc: 220, knock: 11, stun: 0.4, spin: false, color: 0xff8a5a },
+  hammer: { name: 'Землетрясение', hits: 3, window: 0.4, mult: 1.3, rangeAdd: 0.8, shape: 'circle', arc: 360, knock: 5, stun: 1.6, spin: false, color: 0xffc95a },
 };
 
 export interface FactionDef {
@@ -174,7 +174,7 @@ export const MOBS: Record<string, MobDef> = {
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
-    anim: 'AxeAttack', hp: 6000, dmg: 30, aps: 0.6, range: 2.4, speed: 3.6, aggro: 9, scale: 1.9,
+    anim: 'AxeAttack', hp: 5200, dmg: 30, aps: 0.6, range: 2.4, speed: 3.6, aggro: 9, scale: 1.9,
     resist: { slash: 'weak' }, reward: { power: 5, hp: 4, regen: 2, speed: 2 }, gold: [60, 90], respawn: 180,
     boss: {
       ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest',
