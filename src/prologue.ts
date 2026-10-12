@@ -686,6 +686,7 @@ export class Prologue {
     x /= m;
     y /= m;
     arrow.style.display = 'block';
-    arrow.style.transform = `translate(${(x * 0.5 + 0.5) * w - 13}px, ${(-y * 0.5 + 0.5) * h - 13}px) rotate(${Math.atan2(-y, x)}rad)`;
+    const s = this.ui.scale; // #pro-hud is scaled by --ui
+    arrow.style.transform = `translate(${((x * 0.5 + 0.5) * w) / s - 13}px, ${((-y * 0.5 + 0.5) * h) / s - 13}px) rotate(${Math.atan2(-y, x)}rad)`;
   }
 }
