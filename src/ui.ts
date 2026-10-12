@@ -1,17 +1,18 @@
 import * as THREE from 'three';
 import {
-  DAMAGE_TYPE_NAME, FACTIONS, ORBS, SHARPEN, WEAPONS, WORLD, ZONES,
+  DAMAGE_TYPE_NAME, FACTIONS, SHARPEN, WEAPONS, WORLD, ZONES,
   type FactionId, type OrbKind, type ZoneDef,
 } from './config';
 import { ARMOR_SLOTS, cellHtml, scrapValue, type ArmorSlot, type Item } from './items';
 import { DAMAGE_TYPE_ICON, fmtK, icon, resistIcons, rewardChips } from './icons';
+import { art } from './art';
 import type { MobDef } from './config';
 import { sfx } from './audio';
 import type { World } from './world';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toString();
-const STAT_ICON: Record<OrbKind, string> = { power: 'sword', hp: 'heart', regen: 'plus', speed: 'boot' };
+const STAT_ICON: Record<OrbKind, string> = { power: 'sword', hp: 'heart', regen: 'regen', speed: 'boot' };
 
 export interface HudState {
   hp: number; maxHp: number; shield: number; shieldMax: number; gold: number;
@@ -54,11 +55,11 @@ export class UI {
     $('btn-bag').addEventListener('click', () => { sfx.click(); this.onBag(); });
     $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('bosses').addEventListener('click', () => { sfx.click(); this.onMap(); });
-    $('btn-settings').innerHTML = icon('gear', '#d9dde3', 30);
-    $('btn-char').insertAdjacentHTML('afterbegin', icon('hero', '#fff', 34));
-    $('btn-bag').insertAdjacentHTML('afterbegin', icon('bag', '#fff', 34));
-    $('btn-smith').insertAdjacentHTML('afterbegin', icon('anvil', '#fff', 22) + ' ');
-    $('gold').querySelector('i')!.outerHTML = icon('coin', '#ffd23f', 20);
+    $('btn-settings').innerHTML = art('gear', 40);
+    $('btn-char').insertAdjacentHTML('afterbegin', art('hero', 46));
+    $('btn-bag').insertAdjacentHTML('afterbegin', art('bag', 48));
+    $('btn-smith').insertAdjacentHTML('afterbegin', art('anvil', 32) + ' ');
+    $('gold').querySelector('i')!.outerHTML = art('coin', 28);
     $('armorbar').addEventListener('click', (e) => {
       if (!(e.target as HTMLElement).closest('[data-armor]')) return;
       sfx.click();
@@ -66,7 +67,7 @@ export class UI {
     });
     const stats = $('stats');
     stats.innerHTML = (['power', 'hp', 'regen', 'speed'] as OrbKind[])
-      .map((k) => `<div class="st" data-k="${k}">${icon(STAT_ICON[k], ORBS[k].css, 18)}<span></span></div>`)
+      .map((k) => `<div class="st" data-k="${k}">${art(STAT_ICON[k], 26)}<span></span></div>`)
       .join('');
   }
 
@@ -101,8 +102,8 @@ export class UI {
     $('goal').innerHTML = s.goal;
     $('buffs').innerHTML = s.buffs.map((b) => `<div>${b}</div>`).join('');
     $('bosses').innerHTML = s.bosses.map((b) => `<div class="bw ui-block" title="${b.name}">
-      ${b.left > 0 ? '' : '<div class="bw-ready">Готово!</div>'}${icon('skull', b.left > 0 ? '#c9bfb2' : '#fff', 46)}
-      ${b.left > 0 ? `<div class="bw-time">${icon('hourglass', '#ffb21a', 14)}${fmtTime(b.left)}</div>` : `<div class="bw-name">${b.name}</div>`}</div>`).join('');
+      ${b.left > 0 ? '' : '<div class="bw-ready">Готово!</div>'}${art('skull', 62, b.left > 0 ? 'dim' : '')}
+      ${b.left > 0 ? `<div class="bw-time">${art('hourglass', 20)}${fmtTime(b.left)}</div>` : `<div class="bw-name">${b.name}</div>`}</div>`).join('');
   }
 
   popStat(k: OrbKind) {
@@ -212,12 +213,12 @@ export class UI {
         <div class="sc-name">${w.name}${it.sharpen ? ` +${it.sharpen}` : ''}</div>
         <div class="sc-sub">${max ? 'максимум' : `${icon(DAMAGE_TYPE_ICON[w.type], '#9fe3ff', 14)} ${fmtK(now)} <em>›</em> <b>${fmtK(next)}</b>`}</div>
         ${cellHtml(it, 'disabled')}
-        <button class="btn primary price" data-sharpen="${i}" ${max || gold < cost ? 'disabled' : ''}>${max ? 'MAX' : `${icon('coin', '#ffd23f', 18)} ${fmtK(cost)}`}</button>
+        <button class="btn primary price" data-sharpen="${i}" ${max || gold < cost ? 'disabled' : ''}>${max ? 'MAX' : `${art('coin', 26)} ${fmtK(cost)}`}</button>
         ${count > 1 ? `<button class="link" data-scrap="${i}">разобрать +${fmtK(scrapValue(it))}</button>` : ''}
       </div>`;
     }).join('');
     this.open(`<div class="panel shop">
-      <div class="shop-head"><div class="pill">${icon('coin', '#ffd23f', 20)}<span>${fmtK(gold)}</span></div><h2>Кузнец</h2><button class="xbtn" id="m-close">✕</button></div>
+      <div class="shop-head"><div class="pill">${art('coin', 28)}<span>${fmtK(gold)}</span></div><h2>Кузнец</h2><button class="xbtn" id="m-close">✕</button></div>
       <div class="ribbon">Заточка +8% урона</div>
       <div class="shop-grid">${cards}</div>
       <p>Заточка до +${SHARPEN.max}. Лишнее оружие можно разобрать на золото.</p></div>`);
@@ -283,7 +284,7 @@ export class UI {
       return `<div class="fcard ui-block" data-f="${f}" style="border-top:5px solid ${d.color}">
         <h3>${d.name}</h3><div class="fan">${d.fantasy}</div>
         <div class="pas">${d.passiveName}</div><div>${d.passiveText}</div>
-        <div class="pas">Старт: ${icon(w.id, '#fff', 16)} ${w.name}</div></div>`;
+        <div class="pas">Старт: ${art(w.id, 22)} ${w.name}</div></div>`;
     };
     this.open(`<div class="factions ui-block"><h1>Выбери, чьим воином вернёшься</h1>
       <div class="fcards">${card('human')}${card('orc')}</div>

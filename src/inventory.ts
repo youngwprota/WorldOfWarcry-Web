@@ -7,6 +7,7 @@ import {
 } from './items';
 import { sfx } from './audio';
 import { DAMAGE_TYPE_ICON, fmtK, icon } from './icons';
+import { art } from './art';
 import type { Game } from './game';
 import type { UI } from './ui';
 
@@ -119,6 +120,31 @@ export class Inventory {
     this.game.refreshHud(true);
   }
 
+  /** "Характеристики" panel at the top of the screen, above the sheet (as in Butcher Hero). */
+  private statsPanel() {
+    const f = FACTIONS[this.game.faction];
+    return `<div class="top-stats">
+      <div class="sc-title">Характеристики <small>${f.name} · ${f.passiveName}</small></div>
+      <div class="big-stats" id="i-big"></div>
+      <div class="chips" id="i-stats"></div>
+    </div>`;
+  }
+
+  private renderStats() {
+    const g = this.game;
+    const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
+    const hit = g.itemDamage(g.weaponItem) * g.powerMult();
+    const big = (ic: string, v: string, label: string) => `<div>${art(ic, 46)}<b>${v}</b><span>${label}</span></div>`;
+    q('#i-big').innerHTML = big('sword', fmtK(hit * g.weapon.aps), 'DPS') + big('heart', fmtK(g.maxHp), 'HP') +
+      big('regen', fmtK((g.regen / 100) * g.maxHp), 'Реген');
+    const combo = COMBOS[g.weaponItem.def];
+    const chip = (ic: string, v: string, title: string) => `<div class="chip" title="${title}">${art(ic, 28)}<b>${v}</b></div>`;
+    q('#i-stats').innerHTML = chip('hammer', fmtK(Math.round(hit)), 'Урон за удар') + chip('sword', fmtK(g.power), 'Сила (сферы и броня)') +
+      chip('shield', `${g.defense} <small>−${Math.round((g.defense / (g.defense + 100)) * 100)}%</small>`, 'Защита') +
+      chip('boot', `${Math.round(g.speed * 10) / 10}`, 'Бег, м/с') + chip('axe', `×${combo.mult}`, `Комбо: ${combo.name}`) +
+      chip('gear', `${g.weapon.aps}/с`, 'Атак в секунду');
+  }
+
   // ---------- character sheet ----------
   openCharacter() {
     if (this.view === 'char') return;
@@ -127,14 +153,9 @@ export class Inventory {
     this.pause();
     this.view = 'char';
     const f = FACTIONS[this.game.faction];
-    this.ui.open(`<div class="sheet inv char">
+    this.ui.open(`${this.statsPanel()}<div class="sheet inv char">
       <div class="sheet-head"><div class="sheet-title">Герой</div><button class="xbtn" id="i-close" title="Закрыть">✕</button></div>
       <div class="sheet-body">
-        <div class="stat-card well">
-          <div class="sc-title">Характеристики <small>${f.name} · ${f.passiveName}</small></div>
-          <div class="big-stats" id="i-big"></div>
-          <div class="chips" id="i-stats"></div>
-        </div>
         <div class="doll">
           <div class="col" id="i-left"></div>
           <div class="paper">
@@ -146,7 +167,7 @@ export class Inventory {
         <div class="wrow" id="i-weapons"></div>
         <div class="divider"><span id="i-owned-title"></span></div>
         <div class="strip" id="i-strip"></div>
-        <button class="btn primary bag-btn" id="i-bag">${icon('bag', '#fff', 22)} Открыть сумку</button>
+        <button class="btn primary bag-btn" id="i-bag">${art('bag', 30)} Открыть сумку</button>
       </div>
     </div>`);
     this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, f.hero);
@@ -157,6 +178,7 @@ export class Inventory {
     this.ui.modal.insertAdjacentHTML('beforeend', '<div class="tip-wrap hidden" id="i-tip"><div class="tip"></div></div>');
     this.ui.modal.addEventListener('click', this.onClick);
     this.renderChar();
+    this.renderStats();
   }
 
   private renderChar() {
@@ -172,16 +194,6 @@ export class Inventory {
       const tag = `<span class="wtag ${s.active === i ? 'on' : ''}">${s.active === i ? 'в руке' : `слот ${i + 1}`}</span>`;
       return this.cell(it, `data-weapon="${i}"`, 'sword', tag, s.active === i ? 'active' : '');
     }).join('');
-    const hit = g.itemDamage(g.weaponItem) * g.powerMult();
-    const big = (ic: string, color: string, v: string, label: string) => `<div>${icon(ic, color, 40)}<b>${v}</b><span>${label}</span></div>`;
-    q('#i-big').innerHTML = big('sword', '#9fe3ff', fmtK(hit * g.weapon.aps), 'DPS') + big('heart', '#ff4d6a', fmtK(g.maxHp), 'HP') +
-      big('plus', '#5ee87a', fmtK((g.regen / 100) * g.maxHp), 'Реген/с');
-    const combo = COMBOS[g.weaponItem.def];
-    const chip = (ic: string, color: string, v: string, title: string) => `<div class="chip" title="${title}">${icon(ic, color, 20)}<b>${v}</b></div>`;
-    q('#i-stats').innerHTML = chip('hammer', '#ffb347', fmtK(Math.round(hit)), 'Урон за удар') + chip('sword', '#ff8a5a', fmtK(g.power), 'Сила (сферы и броня)') +
-      chip('shield', '#9fe3ff', `${g.defense} <small>−${Math.round((g.defense / (g.defense + 100)) * 100)}%</small>`, 'Защита') +
-      chip('boot', '#ffe04a', `${Math.round(g.speed * 10) / 10}`, 'Бег, м/с') + chip('axe', '#d9a6ff', `×${combo.mult}`, `Комбо: ${combo.name}`) +
-      chip('gear', '#c9bfb2', `${g.weapon.aps}/с`, 'Атак в секунду');
     q('#i-owned-title').innerHTML = `В сумке ${s.bag.length}/${BAG_SIZE}`;
     q('#i-strip').innerHTML = s.bag.length
       ? s.bag.map((it, i) => this.cell(it, `data-bag="${i}"`)).join('')
@@ -196,13 +208,13 @@ export class Inventory {
     this.preview = null;
     this.pause();
     this.view = 'bag';
-    const tab = (f: BagFilter, ic: string) => `<button class="tab ${this.bagFilter === f ? 'on' : ''}" data-filter="${f}">${icon(ic, '#fff', 22)}</button>`;
-    this.ui.open(`<div class="sheet inv bag">
+    const tab = (f: BagFilter, ic: string) => `<button class="tab ${this.bagFilter === f ? 'on' : ''}" data-filter="${f}">${art(ic, 34)}</button>`;
+    this.ui.open(`${this.statsPanel()}<div class="sheet inv bag">
       <div class="sheet-head"><div class="sheet-title">Инвентарь</div><button class="xbtn" id="i-close" title="Закрыть">✕</button></div>
       <div class="sheet-body">
         <div class="tabs">${tab('all', 'bag')}${tab('weapon', 'sword')}${tab('armor', 'chest')}
           <span class="cap" id="b-sub"></span>
-          <button class="tab hero" id="b-char" title="Персонаж">${icon('hero', '#fff', 22)}</button></div>
+          <button class="tab hero" id="b-char" title="Персонаж">${art('hero', 36)}</button></div>
         <div id="b-grid"></div>
         <p class="hint-line">Нажми на предмет: надеть, сравнить или разобрать на золото</p>
       </div>
@@ -219,12 +231,13 @@ export class Inventory {
     this.ui.modal.insertAdjacentHTML('beforeend', '<div class="tip-wrap hidden" id="i-tip"><div class="tip"></div></div>');
     this.ui.modal.addEventListener('click', this.onClick);
     this.renderBag();
+    this.renderStats();
   }
 
   private renderBag() {
     const s = this.game.save;
     const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
-    q('#b-sub').innerHTML = `<span>${s.bag.length}/${BAG_SIZE}</span><span>${icon('coin', '#ffd23f', 18)}<b>${fmtK(s.gold)}</b></span>`;
+    q('#b-sub').innerHTML = `<span>${s.bag.length}/${BAG_SIZE}</span><span>${art('coin', 20)}<b>${fmtK(s.gold)}</b></span>`;
     const section = (kind: 'weapon' | 'armor', title: string) => {
       const cells = s.bag.map((it, i) => (it.kind === kind ? this.cell(it, `data-bag="${i}"`) : '')).join('');
       return cells ? `<div class="divider"><span>${title}</span></div><div class="grid">${cells}</div>` : '';
@@ -238,6 +251,7 @@ export class Inventory {
   }
 
   private rerender() {
+    this.renderStats();
     if (this.view === 'char') this.renderChar();
     else if (this.view === 'bag') this.renderBag();
   }
@@ -298,7 +312,7 @@ export class Inventory {
       return cur && o !== undefined && o !== v ? `<i>${o}</i><em>›</em><b class="${cls}">${v}</b>` : `<b>${v}</b>`;
     };
     const [main, ...rest] = itemLines(it).filter(([k]) => k !== 'Тип');
-    const mainIcon = it.kind === 'weapon' ? icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#9fe3ff', 20) : icon('shield', '#9fe3ff', 20);
+    const mainIcon = it.kind === 'weapon' ? art(it.def, 30) : art('shield', 30);
     const sub = rest.map(([k, v]) => `<div><span>${k}</span>${cmp(k, v)}</div>`).join('');
     let ability: string;
     if (it.kind === 'weapon') {

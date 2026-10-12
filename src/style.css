@@ -531,3 +531,27 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .big-stats div { gap: 3px; }
 .big-stats .svgi { width: 38px; height: 38px; }
 .big-stats b { font-size: 25px; }
+/* stats panel on top of the screen + sheet below (reference: Butcher Hero inventory) */
+#modal:has(.sheet) { flex-direction: column; justify-content: space-between; align-items: stretch; }
+.top-stats { flex: none; margin: calc(10px + env(safe-area-inset-top)) 10px 0; padding: 10px 12px 12px; border-radius: 24px; background: #24160ecc; border: 3px solid #00000066; box-shadow: 0 6px 20px #0008; animation: pop-in 0.18s ease-out; }
+.top-stats .sc-title { font-size: 26px; }
+.top-stats .big-stats { margin: 6px 0 12px; }
+.top-stats .big-stats b { font-size: 30px; }
+.top-stats .big-stats span { font-size: 13px; bottom: -4px; left: 0; }
+.top-stats .chips { gap: 8px; }
+.top-stats .chip { padding: 9px 4px; border-radius: 12px; background: #5a4334; box-shadow: inset 0 3px 0 #ffffff1a, inset 0 -3px 0 #0003; }
+.sheet { flex: 0 1 auto; min-height: 0; max-height: none; margin-top: 44px; }
+.svgi.art.dim { filter: grayscale(1) brightness(0.75); opacity: 0.8; }
+.cell .ic.art { filter: drop-shadow(0 3px 0 #0004); }
+/* thicker outlines, as in the reference */
+:root {
+  --stroke: 0 4px 0 var(--ink), 2.6px 0 0 var(--ink), -2.6px 0 0 var(--ink), 0 2.6px 0 var(--ink), 0 -2.6px 0 var(--ink), 1.9px 1.9px 0 var(--ink), -1.9px 1.9px 0 var(--ink), 1.9px -1.9px 0 var(--ink), -1.9px -1.9px 0 var(--ink), 2.4px 1px 0 var(--ink), -2.4px 1px 0 var(--ink), 1px 2.4px 0 var(--ink), -1px 2.4px 0 var(--ink), 2.4px -1px 0 var(--ink), -2.4px -1px 0 var(--ink);
+  --stroke-s: 0 2.5px 0 var(--ink), 1.7px 0 0 var(--ink), -1.7px 0 0 var(--ink), 0 1.7px 0 var(--ink), 0 -1.7px 0 var(--ink), 1.2px 1.2px 0 var(--ink), -1.2px 1.2px 0 var(--ink), 1.2px -1.2px 0 var(--ink), -1.2px -1.2px 0 var(--ink);
+}
+.btn, .xbtn, .side-btn, .tab, .round-btn, .cell, .panel, .tip, .sheet, .shop-card, .ribbon { border-width: 4px; }
+.cell.empty { border-width: 3px; }
+.btn, .xbtn, .side-btn, .tab, .round-btn { box-shadow: inset 0 3px 0 #ffffff66, inset 0 -5px 0 #0003, 0 4px 0 var(--ink); }
+.round-btn { background: radial-gradient(circle at 50% 35%, #6f7a8b, #3c4350); }
+.sheet .grid { grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.sheet .grid .cell .lv { font-size: 16px; }
+.sheet-body { padding-bottom: 22px; }

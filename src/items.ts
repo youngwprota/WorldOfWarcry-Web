@@ -1,6 +1,7 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
 import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId } from './config';
 import { DAMAGE_TYPE_ICON, icon } from './icons';
+import { art } from './art';
 
 export type ItemKind = 'weapon' | 'armor';
 export interface Item {
@@ -108,14 +109,14 @@ export function itemIconId(it: Item) {
 }
 
 export function itemIcon(it: Item, size = 24) {
-  return icon(itemIconId(it), '#fff', size);
+  return art(itemIconId(it), size);
 }
 
 /** Butcher-style item cell: rarity background, damage-type badge, level, sharpening. Empty cells show a faded slot icon. */
 export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = '', extra = '', cls = '') {
   if (!it) return `<button class="cell empty ${cls}" ${attrs}>${placeholder ? icon(placeholder, '#ffffff55', 30, 'ic') : ''}${extra}</button>`;
   const badge = it.kind === 'weapon' ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 12)}</span>` : '';
-  return `<button class="cell r${it.rarity} ${cls}" ${attrs}>${icon(itemIconId(it), '#fff', 34, 'ic')}${badge}` +
+  return `<button class="cell r${it.rarity} ${cls}" ${attrs}>${art(itemIconId(it), 34, 'ic')}${badge}` +
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }
 
