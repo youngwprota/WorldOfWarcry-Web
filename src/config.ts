@@ -126,8 +126,31 @@ export interface MobDef {
   reward: Partial<Record<OrbKind, number>>;
   gold: [number, number];
   respawn: number; // seconds
-  boss?: { titles: Record<FactionId, string>; slamRadius: number; zone: ZoneId };
+  boss?: BossDef;
 }
+
+/** Boss fight tunables (bossLogic in game.ts). Damage multipliers apply to the boss's `dmg`. */
+export interface BossDef {
+  titles: Record<FactionId, string>;
+  zone: ZoneId;
+  slamRadius: number;
+  slamMul: number; // big slam around the boss
+  slamDelay: number; // telegraph time, s
+  cd: number; // seconds between specials
+  cdPhase2: number;
+  phase2At: number; // HP fraction
+  phase2Dmg: number; // melee multiplier in phase 2
+  chance: number; // phase 2: chance of the chasing blasts instead of the slam
+  chaseCount: number;
+  chaseRadius: number;
+  chaseMul: number;
+  chaseDelay: number;
+  chaseGap: number; // s between blasts
+}
+const BOSS_BASE = {
+  slamMul: 2.2, slamDelay: 1.25, cd: 6.5, cdPhase2: 4.2, phase2At: 0.5, phase2Dmg: 1.2,
+  chance: 0.55, chaseCount: 3, chaseRadius: 2.3, chaseMul: 1.4, chaseDelay: 1.0, chaseGap: 0.45,
+};
 
 export const MOBS: Record<string, MobDef> = {
   bandit_thug: {
@@ -147,7 +170,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
     anim: 'AxeAttack', hp: 1400, dmg: 16, aps: 0.6, range: 2.4, speed: 3.6, aggro: 9, scale: 1.9,
     resist: { slash: 'weak' }, reward: { power: 5, hp: 4, regen: 2, speed: 2 }, gold: [60, 90], respawn: 180,
-    boss: { titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, slamRadius: 4.2, zone: 'forest' },
+    boss: { ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, slamRadius: 4.2, zone: 'forest' },
   },
   skeleton_worker: {
     id: 'skeleton_worker', name: 'Мертвяк',
@@ -172,7 +195,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_king', 'sword_undead_king'], orc: ['undead_king', 'sword_undead_king'] },
     anim: 'SwordAttack', hp: 4200, dmg: 28, aps: 0.6, range: 2.6, speed: 3.4, aggro: 10, scale: 2.1,
     resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { power: 8, hp: 6, regen: 3, speed: 3 }, gold: [150, 220], respawn: 300,
-    boss: { titles: { human: 'Смерть', orc: 'Смерть' }, slamRadius: 5, zone: 'cemetery' },
+    boss: { ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, slamRadius: 5, zone: 'cemetery' },
   },
 };
 

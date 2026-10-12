@@ -745,7 +745,7 @@ export class Game {
         m.impact -= dt;
         if (m.impact < 0 && !this.dead && m.stun <= 0) {
           const reach = def.range + m.radius * 0.5 + HERO.radius + 0.5;
-          if (m.pos.distanceTo(hp) < reach) this.hurtHero(def.dmg * (m.phase2 ? 1.2 : 1), m.pos);
+          if (m.pos.distanceTo(hp) < reach) this.hurtHero(def.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos);
         }
       }
       // knockback
@@ -829,15 +829,15 @@ export class Game {
   }
 
   private bossLogic(m: Mob, dt: number) {
-    if (!m.phase2 && m.hp < m.maxHp * 0.5) {
+    const b = m.def.boss!;
+    if (!m.phase2 && m.hp < m.maxHp * b.phase2At) {
       m.phase2 = true;
       this.fx.spawn(v1.copy(m.pos).setY(4.5), m.def.id === 'death' ? 'Твоё время вышло!' : 'Ты меня разозлил!', 'bark', 2);
       sfx.telegraph();
     }
     m.special -= dt;
     if (m.special > 0 || m.impact >= 0) return;
-    m.special = m.phase2 ? 4.2 : 6.5;
-    const r = m.def.boss!.slamRadius;
+    m.special = m.phase2 ? b.cdPhase2 : b.cd;
     const slam = (at: THREE.Vector3, radius: number, dmgMul: number, delay: number) => {
       this.telegraphs.add(at, radius, delay, () => {
         if (m.state === 'dead') return;
@@ -848,18 +848,18 @@ export class Game {
       });
     };
     sfx.telegraph();
-    if (m.phase2 && Math.random() < 0.55) {
+    if (m.phase2 && Math.random() < b.chance) {
       // three blasts that chase the hero's position
       m.casting = 1.6;
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < b.chaseCount; i++) {
         setTimeout(() => {
-          if (m.state !== 'dead' && !this.paused) slam(this.hero.position.clone(), 2.3, 1.4, 1.0);
-        }, i * 450);
+          if (m.state !== 'dead' && !this.paused) slam(this.hero.position.clone(), b.chaseRadius, b.chaseMul, b.chaseDelay);
+        }, i * b.chaseGap * 1000);
       }
     } else {
       m.casting = 1.35;
       m.ch.attack('AxeAttack', 1.35, 1.25);
-      slam(m.pos.clone(), r, 2.2, 1.25);
+      slam(m.pos.clone(), b.slamRadius, b.slamMul, b.slamDelay);
     }
   }
 
