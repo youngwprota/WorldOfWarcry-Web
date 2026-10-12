@@ -160,23 +160,23 @@ export const MOBS: Record<string, MobDef> = {
   bandit_thug: {
     id: 'bandit_thug', name: 'Разбойник',
     model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['peasant', 'axe'] },
-    anim: 'AxeAttack', hp: 56, dmg: 4, aps: 0.7, range: 1.5, speed: 3.0, aggro: 7, scale: 1,
+    anim: 'AxeAttack', hp: 56, dmg: 6, aps: 0.7, range: 1.5, speed: 3.0, aggro: 7, scale: 1,
     resist: { slash: 'weak' }, reward: { hp: 1, power: 1 }, gold: [1, 3], respawn: 45,
   },
   bandit_fighter: {
     id: 'bandit_fighter', name: 'Головорез',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 110, dmg: 7, aps: 0.8, range: 1.6, speed: 3.4, aggro: 7.5, scale: 1.08,
+    anim: 'SwordAttack', hp: 110, dmg: 10, aps: 0.8, range: 1.6, speed: 3.4, aggro: 7.5, scale: 1.08,
     resist: { slash: 'weak' }, reward: { power: 2, hp: 1 }, gold: [2, 5], respawn: 60,
   },
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
-    anim: 'AxeAttack', hp: 2700, dmg: 13, aps: 0.6, range: 2.4, speed: 3.6, aggro: 9, scale: 1.9,
+    anim: 'AxeAttack', hp: 6000, dmg: 30, aps: 0.6, range: 2.4, speed: 3.6, aggro: 9, scale: 1.9,
     resist: { slash: 'weak' }, reward: { power: 5, hp: 4, regen: 2, speed: 2 }, gold: [60, 90], respawn: 180,
     boss: {
       ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest',
-      slamRadius: 4.2, slamMul: 4.6, chaseMul: 2.6, phase2Dmg: 1.3,
+      slamRadius: 4.2, slamMul: 2.4, chaseMul: 1.4, phase2Dmg: 1.2,
     },
   },
   skeleton_worker: {
