@@ -156,13 +156,13 @@ export const MOBS: Record<string, MobDef> = {
   bandit_thug: {
     id: 'bandit_thug', name: 'Разбойник',
     model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['peasant', 'axe'] },
-    anim: 'AxeAttack', hp: 45, dmg: 5, aps: 0.7, range: 1.5, speed: 3.0, aggro: 7, scale: 1,
+    anim: 'AxeAttack', hp: 56, dmg: 4, aps: 0.7, range: 1.5, speed: 3.0, aggro: 7, scale: 1,
     resist: { slash: 'weak' }, reward: { hp: 1, power: 1 }, gold: [1, 3], respawn: 45,
   },
   bandit_fighter: {
     id: 'bandit_fighter', name: 'Головорез',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 85, dmg: 8, aps: 0.8, range: 1.6, speed: 3.4, aggro: 7.5, scale: 1.08,
+    anim: 'SwordAttack', hp: 110, dmg: 7, aps: 0.8, range: 1.6, speed: 3.4, aggro: 7.5, scale: 1.08,
     resist: { slash: 'weak' }, reward: { power: 2, hp: 1 }, gold: [2, 5], respawn: 60,
   },
   bandit_chief: {
