@@ -1,5 +1,6 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
 import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId } from './config';
+import { DAMAGE_TYPE_ICON, icon } from './icons';
 
 export type ItemKind = 'weapon' | 'armor';
 export interface Item {
@@ -16,12 +17,12 @@ export type VisualPart = 'head' | 'chest' | 'arms' | 'legs';
 export type BonusStat = 'hp' | 'regen' | 'power' | 'speed';
 
 export const ARMOR_SLOTS: { id: ArmorSlot; name: string; icon: string; side: 'left' | 'right' }[] = [
-  { id: 'head', name: 'Шлем', icon: '🪖', side: 'left' },
-  { id: 'chest', name: 'Нагрудник', icon: '🛡️', side: 'left' },
-  { id: 'arms', name: 'Перчатки', icon: '🧤', side: 'left' },
-  { id: 'legs', name: 'Поножи', icon: '👖', side: 'right' },
-  { id: 'ring', name: 'Кольцо', icon: '💍', side: 'right' },
-  { id: 'amulet', name: 'Амулет', icon: '📿', side: 'right' },
+  { id: 'head', name: 'Шлем', icon: 'head', side: 'left' },
+  { id: 'chest', name: 'Нагрудник', icon: 'chest', side: 'left' },
+  { id: 'arms', name: 'Перчатки', icon: 'arms', side: 'left' },
+  { id: 'legs', name: 'Поножи', icon: 'legs', side: 'right' },
+  { id: 'ring', name: 'Кольцо', icon: 'ring', side: 'right' },
+  { id: 'amulet', name: 'Амулет', icon: 'amulet', side: 'right' },
 ];
 export const SLOT_NAME = Object.fromEntries(ARMOR_SLOTS.map((s) => [s.id, s.name])) as Record<ArmorSlot, string>;
 
@@ -101,9 +102,21 @@ export function itemName(it: Item, f: FactionId) {
   return it.kind === 'weapon' ? WEAPONS[it.def].name : ARMOR[it.def].name[f];
 }
 
-export function itemIcon(it: Item) {
-  if (it.kind === 'weapon') return WEAPONS[it.def].icon;
-  return ARMOR_SLOTS.find((s) => s.id === ARMOR[it.def].slot)!.icon;
+/** Icon id for icon(): weapon id or armour slot. */
+export function itemIconId(it: Item) {
+  return it.kind === 'weapon' ? it.def : ARMOR[it.def].slot;
+}
+
+export function itemIcon(it: Item, size = 24) {
+  return icon(itemIconId(it), '#fff', size);
+}
+
+/** Butcher-style item cell: rarity background, damage-type badge, level, sharpening. Empty cells show a faded slot icon. */
+export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = '', extra = '') {
+  if (!it) return `<button class="cell empty" ${attrs}>${placeholder ? icon(placeholder, '#ffffff55', 30, 'ic') : ''}${extra}</button>`;
+  const badge = it.kind === 'weapon' ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 12)}</span>` : '';
+  return `<button class="cell r${it.rarity}" ${attrs}>${icon(itemIconId(it), '#fff', 34, 'ic')}${badge}` +
+    `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }
 
 export function scrapValue(it: Item) {

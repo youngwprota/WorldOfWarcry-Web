@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { Character } from './character';
-import { DAMAGE_TYPE_COLOR, FACTIONS, RARITY, WEAPONS } from './config';
+import { FACTIONS, RARITY, WEAPONS } from './config';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, SLOT_NAME, itemIcon, itemLines, itemName, scrapValue, slotOf,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, SLOT_NAME, cellHtml, itemIcon, itemLines, itemName, scrapValue, slotOf,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -99,11 +99,7 @@ export class Inventory {
   get isOpen() { return this.view !== null; }
 
   private cell(it: Item | null | undefined, attrs: string, placeholder = '', extra = '') {
-    if (!it) return `<button class="cell empty" ${attrs}><span class="ic">${placeholder}</span>${extra}</button>`;
-    const r = RARITY[it.rarity];
-    const type = it.kind === 'weapon' ? `<span class="dt" style="background:${DAMAGE_TYPE_COLOR[WEAPONS[it.def].type]}"></span>` : '';
-    return `<button class="cell" style="border-color:${r.color};box-shadow:inset 0 0 14px ${r.color}55" ${attrs}>
-      <span class="ic">${itemIcon(it)}</span>${type}<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
+    return cellHtml(it, attrs, placeholder, extra);
   }
 
   private pause() {
@@ -168,7 +164,7 @@ export class Inventory {
     q('#i-weapons').innerHTML = ([0, 1] as const).map((i) => {
       const it = s.weapons[i];
       const tag = `<span class="wtag ${s.active === i ? 'on' : ''}">${s.active === i ? 'в руке' : `слот ${i + 1}`}</span>`;
-      return this.cell(it, `data-weapon="${i}"`, '⚔', tag);
+      return this.cell(it, `data-weapon="${i}"`, 'sword', tag);
     }).join('');
     q('#i-stats').innerHTML = g.statRows().map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
     q('#i-owned-title').innerHTML = `Предметы в сумке <b>${s.bag.length}/${BAG_SIZE}</b>`;
