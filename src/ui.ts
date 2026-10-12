@@ -18,6 +18,18 @@ export interface HudState {
   stats: { power: number; hp: number; regen: number; speed: number };
   goal: string;
   buffs: string[];
+  /** Boss widgets on the left: seconds until respawn, 0 = alive. */
+  bosses: { name: string; left: number }[];
+}
+
+/** Butcher-style timer: 9h 23m, 4m 05s, 12s. */
+function fmtTime(sec: number) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${String(s).padStart(2, '0')}s`;
+  return `${s}s`;
 }
 
 export class UI {
@@ -41,6 +53,7 @@ export class UI {
     $('btn-char').addEventListener('click', () => { sfx.click(); this.onCharacter(); });
     $('btn-bag').addEventListener('click', () => { sfx.click(); this.onBag(); });
     $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
+    $('bosses').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('btn-settings').innerHTML = icon('gear', '#d9dde3', 30);
     $('btn-char').insertAdjacentHTML('afterbegin', icon('hero', '#fff', 34));
     $('btn-bag').insertAdjacentHTML('afterbegin', icon('bag', '#fff', 34));
@@ -87,6 +100,9 @@ export class UI {
     });
     $('goal').innerHTML = s.goal;
     $('buffs').innerHTML = s.buffs.map((b) => `<div>${b}</div>`).join('');
+    $('bosses').innerHTML = s.bosses.map((b) => `<div class="bw ui-block" title="${b.name}">
+      ${b.left > 0 ? '' : '<div class="bw-ready">Готово!</div>'}${icon('skull', b.left > 0 ? '#c9bfb2' : '#fff', 46)}
+      ${b.left > 0 ? `<div class="bw-time">${icon('hourglass', '#ffb21a', 14)}${fmtTime(b.left)}</div>` : `<div class="bw-name">${b.name}</div>`}</div>`).join('');
   }
 
   popStat(k: OrbKind) {

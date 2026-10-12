@@ -298,3 +298,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .big-btn:active:not(:disabled) { transform: translateX(-50%) translateY(2px); }
 #hint { position: absolute; left: 12px; right: 12px; bottom: calc(170px + env(safe-area-inset-bottom)); text-align: center; font-weight: 900; font-size: 16px; color: #fff; text-shadow: var(--stroke); opacity: 0; transition: opacity 0.5s; }
 #hint.show { opacity: 1; }
+/* boss widgets (left side, like the skull timer in Butcher Hero) */
+#bosses { position: absolute; left: 8px; top: 36%; display: flex; flex-direction: column; gap: 14px; }
+.bw { position: relative; display: flex; flex-direction: column; align-items: center; width: 84px; cursor: pointer; }
+.bw .svgi { filter: drop-shadow(0 3px 0 #0006); }
+.bw-ready { font-size: 13px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); padding: 2px 8px; margin-bottom: 2px; border-radius: 9px; border: 2px solid var(--ink); background: linear-gradient(#8cf26a, #2fb847); text-transform: uppercase; animation: pulse 0.9s ease-in-out infinite alternate; }
+.bw-time { display: flex; align-items: center; gap: 3px; margin-top: 2px; font-size: 13px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); background: #1d120bb3; border: 2px solid #00000080; padding: 2px 7px 2px 4px; border-radius: 9px; white-space: nowrap; }
+.bw-name { margin-top: 1px; font-size: 10px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); text-align: center; line-height: 1.1; }

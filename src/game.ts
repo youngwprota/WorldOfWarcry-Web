@@ -1213,6 +1213,10 @@ export class Game {
         this.time - this.lastFight > HERO.outOfCombatDelay && this.hp < this.maxHp ? '💤 Вне боя: реген ×3' : '',
         this.faction === 'orc' && this.hp < this.maxHp * 0.7 ? `🩸 Жажда крови: +${Math.round(30 * (1 - this.hp / this.maxHp))}% урона` : '',
       ].filter(Boolean),
+      bosses: this.mobs.filter((m) => m.def.boss).map((m) => ({
+        name: m.def.boss!.titles[this.faction],
+        left: m.alive ? 0 : Math.max(1, Math.ceil(m.respawnAt - this.time)),
+      })),
     });
     if (full) {
       this.ui.weapons(this.save.weapons, this.save.active, (it) => this.itemDamage(it), this.save.equip);
