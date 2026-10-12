@@ -48,6 +48,8 @@ class Mob {
   private lastSec = -1;
   // boss
   special = 4;
+  /** Game time of the last hit taken (boss regen). */
+  hurtAt = -99;
   casting = 0;
   phase2 = false;
   awake = true;
@@ -563,6 +565,7 @@ export class Game {
 
   private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5) {
     m.hp -= dmg;
+    m.hurtAt = this.time;
     m.ch.hit();
     m.state = m.state === 'return' ? 'return' : 'chase';
     if (!m.def.boss) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
@@ -721,7 +724,11 @@ export class Game {
             m.state = 'return';
           } else {
             const reach = def.range + m.radius * 0.5 + HERO.radius;
-            if (def.boss) this.bossLogic(m, dt);
+            if (def.boss) {
+              // A boss on your tail keeps you in combat: no out-of-combat regen while kiting.
+              this.lastFight = this.time;
+              this.bossLogic(m, dt, dHero);
+            }
             if (m.casting <= 0) {
               if (dHero > reach * 0.85) moving = this.stepTo(m, hp, def.speed, dt);
               m.ch.facing = turn(m.ch.facing, Math.atan2(hp.x - m.pos.x, hp.z - m.pos.z), dt * 8);
@@ -828,8 +835,9 @@ export class Game {
     return ttk < 35 ? '#6cff7a' : ttk < 80 ? '#ffd84d' : '#ff5a5a';
   }
 
-  private bossLogic(m: Mob, dt: number) {
+  private bossLogic(m: Mob, dt: number, dHero: number) {
     const b = m.def.boss!;
+    if (this.time - m.hurtAt > b.regenDelay) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * b.regen * dt);
     if (!m.phase2 && m.hp < m.maxHp * b.phase2At) {
       m.phase2 = true;
       this.fx.spawn(v1.copy(m.pos).setY(4.5), m.def.id === 'death' ? 'Твоё время вышло!' : 'Ты меня разозлил!', 'bark', 2);
@@ -837,6 +845,9 @@ export class Game {
     }
     m.special -= dt;
     if (m.special > 0 || m.impact >= 0) return;
+    // Specials wait until the hero is in reach: no slams into thin air while the hero runs off.
+    const chase = m.phase2 && dHero < b.chaseRange && Math.random() < b.chance;
+    if (!chase && dHero > b.slamRadius + HERO.radius) return;
     m.special = m.phase2 ? b.cdPhase2 : b.cd;
     const slam = (at: THREE.Vector3, radius: number, dmgMul: number, delay: number) => {
       this.telegraphs.add(at, radius, delay, () => {
@@ -848,7 +859,7 @@ export class Game {
       });
     };
     sfx.telegraph();
-    if (m.phase2 && Math.random() < b.chance) {
+    if (chase) {
       // three blasts that chase the hero's position
       m.casting = 1.6;
       for (let i = 0; i < b.chaseCount; i++) {

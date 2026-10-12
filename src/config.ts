@@ -46,7 +46,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     anim: 'AxeAttack', model: { human: 'axe', orc: 'axe_orc_grunt' }, icon: '🪓',
   },
   hammer: {
-    id: 'hammer', name: 'Молот', type: 'crush', dmg: 34, aps: 0.7, shape: 'circle', arc: 360, range: 2.7,
+    id: 'hammer', name: 'Молот', type: 'crush', dmg: 34, aps: 0.7, shape: 'circle', arc: 360, range: 2.1,
     anim: 'AxeAttack', model: { human: 'hammer_human_paladin', orc: 'hammer_human_paladin' }, icon: '🔨', stun: 0.25,
   },
 };
@@ -70,7 +70,7 @@ export interface ComboDef {
 export const COMBOS: Record<string, ComboDef> = {
   sword: { name: 'Вихрь', hits: 3, window: 0.35, mult: 1.8, rangeAdd: 0.9, shape: 'circle', arc: 360, knock: 7, stun: 0, spin: true, color: 0x9fe3ff },
   axe: { name: 'Раскол', hits: 3, window: 0.35, mult: 2.3, rangeAdd: 1.2, shape: 'arc', arc: 220, knock: 11, stun: 0.4, spin: false, color: 0xff8a5a },
-  hammer: { name: 'Землетрясение', hits: 3, window: 0.4, mult: 1.6, rangeAdd: 1.8, shape: 'circle', arc: 360, knock: 5, stun: 1.6, spin: false, color: 0xffc95a },
+  hammer: { name: 'Землетрясение', hits: 3, window: 0.4, mult: 1.6, rangeAdd: 1.0, shape: 'circle', arc: 360, knock: 5, stun: 1.6, spin: false, color: 0xffc95a },
 };
 
 export interface FactionDef {
@@ -146,10 +146,14 @@ export interface BossDef {
   chaseMul: number;
   chaseDelay: number;
   chaseGap: number; // s between blasts
+  chaseRange: number; // blasts only when the hero is this close, m
+  regen: number; // HP fraction per second when nobody hits the boss
+  regenDelay: number; // s without damage before regen starts
 }
 const BOSS_BASE = {
   slamMul: 2.2, slamDelay: 1.25, cd: 6.5, cdPhase2: 4.2, phase2At: 0.5, phase2Dmg: 1.2,
-  chance: 0.55, chaseCount: 3, chaseRadius: 2.3, chaseMul: 1.4, chaseDelay: 1.0, chaseGap: 0.45,
+  chance: 0.55, chaseCount: 3, chaseRadius: 2.3, chaseMul: 1.4, chaseDelay: 1.0, chaseGap: 0.45, chaseRange: 11,
+  regen: 0.03, regenDelay: 4,
 };
 
 export const MOBS: Record<string, MobDef> = {
