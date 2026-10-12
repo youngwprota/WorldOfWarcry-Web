@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { FACTIONS, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
+import { ANTI_KITE_NAMES, FACTIONS, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
@@ -14,6 +14,7 @@ import { DebugPanel } from './debug';
 import { Prologue, clearPrologue, prologueDone, type Gains } from './prologue';
 import { MapView } from './mapview';
 import { loadSave, newSave, wipeAll, writeSave } from './save';
+import { clearLog, report } from './balancelog';
 import { UI } from './ui';
 import { BREAKABLES } from './world';
 
@@ -112,7 +113,7 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
     if (inv.isOpen && (e.code === 'Escape' || e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyB')) inv.close();
     else if (talents.isOpen && (e.code === 'Escape' || e.code === 'KeyT')) talents.close();
   });
-  ui.onSettings = () => {
+  ui.onSettings = function open() {
     if (!game) return;
     game.paused = true;
     input.reset();
@@ -121,9 +122,19 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
       applyGfx(!!save!.lowGfx);
       game?.persist();
     }, () => {
+      // Drop the game first: reload fires visibilitychange(hidden), whose persist() would rewrite the save.
+      game = null;
       wipeAll();
+      clearLog();
       location.reload();
-    }, () => { if (game) game.paused = false; });
+    }, () => { if (game) game.paused = false; }, () => ui.balanceLog(report(), open), {
+      label: ANTI_KITE_NAMES[save!.antiKite === 'off' ? 'off' : 'slow'],
+      cycle: () => {
+        save!.antiKite = save!.antiKite === 'off' ? 'slow' : 'off';
+        game?.persist();
+        open();
+      },
+    });
   };
   if (fresh) {
     ui.flash();

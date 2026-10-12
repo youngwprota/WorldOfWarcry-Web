@@ -307,21 +307,42 @@ export class UI {
     }, 1000);
   }
 
-  settings(muted: boolean, lowGfx: boolean, toggleMute: () => void, toggleGfx: () => void, reset: () => void, close: () => void) {
+  settings(muted: boolean, lowGfx: boolean, toggleMute: () => void, toggleGfx: () => void, reset: () => void, close: () => void, showLog: () => void, kite: { label: string; cycle: () => void }) {
     this.open(`<div class="panel"><h2>Настройки</h2>
       <p>Управление: тяни палец в любом месте экрана (или WASD). Атака — автоматически. Смена оружия — тап по второму оружию внизу или Q.</p>
       <div class="row"><button class="btn" id="m-mute">${muted ? '🔇 Звук выкл' : '🔊 Звук вкл'}</button>
       <button class="btn" id="m-gfx">${lowGfx ? '🖥 Графика: низкая' : '🖥 Графика: высокая'}</button></div>
-      <div class="row"><button class="btn purple" id="m-debug">🛠 Дебаг-меню</button></div>
-      <div class="row"><button class="btn danger" id="m-reset">Сбросить прогресс</button></div>
+      <div class="row"><button class="btn purple" id="m-debug">🛠 Дебаг-меню</button><button class="btn" id="m-kite">🐞 Анти-кайт: ${kite.label}</button></div>
+      <div class="row"><button class="btn" id="m-log">📊 Лог баланса</button><button class="btn danger" id="m-reset">Сбросить прогресс</button></div>
       <div class="row"><button class="btn primary" id="m-close">Продолжить</button></div></div>`);
     this.on('#m-debug', () => { this.close(); close(); this.onDebug(); });
-    this.on('#m-mute', () => { toggleMute(); this.close(); this.settings(!muted, lowGfx, toggleMute, toggleGfx, reset, close); });
-    this.on('#m-gfx', () => { toggleGfx(); this.close(); this.settings(muted, !lowGfx, toggleMute, toggleGfx, reset, close); });
+    this.on('#m-mute', () => { toggleMute(); this.close(); this.settings(!muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog, kite); });
+    this.on('#m-gfx', () => { toggleGfx(); this.close(); this.settings(muted, !lowGfx, toggleMute, toggleGfx, reset, close, showLog, kite); });
     this.on('#m-reset', () => {
-      this.confirm('Сбросить весь прогресс?', 'Герой, фракция и снаряжение будут удалены.', reset, () => this.settings(muted, lowGfx, toggleMute, toggleGfx, reset, close));
+      this.confirm('Сбросить весь прогресс?', 'Герой, фракция и снаряжение будут удалены.', reset, () => this.settings(muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog, kite));
     });
+    this.on('#m-log', () => { this.close(); showLog(); });
+    this.on('#m-kite', () => { this.close(); kite.cycle(); });
     this.on('#m-close', () => { this.close(); close(); });
+  }
+
+  /** Balance playtest report (src/balancelog.ts): read here, copy to paste into chat. */
+  balanceLog(text: string, back: () => void) {
+    const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    this.open(`<div class="panel"><h2>Лог баланса</h2>
+      <pre class="ballog">${esc || 'Пока пусто: поиграй минуту.'}</pre>
+      <div class="row"><button class="btn" id="m-back">Назад</button><button class="btn primary" id="m-copy">Копировать</button></div></div>`);
+    this.on('#m-copy', () => {
+      // No clipboard API over plain http (phone on the LAN): select the text for a manual copy instead.
+      const selectAll = () => {
+        const pre = this.modal.querySelector('.ballog');
+        if (pre) getSelection()?.selectAllChildren(pre);
+        this.toast('Текст выделен — скопируй вручную');
+      };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => this.toast('Лог скопирован'), selectAll);
+      else selectAll();
+    });
+    this.on('#m-back', () => { this.close(); back(); });
   }
 
   confirm(title: string, text: string, yes: () => void, no: () => void) {

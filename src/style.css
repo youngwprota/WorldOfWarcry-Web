@@ -729,6 +729,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .top-stats .chip { gap: 2px; }
 .top-stats .chip .svgi { width: 36px; height: 36px; }
 
+/* Balance log (⚙ → Лог баланса): raw report, scrolls inside the panel */
+.ballog { max-height: 55vh; max-width: min(92vw, 720px); overflow: auto; margin: 8px 0; padding: 8px; background: rgba(0, 0, 0, 0.35); border-radius: 8px; font: 11px/1.4 ui-monospace, Consolas, monospace; color: #f3ead8; text-shadow: none; white-space: pre; user-select: text; -webkit-user-select: text; text-align: left; }
 /* ---------- prologue & dialogue (same cartoon skin: wood, thick ink, stroked type) ---------- */
 .factions .lead { text-align: center; margin: 0 0 8px; font-size: 17px; font-weight: 900; color: #d9c4ff; text-shadow: var(--stroke-s); }
 /* dialogue box (GDD 6.3): wooden plank at the bottom, round portrait, name, typed text, answers, skip */
