@@ -196,9 +196,12 @@ export const MOBS: Record<string, MobDef> = {
   death: {
     id: 'death', name: 'Смерть',
     model: { human: ['undead_king', 'sword_undead_king'], orc: ['undead_king', 'sword_undead_king'] },
-    anim: 'SwordAttack', hp: 4200, dmg: 28, aps: 0.6, range: 2.6, speed: 3.4, aggro: 10, scale: 2.1,
+    anim: 'SwordAttack', hp: 4500, dmg: 19, aps: 0.6, range: 2.6, speed: 3.4, aggro: 10, scale: 2.1,
     resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { power: 8, hp: 6, regen: 3, speed: 3 }, gold: [150, 220], respawn: 300,
-    boss: { ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, slamRadius: 5, zone: 'cemetery' },
+    boss: {
+      ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery',
+      slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
+    },
   },
 };
 
