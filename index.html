@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+  <meta name="theme-color" content="#1b1a24" />
+  <title>WarCry — веб-прототип</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="labels"></div>
+    <div id="hud" class="hidden">
+      <div class="top-left">
+        <div id="hp" class="bar"><div class="fill"></div><div class="shield"></div><span></span></div>
+        <div id="stats"></div>
+        <div id="gold">0</div>
+        <div class="btn-row">
+          <button id="btn-settings" class="ui-block icon-btn" aria-label="Настройки">⚙</button>
+          <button id="btn-char" class="ui-block icon-btn" aria-label="Персонаж (C)">👤</button>
+          <button id="btn-bag" class="ui-block icon-btn" aria-label="Сумка (B)">🎒</button>
+        </div>
+      </div>
+      <div class="top-right">
+        <canvas id="minimap" width="220" height="220"></canvas>
+        <div id="goal"></div>
+      </div>
+      <div id="bossbar" class="hidden"><div class="name"></div><div class="binfo"></div><div class="bar"><div class="fill"></div><span></span></div></div>
+      <div id="zone-banner"></div>
+      <div id="edge-arrow">➤</div>
+      <div id="buffs"></div>
+      <div id="combo"></div>
+      <div id="weapons" class="ui-block"></div>
+      <button id="btn-smith" class="ui-block big-btn hidden">⚒ Кузнец</button>
+      <div id="hint"></div>
+    </div>
+    <div id="modal"></div>
+    <div id="flash"></div>
+    <div id="loading">
+      <div class="logo">WarCry</div>
+      <div class="sub">веб-прототип</div>
+      <div class="bar"><div class="fill"></div></div>
+      <div class="pct">Загрузка моделей…</div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

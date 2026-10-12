@@ -1,0 +1,80 @@
+import * as THREE from 'three';
+import { assets } from './assets';
+
+/**
+ * Per-weapon grip tweaks. The grip is derived from geometry (bottom of the weapon's long Y axis),
+ * then the blade is aimed along the fist axis (hand-local +Z) tilted up toward the forearm.
+ */
+export const WEAPON_GRIPS: Record<string, { tilt?: number; grip?: number; scale?: number; roll?: number }> = {
+  sword_human_knight: { scale: 0.75, grip: 0.1 },
+  sword_soldier: { scale: 0.8, grip: 0.12 },
+  sword_orc_warrior: { scale: 0.8, grip: 0.12 },
+  sword_undead_king: { scale: 0.85, grip: 0.12 },
+  axe_orc_grunt: { scale: 0.85, grip: 0.18 },
+  axe_orc_chieftain: { scale: 0.9, grip: 0.18 },
+  axe_orc_peon: { scale: 0.9, grip: 0.2 },
+  axe: { scale: 0.9, grip: 0.2 },
+  hammer_human_paladin: { scale: 0.9, grip: 0.18 },
+  spear_undead_warrior: { scale: 0.8, grip: 0.4, tilt: 0.2 },
+};
+
+/** Palm centre in hand_r space (cm). */
+const PALM = new THREE.Vector3(-9, -4, 0);
+const gripCache = new Map<string, THREE.Vector3>();
+
+function gripPoint(name: string, w: THREE.Object3D, frac: number): THREE.Vector3 {
+  const key = name + frac;
+  let g = gripCache.get(key);
+  if (g) return g;
+  // `w` is a detached root, so matrixWorld is "relative to the root's parent space".
+  w.updateMatrixWorld(true);
+  const pts: THREE.Vector3[] = [];
+  const v = new THREE.Vector3();
+  w.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const pos = m.geometry.getAttribute('position');
+    for (let i = 0; i < pos.count; i++) pts.push(v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld).clone());
+  });
+  let minY = Infinity, maxY = -Infinity;
+  for (const p of pts) { minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
+  const y = minY + (maxY - minY) * frac;
+  const band = (maxY - minY) * 0.06;
+  const c = new THREE.Vector3();
+  let n = 0;
+  for (const p of pts) if (Math.abs(p.y - y) < band) { c.x += p.x; c.z += p.z; n++; }
+  g = new THREE.Vector3(n ? c.x / n : 0, y, n ? c.z / n : 0);
+  gripCache.set(key, g);
+  return g;
+}
+
+export function attachWeapon(character: THREE.Object3D, weapon: string): THREE.Object3D {
+  const hand = character.getObjectByName('hand_r')!;
+  const cfg = WEAPON_GRIPS[weapon] ?? {};
+  const inner = assets.clone(weapon);
+  inner.scale.setScalar(1); // hand bone already lives in the 0.01-scaled character space (cm)
+  inner.position.set(0, 0, 0);
+  inner.rotation.set(0, 0, 0);
+  // Some weapons are authored along Z instead of Y: stand them up first.
+  const size = new THREE.Box3().setFromObject(inner).getSize(new THREE.Vector3());
+  const pivot = new THREE.Group();
+  pivot.add(inner);
+  if (size.z > size.y * 1.5) pivot.rotation.x = -Math.PI / 2;
+  if (size.x > size.y * 1.5) pivot.rotation.z = Math.PI / 2;
+  const grip = gripPoint(weapon, pivot, cfg.grip ?? 0.15);
+  const holder = new THREE.Group();
+  holder.name = 'weapon';
+  const offset = new THREE.Group();
+  offset.position.copy(grip).negate();
+  offset.add(pivot);
+  holder.add(offset);
+  // Weapon +Y -> fist axis (hand +Z) tilted toward the forearm (hand +X).
+  const tilt = cfg.tilt ?? 0.55;
+  const dir = new THREE.Vector3(Math.sin(tilt), 0, Math.cos(tilt)).normalize();
+  holder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  if (cfg.roll) holder.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), cfg.roll));
+  holder.position.copy(PALM);
+  holder.scale.setScalar(cfg.scale ?? 1);
+  hand.add(holder);
+  return holder;
+}
