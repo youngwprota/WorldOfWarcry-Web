@@ -178,19 +178,19 @@ export const MOBS: Record<string, MobDef> = {
   skeleton_worker: {
     id: 'skeleton_worker', name: 'Мертвяк',
     model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
-    anim: 'SwordAttack', hp: 120, dmg: 11, aps: 0.8, range: 1.4, speed: 2.8, aggro: 7, scale: 1,
+    anim: 'SwordAttack', hp: 140, dmg: 8, aps: 0.8, range: 1.4, speed: 2.8, aggro: 7, scale: 1,
     resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { regen: 1, hp: 1, power: 1 }, gold: [3, 6], respawn: 50,
   },
   skeleton_warrior: {
     id: 'skeleton_warrior', name: 'Скелет-копейщик',
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
-    anim: 'SwordAttack', hp: 170, dmg: 14, aps: 0.75, range: 2.0, speed: 3.0, aggro: 8, scale: 1.08,
+    anim: 'SwordAttack', hp: 260, dmg: 15, aps: 0.75, range: 2.0, speed: 3.0, aggro: 8, scale: 1.08,
     resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { power: 2, hp: 1 }, gold: [4, 8], respawn: 70,
   },
   ghost: {
     id: 'ghost', name: 'Призрак',
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
-    anim: 'SwordAttack', hp: 110, dmg: 15, aps: 1.0, range: 1.4, speed: 4.3, aggro: 9, scale: 1,
+    anim: 'SwordAttack', hp: 130, dmg: 14, aps: 1.0, range: 1.4, speed: 4.3, aggro: 9, scale: 1,
     resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { speed: 2, power: 1 }, gold: [4, 7], respawn: 60,
   },
   death: {
