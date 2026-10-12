@@ -24,7 +24,8 @@ const outlineMat = (() => {
   m.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
-      '#include <begin_vertex>\n transformed += normalize(objectNormal) * 2.8;',
+      // `normal` (not objectNormal): MeshBasicMaterial declares objectNormal only for skinned meshes.
+      '#include <begin_vertex>\n transformed += normalize(normal) * 1.4;',
     );
   };
   return m;

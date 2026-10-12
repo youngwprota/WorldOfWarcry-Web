@@ -19,6 +19,14 @@ export interface HudState {
   buffs: string[];
 }
 
+/** One line of a dialogue; a line with choices waits for an answer (GDD 4.2: no wrong answers). */
+export interface DialogueLine {
+  who: string;
+  portrait: string;
+  text: string;
+  choices?: { text: string; then?: DialogueLine[] }[];
+}
+
 export class UI {
   readonly app = $('app');
   readonly modal = $('modal');
@@ -247,7 +255,77 @@ export class UI {
     this.on('#m-no', () => { this.close(); no(); });
   }
 
-  factionSelect(onPick: (f: FactionId) => void, onConfirm: (f: FactionId) => void) {
+  /**
+   * Bottom dialogue box: portrait, name, typed text (tap shows it at once), 1–3 answers and an
+   * always-visible "Пропустить" (GDD 4.2 / 6.2). `done` fires once, after the last line or a skip.
+   */
+  dialogue(lines: DialogueLine[], done: () => void) {
+    const queue = [...lines];
+    const box = document.createElement('div');
+    box.id = 'dialogue';
+    box.className = 'ui-block';
+    box.innerHTML = `<button class="dlg-skip">Пропустить ⏭</button>
+      <div class="dlg-who"><div class="dlg-portrait"></div><b></b></div>
+      <div class="dlg-text"></div><div class="dlg-choices"></div><div class="dlg-next">▼</div>`;
+    this.app.appendChild(box);
+    const who = box.querySelector('b')!;
+    const portrait = box.querySelector<HTMLElement>('.dlg-portrait')!;
+    const textEl = box.querySelector<HTMLElement>('.dlg-text')!;
+    const choicesEl = box.querySelector<HTMLElement>('.dlg-choices')!;
+    let line: DialogueLine | null = null;
+    let shown = 0;
+    let timer = 0;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearInterval(timer);
+      box.remove();
+      done();
+    };
+    const reveal = () => {
+      clearInterval(timer);
+      if (!line) return;
+      shown = line.text.length;
+      textEl.textContent = line.text;
+      box.classList.add('ready');
+      if (!line.choices) return;
+      choicesEl.innerHTML = line.choices.map((c, i) => `<button class="btn" data-i="${i}">${c.text}</button>`).join('');
+      choicesEl.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sfx.click();
+        queue.unshift(...(line!.choices![+b.dataset.i!].then ?? []));
+        next();
+      }));
+    };
+    const next = () => {
+      line = queue.shift() ?? null;
+      if (!line) { finish(); return; }
+      who.textContent = line.who;
+      portrait.textContent = line.portrait;
+      choicesEl.innerHTML = '';
+      box.classList.toggle('ask', !!line.choices);
+      box.classList.remove('ready');
+      shown = 0;
+      textEl.textContent = '';
+      clearInterval(timer);
+      timer = window.setInterval(() => {
+        if (!line) return;
+        shown += 2;
+        textEl.textContent = line.text.slice(0, shown);
+        if (shown >= line.text.length) reveal();
+      }, 28);
+    };
+    box.addEventListener('click', () => {
+      if (!line) return;
+      if (shown < line.text.length) reveal();
+      else if (!line.choices) { sfx.click(); next(); }
+    });
+    box.querySelector('.dlg-skip')!.addEventListener('click', (e) => { e.stopPropagation(); sfx.click(); finish(); });
+    next();
+  }
+
+  factionSelect(onPick: (f: FactionId) => void, onConfirm: (f: FactionId) => void, lead = '') {
     let sel: FactionId | null = null;
     const card = (f: FactionId) => {
       const d = FACTIONS[f];
@@ -257,7 +335,7 @@ export class UI {
         <div class="pas">${d.passiveName}</div><div>${d.passiveText}</div>
         <div class="pas">Старт: ${w.icon} ${w.name}</div></div>`;
     };
-    this.open(`<div class="factions ui-block"><h1>Выбери, чьим воином вернёшься</h1>
+    this.open(`<div class="factions ui-block">${lead ? `<p class="lead">${lead}</p>` : ''}<h1>Выбери, чьим воином вернёшься</h1>
       <div class="fcards">${card('human')}${card('orc')}</div>
       <button class="btn primary" id="m-go" disabled>Воскреснуть</button></div>`, true);
     const go = this.modal.querySelector<HTMLButtonElement>('#m-go')!;
@@ -271,7 +349,7 @@ export class UI {
     go.addEventListener('click', () => {
       if (!sel) return;
       const f = sel;
-      this.confirm(`${FACTIONS[f].name}?`, 'Выбор делается один раз и навсегда.', () => onConfirm(f), () => this.factionSelect(onPick, onConfirm));
+      this.confirm(`${FACTIONS[f].name}?`, 'Выбор делается один раз и навсегда.', () => onConfirm(f), () => this.factionSelect(onPick, onConfirm, lead));
     });
   }
 

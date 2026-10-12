@@ -78,6 +78,8 @@ export interface FactionDef {
   name: string;
   fantasy: string;
   hero: string;
+  /** Model + weapon shown on the faction-select stage (the race's champion). */
+  preview: [string, string];
   startWeapon: string;
   passiveName: string;
   passiveText: string;
@@ -89,7 +91,7 @@ export interface FactionDef {
 
 export const FACTIONS: Record<FactionId, FactionDef> = {
   human: {
-    id: 'human', name: 'Люди', fantasy: 'Дисциплина, защита, свет', hero: 'human_knight', startWeapon: 'sword',
+    id: 'human', name: 'Люди', fantasy: 'Дисциплина, защита, свет', hero: 'human_knight', preview: ['paladin', 'hammer_human_paladin'], startWeapon: 'sword',
     passiveName: 'Святой щит',
     passiveText: 'Щит на 15% HP, восстанавливается через 6 с без урона. +10% HP, +10% реген.',
     color: '#3f7fd8',
@@ -98,7 +100,7 @@ export const FACTIONS: Record<FactionId, FactionDef> = {
     campfire: 'campfire',
   },
   orc: {
-    id: 'orc', name: 'Орки', fantasy: 'Ярость, натиск, сила', hero: 'orc_grunt', startWeapon: 'axe',
+    id: 'orc', name: 'Орки', fantasy: 'Ярость, натиск, сила', hero: 'orc_grunt', preview: ['orc_chieftain', 'axe_orc_chieftain'], startWeapon: 'axe',
     passiveName: 'Жажда крови',
     passiveText: 'Чем меньше HP, тем больше урон (до +30%). +10% урон, +5% скорость бега.',
     color: '#c0392b',

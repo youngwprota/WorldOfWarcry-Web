@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { FACTIONS, MOBS, WEAPONS, type FactionId } from './config';
+import { FACTIONS, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
+import { Prologue, clearPrologue, prologueDone, type Gains } from './prologue';
 import { MapView } from './mapview';
 import { clearSave, loadSave, newSave, writeSave } from './save';
 import { UI } from './ui';
@@ -73,9 +74,14 @@ function applyGfx(low: boolean) {
 }
 const clock = new THREE.Clock();
 
-function startGame(faction: FactionId, fresh: boolean) {
+function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   let save = loadSave();
-  if (!save || save.faction !== faction) { save = newSave(faction); writeSave(save); }
+  if (!save || save.faction !== faction) {
+    save = newSave(faction);
+    // Orbs collected in the prologue stay with the hero.
+    if (gains) for (const k of Object.keys(gains) as OrbKind[]) save.stats[k] = +(save.stats[k] + gains[k] * ORBS[k].value).toFixed(2);
+    writeSave(save);
+  }
   setMuted(save.muted);
   game = new Game(save, input, ui, labels);
   game.camera.aspect = app.clientWidth / app.clientHeight;
@@ -111,36 +117,66 @@ function startGame(faction: FactionId, fresh: boolean) {
   }
 }
 
-// ---------- faction select: both heroes on a small stage ----------
-function factionScreen() {
+// ---------- prologue: the spirit before the Lich King (GDD 3.1) ----------
+function prologue() {
+  ui.hideLoading();
+  const p = new Prologue(ui, input, labels, (gains) => {
+    renderer.setAnimationLoop(null);
+    p.dispose();
+    ui.flash();
+    factionScreen(gains);
+  });
+  if (import.meta.env.DEV) Object.assign(window, { __prologue: p });
+  clock.getDelta();
+  renderer.setAnimationLoop(() => {
+    const dt = clock.getDelta();
+    p.camera.aspect = app.clientWidth / app.clientHeight;
+    p.camera.updateProjectionMatrix();
+    p.update(dt);
+    renderer.render(p.scene, p.camera);
+  });
+}
+
+// ---------- faction select: each race's champion on a small stage, the Lich King behind ----------
+function factionScreen(gains: Gains) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x585470);
-  scene.fog = new THREE.Fog(0x585470, 8, 22);
+  scene.background = new THREE.Color(0x48445c);
+  scene.fog = new THREE.Fog(0x48445c, 9, 24);
   scene.add(new THREE.HemisphereLight(0xe8e4ff, 0x3a3348, 2));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
   sun.position.set(2, 5, 4);
   scene.add(sun);
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(8, 48).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x6d6880 }));
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(10, 48).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x5d5872 }));
   scene.add(ground);
   const cam = new THREE.PerspectiveCamera(50, app.clientWidth / app.clientHeight, 0.1, 50);
   cam.position.set(0, 3.2, 10.5);
-  cam.lookAt(0, -0.4, 0);
-  const heroes: Record<FactionId, Character> = {
-    human: new Character(FACTIONS.human.hero, WEAPONS.sword.model.human, 1),
-    orc: new Character(FACTIONS.orc.hero, WEAPONS.axe.model.orc, 1),
-  };
-  heroes.human.position.set(-0.95, 0, 0);
-  heroes.orc.position.set(0.95, 0, 0);
-  heroes.human.facing = 0.25;
-  heroes.orc.facing = -0.25;
-  // Grey "world of the dead" look from the prologue until the hero picks a side.
-  for (const h of Object.values(heroes)) { h.setTint(0x9a9ab8, 0.85); scene.add(h.root); }
+  cam.lookAt(0, -0.2, 0);
+  const heroes = {} as Record<FactionId, Character>;
   for (const f of ['human', 'orc'] as FactionId[]) {
+    const [model, weapon] = FACTIONS[f].preview;
+    const h = new Character(model, weapon, 1.1);
+    const sx = f === 'human' ? -1 : 1;
+    h.position.set(sx * 1.05, 0, 0.4);
+    h.facing = -sx * 0.25;
+    // Grey "world of the dead" look until a side is picked. Opaque tint only: a transparent
+    // material without depth writes lets the armour pieces show through each other.
+    h.setTint(0x8f8ca8);
+    scene.add(h.root);
+    heroes[f] = h;
     const b = assets.clone(f === 'human' ? 'banner' : 'orc_banner');
     b.scale.multiplyScalar(0.45);
-    b.position.set(f === 'human' ? -3 : 3, 0, -2.5);
+    b.position.set(sx * 3.2, 0, -2.5);
     scene.add(b);
   }
+  // The Lich King watches the choice from behind.
+  const lich = new Character('undead_king', 'sword_undead_king', 1.7);
+  lich.position.set(0, 0, -3.6);
+  lich.setTint(0x7a7896);
+  scene.add(lich.root);
+  const glow = new THREE.PointLight(0x7fc8ff, 5, 7, 1.6);
+  glow.position.set(0, 3, -2.4);
+  scene.add(glow);
+
   let picked: FactionId | null = null;
   let running = true;
   const loop = () => {
@@ -151,25 +187,28 @@ function factionScreen() {
       h.root.scale.setScalar(THREE.MathUtils.lerp(h.root.scale.x, target, dt * 8));
       h.update(dt, false);
     }
+    lich.update(dt, false);
     cam.aspect = app.clientWidth / app.clientHeight;
     cam.updateProjectionMatrix();
     renderer.render(scene, cam);
     requestAnimationFrame(loop);
   };
   ui.hideLoading();
+  clock.getDelta();
   loop();
   ui.factionSelect((f) => {
     unlockAudio();
     picked = f;
     for (const [k, h] of Object.entries(heroes) as [FactionId, Character][]) {
-      h.setTint(k === f ? 0xffffff : 0x9a9ab8, k === f ? 1 : 0.85);
-      if (k === f) h.attack(WEAPONS[FACTIONS[f].startWeapon].anim, 1, 0.4);
+      h.setTint(k === f ? 0xffffff : 0x8f8ca8);
+      if (k === f) h.attack('AxeAttack', 1, 0.4);
     }
   }, (f) => {
     running = false;
-    startGame(f, true);
+    clearPrologue();
+    startGame(f, true, gains);
     run();
-  });
+  }, 'За заслуги перед нежитью Король-лич возвращает тебя к жизни.');
 }
 
 function run() {
@@ -198,7 +237,10 @@ if (existing) {
   startGame(existing.faction, false);
   run();
 } else {
-  factionScreen();
+  // A finished prologue skips straight to the choice after a reload.
+  const done = prologueDone();
+  if (done) factionScreen(done);
+  else prologue();
 }
 Object.assign(window, { __game: () => game });
 if (import.meta.env.DEV) {
