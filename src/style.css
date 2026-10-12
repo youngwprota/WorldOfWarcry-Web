@@ -230,19 +230,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .strip .cell { flex: none; width: 50px; height: 50px; }
 .strip .none { font-size: 12px; color: var(--muted); padding: 10px 0; }
 .hint-line { font-size: 12px; color: var(--muted); text-align: center; margin: 10px 0 2px; }
-.tip { position: absolute; left: 10px; right: 10px; bottom: 10px; background: #0e0d13; border: 3px solid #666; border-radius: 14px; padding: 12px; box-shadow: 0 -6px 30px #000c; z-index: 2; }
-.tip h3 { margin: 2px 0; font-size: 18px; }
-.tip p { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
-.tip .rar { font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; }
-.tip .where { font-size: 12px; color: var(--muted); }
-.tip-stats { margin-top: 8px; font-size: 14px; }
-.tip-stats div { display: grid; grid-template-columns: 1fr auto 60px; gap: 8px; padding: 2px 0; border-bottom: 1px solid #ffffff10; }
-.tip-stats span { color: var(--muted); }
-.tip-stats i { color: #888; font-style: normal; text-align: right; font-size: 12px; }
-.tip-stats b.up { color: #6cff7a; }
-.tip-stats b.down { color: #ff6a6a; }
-.tip .row { margin-top: 10px; }
-.tip .btn { font-size: 14px; min-height: 44px; }
 
 .svgi { display: inline-block; vertical-align: middle; flex: none; overflow: visible; }
 
@@ -329,3 +316,31 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .eq-row .cell.active { box-shadow: inset 0 3px 0 #ffffff55, 0 0 0 3px #ffd23f; }
 .eq-row .cell .lv { font-size: 12px; }
 .eq-row .sep { width: 3px; align-self: stretch; border-radius: 2px; background: #ffffff33; margin: 0 2px; }
+/* item card (Butcher Hero item popup) */
+.tip-wrap { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; padding: 14px; background: #0d0806aa; }
+.tip { width: 100%; max-width: 400px; max-height: 100%; overflow-y: auto; text-align: left; background: linear-gradient(var(--wood-hi), var(--wood) 70px); border: 3px solid var(--ink); border-radius: 22px; padding: 14px; box-shadow: inset 0 3px 0 #ffffff26, 0 6px 0 #0007, 0 14px 40px #000c; animation: pop-in 0.16s ease-out; }
+.card-head { display: flex; gap: 10px; align-items: flex-start; }
+.card-head .cell.big { width: 84px; height: 84px; flex: none; }
+.card-head .cell.big .lv { font-size: 20px; }
+.card-head .xbtn { width: 54px; height: 42px; font-size: 20px; }
+.card-title { flex: 1; min-width: 0; padding-top: 4px; }
+.card-title h3 { margin: 0 0 8px; font-size: 19px; font-weight: 900; color: #fff; text-transform: uppercase; text-shadow: var(--stroke); line-height: 1.1; }
+.pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.pills span { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 8px; background: var(--wood-dark); font-size: 13px; font-weight: 900; text-transform: uppercase; text-shadow: var(--stroke-s); color: #fff; }
+.card-main { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 10px 14px; font-size: 18px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); }
+.card-main .v { display: flex; align-items: center; gap: 6px; font-size: 20px; }
+.tip i { font-style: normal; color: #fff; }
+.tip em { font-style: normal; color: #9fff7a; font-weight: 900; }
+.tip b.up { color: #8cff6a; }
+.tip b.down { color: #ff6a7a; }
+.card-sub { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; margin: 8px 4px 0; font-size: 13px; }
+.card-sub div { display: flex; justify-content: space-between; gap: 6px; border-bottom: 2px solid #0002; padding-bottom: 3px; }
+.card-sub span { color: #f0dcc0; font-weight: 700; text-transform: uppercase; font-size: 11px; align-self: center; }
+.card-sub b, .card-sub i { color: #fff; text-shadow: var(--stroke-s); font-weight: 900; }
+.cmp-note { margin: 6px 4px 0; font-size: 11px; color: #f0dcc0; text-align: right; }
+.ability { margin-top: 10px; padding: 10px 12px; text-align: center; }
+.ab-title { font-size: 16px; font-weight: 900; color: #d9a6ff; text-transform: uppercase; text-shadow: var(--stroke-s); margin-bottom: 4px; }
+.ability p { margin: 0; font-size: 14px; font-weight: 700; color: #fff; text-shadow: var(--stroke-s); line-height: 1.35; }
+.ability p b { color: #ffe04a; }
+.tip .row { display: flex; gap: 8px; margin-top: 12px; }
+.tip .btn { font-size: 15px; min-height: 52px; }

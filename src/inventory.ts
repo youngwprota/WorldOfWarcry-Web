@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { Character } from './character';
-import { FACTIONS, RARITY, WEAPONS } from './config';
+import { COMBOS, DAMAGE_TYPE_NAME, FACTIONS, RARITY, WEAPONS } from './config';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, SLOT_NAME, cellHtml, itemIcon, itemLines, itemName, scrapValue, slotOf,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, SLOT_NAME, cellHtml, itemLines, itemName, scrapValue, slotOf,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
-import { fmtK, icon } from './icons';
+import { DAMAGE_TYPE_ICON, fmtK, icon } from './icons';
 import type { Game } from './game';
 import type { UI } from './ui';
 
@@ -145,13 +145,13 @@ export class Inventory {
       <div class="wrow" id="i-weapons"></div>
       <div class="stats-box" id="i-stats"></div>
       <div class="owned"><div class="owned-title" id="i-owned-title"></div><div class="strip" id="i-strip"></div></div>
-      <div class="tip hidden" id="i-tip"></div>
     </div>`);
     this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, f.hero);
     this.ui.on('#i-close', () => this.close());
     this.ui.on('#i-bag', () => this.openBag());
     this.ui.modal.querySelector('#i-rl')!.addEventListener('click', () => this.preview?.nudge(-1));
     this.ui.modal.querySelector('#i-rr')!.addEventListener('click', () => this.preview?.nudge(1));
+    this.ui.modal.insertAdjacentHTML('beforeend', '<div class="tip-wrap hidden" id="i-tip"><div class="tip"></div></div>');
     this.ui.modal.addEventListener('click', this.onClick);
     this.renderChar();
   }
@@ -195,7 +195,6 @@ export class Inventory {
         <p class="hint-line">Нажми на предмет: надеть, сравнить или разобрать на золото</p>
       </div>
       <div class="equipped"><div class="eq-title">Экипировано</div><div class="eq-row" id="b-eq"></div></div>
-      <div class="tip hidden" id="i-tip"></div>
     </div>`);
     this.ui.on('#i-close', () => this.close());
     this.ui.on('#b-char', () => this.openCharacter());
@@ -205,6 +204,7 @@ export class Inventory {
       this.ui.modal.querySelectorAll('[data-filter]').forEach((x) => x.classList.toggle('on', x === b));
       this.renderBag();
     }));
+    this.ui.modal.insertAdjacentHTML('beforeend', '<div class="tip-wrap hidden" id="i-tip"><div class="tip"></div></div>');
     this.ui.modal.addEventListener('click', this.onClick);
     this.renderBag();
   }
@@ -255,16 +255,21 @@ export class Inventory {
   }
 
   private showTip(src: Source) {
-    const tip = this.ui.modal.querySelector<HTMLElement>('#i-tip');
-    if (!tip) return;
+    const wrap = this.ui.modal.querySelector<HTMLElement>('#i-tip');
+    if (!wrap) return;
+    const tip = wrap.querySelector<HTMLElement>('.tip')!;
     const g = this.game;
     const s = g.save;
     const it = this.itemOf(src);
     sfx.click();
+    const x = '<button class="xbtn" data-act="close">✕</button>';
+    wrap.classList.remove('hidden');
     if (!it) {
       const name = src.at === 'armor' ? SLOT_NAME[src.slot] : 'Оружие';
-      tip.innerHTML = `<h3>${name}</h3><p>Слот пуст. Подходящие предметы лежат в сумке.</p>`;
-      tip.classList.remove('hidden');
+      const ph = src.at === 'armor' ? ARMOR_SLOTS.find((a) => a.id === src.slot)!.icon : 'sword';
+      tip.innerHTML = `<div class="card-head">${cellHtml(null, 'disabled', ph, '', 'big')}<div class="card-title"><h3>${name}</h3></div>${x}</div>
+        <div class="ability well"><p>Слот пуст. Подходящие предметы лежат в сумке.</p></div>`;
+      this.bindTip(tip, src);
       return;
     }
     const r = RARITY[it.rarity];
@@ -272,38 +277,53 @@ export class Inventory {
     // Compare a bag item with what is equipped in the same slot.
     let cur: Item | null = null;
     if (src.at === 'bag') cur = slot === 'weapon' ? g.weaponItem : (s.equip[slot] ?? null);
-    const mine = itemLines(it);
     const theirs = cur ? Object.fromEntries(itemLines(cur)) : {};
-    const rows = mine.map(([k, v]) => {
+    const cmp = (k: string, v: string) => {
       const o = theirs[k];
       const nv = parseFloat(v.replace('+', ''));
       const ov = o !== undefined ? parseFloat(String(o).replace('+', '')) : NaN;
-      const cls = !cur || Number.isNaN(nv) || Number.isNaN(ov) ? '' : nv > ov ? 'up' : nv < ov ? 'down' : '';
-      return `<div><span>${k}</span><b class="${cls}">${v}</b>${cur ? `<i>${o ?? '—'}</i>` : ''}</div>`;
-    }).join('');
+      const cls = Number.isNaN(nv) || Number.isNaN(ov) ? '' : nv > ov ? 'up' : nv < ov ? 'down' : '';
+      return cur && o !== undefined && o !== v ? `<i>${o}</i><em>›</em><b class="${cls}">${v}</b>` : `<b>${v}</b>`;
+    };
+    const [main, ...rest] = itemLines(it).filter(([k]) => k !== 'Тип');
+    const mainIcon = it.kind === 'weapon' ? icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#9fe3ff', 20) : icon('shield', '#9fe3ff', 20);
+    const sub = rest.map(([k, v]) => `<div><span>${k}</span>${cmp(k, v)}</div>`).join('');
+    let ability: string;
+    if (it.kind === 'weapon') {
+      const c = COMBOS[it.def];
+      ability = `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
+    } else {
+      ability = `<div class="ab-title">Комплект</div><p>${it.rarity > 0 || rest.length ? 'Бонус к стату действует, пока предмет надет.' : 'У обычных предметов нет бонуса. Ищи <b>редкие</b> и выше.'}</p>`;
+    }
     const btn = (act: string, label: string, cls = '') => `<button class="btn ${cls}" data-act="${act}">${label}</button>`;
     let actions = '';
     if (src.at === 'bag') {
+      actions = btn('scrap', `Разобрать<br><small>+${scrapValue(it)} золота</small>`);
       if (it.kind === 'weapon') {
-        actions = btn('eq0', s.active === 0 ? 'В руку' : 'Слот 1', 'primary') + btn('eq1', s.active === 1 ? 'В руку' : 'Слот 2', 'primary');
-      } else actions = btn('equip', 'Надеть', 'primary');
-      actions += btn('scrap', `Разобрать +${scrapValue(it)}`);
+        actions += btn('eq0', s.active === 0 ? 'В руку' : 'Слот 1', 'primary') + btn('eq1', s.active === 1 ? 'В руку' : 'Слот 2', 'primary');
+      } else actions += btn('equip', 'Экипировать', 'primary');
     } else if (src.at === 'armor') {
-      actions = btn('unequip', 'Снять', 'primary');
+      actions = btn('unequip', 'Снять', 'red');
     } else {
-      if (s.active !== src.slot) actions += btn('active', 'Взять в руку', 'primary');
-      if (s.weapons[1 - src.slot]) actions += btn('unequip', 'Снять');
+      if (s.weapons[1 - src.slot]) actions += btn('unequip', 'Снять', 'red');
+      if (s.active !== src.slot) actions += btn('active', 'В руку', 'primary');
     }
-    const where = slot === 'weapon' ? `Оружие · ${WEAPONS[it.def].name}` : SLOT_NAME[ARMOR[it.def].slot];
-    tip.style.borderColor = r.color;
-    tip.innerHTML = `<div class="rar" style="color:${r.color}">${r.name} · ур. ${it.lvl}</div>
-      <h3>${itemIcon(it)} ${itemName(it, g.faction)}${it.sharpen ? ` +${it.sharpen}` : ''}</h3>
-      <div class="where">${where}${cur ? ` · сравнение с надетым` : ''}</div>
-      <div class="tip-stats">${rows}</div>
+    const type = slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
+    tip.innerHTML = `<div class="card-head">${cellHtml(it, 'disabled', '', '', 'big')}
+        <div class="card-title"><h3>${itemName(it, g.faction)}${it.sharpen ? ` +${it.sharpen}` : ''}</h3>
+          <div class="pills"><span class="rar" style="color:${r.color}">${r.name}</span><span class="typ">${type}</span></div></div>${x}</div>
+      <div class="card-main well"><span>${main[0]}</span><span class="v">${mainIcon}${cmp(main[0], main[1])}</span></div>
+      <div class="card-sub">${sub}<div><span>Уровень</span><b>${it.lvl}</b></div></div>
+      ${cur ? '<div class="cmp-note">сравнение с надетым</div>' : ''}
+      <div class="ability well">${ability}</div>
       <div class="row">${actions}</div>`;
-    tip.classList.remove('hidden');
+    this.bindTip(tip, src);
+  }
+
+  private bindTip(tip: HTMLElement, src: Source) {
     tip.querySelectorAll<HTMLButtonElement>('[data-act]').forEach((b) => b.addEventListener('click', (ev) => {
       ev.stopPropagation();
+      if (b.dataset.act === 'close') { sfx.click(); this.hideTip(); return; }
       this.act(b.dataset.act!, src);
     }));
   }
