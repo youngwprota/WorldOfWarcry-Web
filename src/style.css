@@ -381,3 +381,153 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ftext { text-shadow: var(--stroke); }
 .ftext.dmg.weak { color: #ffe04a; }
 .herohp, .mobhp { border-color: var(--ink); }
+
+/* ---------- mobile sizing: proportions of the Butcher Hero screens (≈390px wide phone) ---------- */
+.stick-base { border-width: 5px; border-color: rgba(255,255,255,0.55); background: rgba(0,0,0,0.12); }
+.stick-knob { width: 42%; height: 42%; background: rgba(255,255,255,0.8); border: 3px solid rgba(0,0,0,0.25); }
+/* HUD */
+.top-left { gap: 10px; }
+.round-btn { width: 58px; height: 58px; }
+.round-btn .svgi { width: 38px; height: 38px; }
+.pill { height: 40px; font-size: 22px; padding: 0 14px 0 5px; border-radius: 20px; gap: 6px; }
+.pill .svgi { width: 28px; height: 28px; }
+#stats { font-size: 20px; gap: 6px 16px; }
+#stats .st { gap: 5px; }
+#stats .svgi { width: 24px; height: 24px; }
+.top-right { width: 170px; gap: 8px; }
+#minimap, #bigmap { width: 140px; height: 140px; }
+#zone-label { font-size: 19px; max-width: 170px; }
+#goal { font-size: 14px; max-width: 170px; padding: 7px 10px; border-radius: 12px; }
+#side-btns { bottom: calc(118px + env(safe-area-inset-bottom)); gap: 22px; }
+.side-btn { width: 76px; height: 76px; border-radius: 20px; }
+.side-btn .svgi { width: 46px; height: 46px; }
+.side-btn span { font-size: 14px; bottom: -13px; }
+#btn-bag[data-badge]:not([data-badge=""])::after { min-width: 28px; height: 28px; font-size: 15px; border-radius: 14px; top: -10px; right: -10px; }
+#bosses { left: 6px; top: 34%; gap: 18px; }
+.bw { width: 104px; }
+.bw .svgi { width: 62px; height: 62px; }
+.bw-ready { font-size: 16px; padding: 3px 12px; border-radius: 11px; }
+.bw-time { font-size: 16px; padding: 3px 9px 3px 5px; border-radius: 11px; }
+.bw-time .svgi { width: 18px; height: 18px; }
+.bw-name { font-size: 13px; }
+#buffs { bottom: calc(150px + env(safe-area-inset-bottom)); font-size: 15px; }
+#buffs div { padding: 6px 10px; border-radius: 12px; }
+#zone-banner { font-size: 38px; }
+#zone-banner small { font-size: 16px; padding: 5px 14px; }
+#hint { font-size: 20px; bottom: calc(210px + env(safe-area-inset-bottom)); }
+.big-btn { bottom: calc(132px + env(safe-area-inset-bottom)); min-height: 60px; font-size: 22px; padding: 10px 28px; }
+.big-btn .svgi { width: 30px; height: 30px; }
+/* bottom bar: 8 equal slots, like the reference */
+#equipbar { gap: 5px; padding: 18px 6px calc(10px + env(safe-area-inset-bottom)); }
+#weapons, #armorbar { gap: 5px; }
+#weapons { flex: 2 1 0; }
+#armorbar { flex: 6 1 0; justify-content: flex-start; }
+#equipbar .cell, #armorbar .cell, #equipbar .wslot.active { flex: 1 1 0; min-width: 0; max-width: 70px; width: auto; height: auto; aspect-ratio: 1; border-width: 3px; border-radius: 12px; }
+#armorbar .cell .ic, #equipbar .cell .ic { width: 70%; height: 70%; }
+#equipbar .cell .lv { font-size: 16px; right: 3px; }
+#equipbar .cell .badge { width: 20px; height: 20px; }
+#equipbar .sep { width: 4px; margin: 4px 1px; }
+.wslot .swap { width: 28px; height: 28px; font-size: 17px; top: -12px; left: -10px; }
+#combo { bottom: calc(108px + env(safe-area-inset-bottom)); gap: 7px; }
+#combo span { font-size: 15px; }
+#combo i { width: 20px; height: 20px; border-width: 3px; }
+/* over-head bars and numbers */
+.herohp { width: 92px; height: 15px; border-radius: 8px; }
+.herohp span { font-size: 11px; }
+.mobhp { width: 64px; height: 9px; }
+.mobui.boss .mobhp { width: 150px; height: 16px; }
+.mobui.boss .bname { font-size: 17px; }
+.ftext.dmg { font-size: 26px; }
+.ftext.dmg.weak { font-size: 36px; }
+.ftext.dmg.resist { font-size: 19px; }
+.ftext.hurt { font-size: 26px; }
+.ftext.heal, .ftext.gold, .ftext.loot { font-size: 19px; }
+.ftext.orb { font-size: 17px; }
+.ftext.bark { font-size: 16px; }
+.ftext.combo { font-size: 38px; }
+/* panels and buttons */
+#modal { padding: 12px; }
+.panel { max-width: 440px; padding: 20px 16px; border-radius: 26px; }
+.panel h2 { font-size: 30px; }
+.panel p { font-size: 16px; }
+.btn { min-height: 60px; font-size: 20px; border-radius: 16px; }
+.btn small { font-size: 13px; }
+.xbtn { width: 80px; height: 56px; font-size: 30px; border-radius: 16px; }
+.factions h1 { font-size: 26px; }
+.fcard { font-size: 14px; padding: 12px; }
+.fcard h3 { font-size: 24px; }
+#loading .logo { font-size: 64px; }
+/* sheets: inventory and hero */
+.sheet { max-height: 92%; }
+.sheet-head { height: 40px; }
+.sheet-title { font-size: 36px; top: -28px; }
+.sheet-head .xbtn { top: -34px; right: 12px; }
+.sheet-body { padding: 4px 12px 12px; }
+.tabs { gap: 8px; }
+.tab { width: 58px; height: 58px; border-radius: 14px; }
+.tab .svgi { width: 30px; height: 30px; }
+.tabs .cap { font-size: 17px; }
+.tabs .cap .svgi { width: 20px; height: 20px; }
+.divider { font-size: 17px; margin: 16px 0 12px; }
+.sheet .grid { grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.cell .lv { font-size: 19px; right: 6px; }
+.cell .badge { width: 26px; height: 26px; }
+.cell .badge .svgi { width: 16px; height: 16px; }
+.cell .sh { font-size: 14px; }
+.sheet .hint-line { font-size: 14px; }
+.eq-title { font-size: 26px; margin: -16px 0 8px; }
+.eq-row { gap: 5px; }
+.eq-row .cell { max-width: 70px; border-radius: 12px; }
+.eq-row .cell .lv { font-size: 15px; }
+/* item card */
+.tip { max-width: 440px; padding: 16px; border-radius: 26px; }
+.card-head .cell.big { width: 104px; height: 104px; }
+.card-head .cell.big .lv { font-size: 24px; }
+.card-head .xbtn { width: 68px; height: 52px; font-size: 26px; }
+.card-title h3 { font-size: 24px; }
+.pills span { font-size: 15px; padding: 4px 10px; }
+.card-main { font-size: 22px; padding: 12px 16px; }
+.card-main .v { font-size: 26px; }
+.card-main .svgi { width: 26px; height: 26px; }
+.card-sub { font-size: 16px; grid-template-columns: 1fr; }
+.card-sub span { font-size: 14px; }
+.cmp-note { font-size: 13px; }
+.ab-title { font-size: 19px; }
+.ability p { font-size: 17px; }
+.tip .btn { min-height: 62px; font-size: 18px; }
+/* hero sheet */
+.sc-title { font-size: 24px; }
+.sc-title small { font-size: 14px; }
+.big-stats b { font-size: 30px; }
+.big-stats .svgi { width: 48px; height: 48px; }
+.big-stats span { font-size: 13px; }
+.chip { padding: 10px 4px; }
+.chip b { font-size: 19px; }
+.chip .svgi { width: 24px; height: 24px; }
+.doll { gap: 10px; }
+.doll .cell { width: 66px; height: 66px; }
+.paper { min-height: 260px; }
+.paper .rot button { width: 44px; height: 44px; font-size: 20px; }
+.wrow .cell { width: 72px; height: 72px; }
+.cell .wtag { font-size: 12px; bottom: -13px; }
+.char .strip .cell { width: 64px; height: 64px; }
+.bag-btn .svgi { width: 28px; height: 28px; }
+/* smith shop */
+.shop-head h2 { font-size: 32px; }
+.ribbon { font-size: 21px; padding: 10px; }
+.sc-name { font-size: 19px; }
+.sc-sub { font-size: 16px; }
+.shop-card .cell { width: 92px; height: 92px; }
+.shop-card .price { font-size: 22px; }
+.link { font-size: 14px; padding: 6px; }
+.sheet-title { left: 18px; transform: none; font-size: 32px; }
+.tabs .cap { flex-direction: column; align-items: flex-end; gap: 0; font-size: 15px; white-space: nowrap; }
+.tabs .cap span { display: flex; align-items: center; gap: 4px; }
+#equipbar .cell .badge, .eq-row .cell .badge { width: 18px; height: 18px; left: -4px; top: -4px; border-radius: 6px 3px 5px 3px; }
+#equipbar .cell .badge .svgi, .eq-row .cell .badge .svgi { width: 11px; height: 11px; }
+#equipbar .cell .sh, .eq-row .cell .sh { font-size: 11px; }
+.wslot .swap { left: -6px; }
+.big-stats { justify-content: space-between; padding: 0 2px; }
+.big-stats div { gap: 3px; }
+.big-stats .svgi { width: 38px; height: 38px; }
+.big-stats b { font-size: 25px; }

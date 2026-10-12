@@ -178,7 +178,7 @@ export class Inventory {
       big('plus', '#5ee87a', fmtK((g.regen / 100) * g.maxHp), 'Реген/с');
     const combo = COMBOS[g.weaponItem.def];
     const chip = (ic: string, color: string, v: string, title: string) => `<div class="chip" title="${title}">${icon(ic, color, 20)}<b>${v}</b></div>`;
-    q('#i-stats').innerHTML = chip('hammer', '#ffb347', fmtK(hit), 'Урон за удар') + chip('sword', '#ff8a5a', fmtK(g.power), 'Сила (сферы и броня)') +
+    q('#i-stats').innerHTML = chip('hammer', '#ffb347', fmtK(Math.round(hit)), 'Урон за удар') + chip('sword', '#ff8a5a', fmtK(g.power), 'Сила (сферы и броня)') +
       chip('shield', '#9fe3ff', `${g.defense} <small>−${Math.round((g.defense / (g.defense + 100)) * 100)}%</small>`, 'Защита') +
       chip('boot', '#ffe04a', `${Math.round(g.speed * 10) / 10}`, 'Бег, м/с') + chip('axe', '#d9a6ff', `×${combo.mult}`, `Комбо: ${combo.name}`) +
       chip('gear', '#c9bfb2', `${g.weapon.aps}/с`, 'Атак в секунду');
@@ -224,7 +224,7 @@ export class Inventory {
   private renderBag() {
     const s = this.game.save;
     const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
-    q('#b-sub').innerHTML = `${s.bag.length}/${BAG_SIZE} · ${icon('coin', '#ffd23f', 16)}<b>${fmtK(s.gold)}</b>`;
+    q('#b-sub').innerHTML = `<span>${s.bag.length}/${BAG_SIZE}</span><span>${icon('coin', '#ffd23f', 18)}<b>${fmtK(s.gold)}</b></span>`;
     const section = (kind: 'weapon' | 'armor', title: string) => {
       const cells = s.bag.map((it, i) => (it.kind === kind ? this.cell(it, `data-bag="${i}"`) : '')).join('');
       return cells ? `<div class="divider"><span>${title}</span></div><div class="grid">${cells}</div>` : '';
