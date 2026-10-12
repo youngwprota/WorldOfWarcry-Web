@@ -464,7 +464,10 @@ export class Game {
     const combo = COMBOS[this.weaponItem.def];
     // A pause or a whiff breaks the chain (GDD: combo = N uninterrupted attacks).
     if (this.combo > 0 && this.impact < 0 && this.time - this.lastSwing > period + combo.window) this.combo = 0;
-    if (this.target && this.atkCd <= 0) {
+    // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
+    // up to 1 m further for facing, and swinging there was a whiff into thin air.
+    const inReach = !!this.target && this.target.ref.pos.distanceTo(p) - this.target.ref.radius <= w.range + 0.35;
+    if (inReach && this.atkCd <= 0) {
       const chained = this.lastSwingHit && this.time - this.lastSwing <= period + combo.window;
       this.combo = chained ? this.combo + 1 : 1;
       this.finisher = this.combo >= combo.hits;
