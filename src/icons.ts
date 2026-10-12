@@ -33,7 +33,7 @@ const SVG: Record<string, string> = {
 
 /** Any UI icon: silhouette in `color` with an ink outline. */
 export function icon(id: string, color = '#fff', size = 24, cls = '') {
-  return `<svg class="svgi ${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" style="color:${color}" fill="currentColor" stroke="${INK}" stroke-width="1.5" stroke-linejoin="round" paint-order="stroke">${SVG[id] ?? ''}</svg>`;
+  return `<svg class="svgi ${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" style="color:${color}" fill="currentColor" stroke="${INK}" stroke-width="2.2" stroke-linejoin="round" paint-order="stroke">${SVG[id] ?? ''}</svg>`;
 }
 
 export function weaponSvg(id: string, color: string, size = 16) {

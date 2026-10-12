@@ -634,3 +634,97 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .top-stats .chip .svgi { width: 38px; height: 38px; }
 .top-stats .chip b { font-size: 22px; }
 .sheet { margin-top: 40px; }
+
+/* ---------- cartoon pass: flat two-tone fills, thick ink, big type (readable on a phone) ---------- */
+:root {
+  /* flat cartoon planks: thick seams, a light lip and a few rounded grain dashes; no noise */
+  --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='180'><g fill='%23000' fill-opacity='.4'><rect y='41' width='360' height='4'/><rect y='86' width='360' height='4'/><rect y='131' width='360' height='4'/><rect y='176' width='360' height='4'/></g><g fill='%23000' fill-opacity='.3'><rect x='120' y='0' width='4' height='41'/><rect x='280' y='45' width='4' height='41'/><rect x='60' y='90' width='4' height='41'/><rect x='220' y='135' width='4' height='41'/></g><g fill='%23fff' fill-opacity='.13'><rect y='0' width='360' height='3'/><rect y='45' width='360' height='3'/><rect y='90' width='360' height='3'/><rect y='135' width='360' height='3'/></g><g fill='none' stroke='%23000' stroke-opacity='.16' stroke-width='3.5' stroke-linecap='round'><path d='M20 20h60M160 26c20 0 40-5 70-5M300 16h36M40 64c25 0 35 5 76 5M180 70h56M300 62h36M100 110h84M240 106c20 0 30 6 60 6M20 156h56M150 160h40M250 152c20 0 40-4 76-4'/></g></svg>");
+  --planks: linear-gradient(transparent, transparent);
+  --bolt: #f0cf94 0 3.5px, var(--ink) 4px 6.5px, transparent 7px;
+  --gloss: linear-gradient(#ffffff38 0 44%, #ffffff00 44%);
+  --wood-light: linear-gradient(#b27b4b, #b27b4b);
+  --wood-mid: linear-gradient(#93633d, #93633d);
+  --wood-deep: linear-gradient(#5a3a24, #5a3a24);
+  --stroke: 0 5px 0 var(--ink), 3.6px 0 0 var(--ink), -3.6px 0 0 var(--ink), 0 3.6px 0 var(--ink), 0 -3.6px 0 var(--ink), 2.6px 2.6px 0 var(--ink), -2.6px 2.6px 0 var(--ink), 2.6px -2.6px 0 var(--ink), -2.6px -2.6px 0 var(--ink), 3.3px 1.4px 0 var(--ink), -3.3px 1.4px 0 var(--ink), 1.4px 3.3px 0 var(--ink), -1.4px 3.3px 0 var(--ink), 3.3px -1.4px 0 var(--ink), -3.3px -1.4px 0 var(--ink), 1.4px -3.3px 0 var(--ink), -1.4px -3.3px 0 var(--ink);
+  --stroke-s: 0 3.5px 0 var(--ink), 2.4px 0 0 var(--ink), -2.4px 0 0 var(--ink), 0 2.4px 0 var(--ink), 0 -2.4px 0 var(--ink), 1.7px 1.7px 0 var(--ink), -1.7px 1.7px 0 var(--ink), 1.7px -1.7px 0 var(--ink), -1.7px -1.7px 0 var(--ink);
+}
+/* flat two-tone candy instead of gradients */
+.btn, .xbtn, .side-btn, .tab.on, .tab.hero, .bw-ready, .ribbon { background: linear-gradient(var(--c1) 0 50%, var(--c2) 50%); }
+.ribbon { --c1: #ff9ad6; --c2: #e957b4; }
+.bw-ready { --c1: #8cf26a; --c2: #3cc153; }
+.cell:not(.empty), .cell.r3:not(.empty), .cell.r2:not(.empty) { background: linear-gradient(var(--c1) 0 46%, var(--c2) 46%); }
+.cell.r0 { --c1: #c3ced6; --c2: #9aa8b4; }
+.cell.r1 { --c1: #7fd6ff; --c2: #41a6f0; }
+.cell.r2 { --c1: #d58bff; --c2: #a656ef; }
+.cell.r3 { --c1: #ffd352; --c2: #ffa52c; }
+.round-btn { background: linear-gradient(#8a95a6 0 50%, #626c7c 50%); }
+.char .paper { background: var(--grain), var(--wood-deep); background-size: 360px 180px, auto; }
+.top-stats { background: var(--grain), linear-gradient(#3f2817f2, #3f2817f2); background-size: 360px 180px, auto; }
+.pill, #goal, #buffs div, .bw-time { background: #2e1c10e6; }
+/* thick ink everywhere */
+.btn, .xbtn, .side-btn, .tab, .round-btn, .cell, .panel, .tip, .sheet, .shop-card, .ribbon, .top-stats, .chip, .pill, .fcard { border-width: 5px; border-color: var(--ink); }
+.cell.empty { border-width: 4px; border-color: #2a180c; }
+#equipbar .cell, .eq-row .cell, #armorbar .cell { border-width: 4px; }
+.pill, #goal, #buffs div, .bw-time { border: 4px solid var(--ink); }
+.btn, .xbtn, .side-btn, .tab, .round-btn { box-shadow: inset 0 -6px 0 #0000002e, 0 5px 0 var(--ink); }
+.btn:active:not(:disabled) { box-shadow: inset 0 -4px 0 #0000002e, 0 2px 0 var(--ink); }
+.cell { box-shadow: inset 0 -5px 0 #00000026, 0 4px 0 var(--ink); }
+.cell.empty { box-shadow: inset 0 4px 0 #0005; }
+.chip, .top-stats .chip { box-shadow: inset 0 -5px 0 #00000030, 0 4px 0 #000a; }
+.panel, .tip, .top-stats { box-shadow: 0 7px 0 var(--ink), 0 14px 30px #0009; }
+.sheet { box-shadow: inset 0 0 0 4px #ffffff18, 0 -8px 30px #0009; }
+.well { box-shadow: inset 0 5px 0 #0006; border: 4px solid #2a180c; }
+.divider::before, .divider::after { height: 7px; border: 2px solid var(--ink); background: #4a2f1d; box-shadow: none; }
+.cell .badge { border-width: 3px; }
+.wslot .swap { border-width: 3px; }
+#minimap, #bigmap { border-width: 5px; box-shadow: 0 0 0 6px #b07a48, 0 0 0 11px var(--ink), 0 6px 0 11px #0006; }
+.herohp { border-width: 3px; border-color: var(--ink); height: 17px; }
+.mobhp { border-width: 2px; }
+/* bigger type */
+#stats { font-size: 26px; }
+#stats .svgi { width: 38px; height: 38px; }
+.pill { font-size: 26px; height: 48px; }
+#zone-label { font-size: 23px; }
+#goal { font-size: 16px; max-width: 180px; }
+.side-btn span, .bw-name { font-size: 16px; }
+.bw-ready, .bw-time { font-size: 18px; }
+#buffs { font-size: 17px; }
+#combo span { font-size: 18px; }
+#hint { font-size: 23px; }
+.panel h2 { font-size: 34px; }
+.panel p { font-size: 18px; }
+.btn { font-size: 23px; min-height: 66px; border-radius: 18px; }
+.btn small { font-size: 14px; }
+.xbtn { width: 84px; height: 60px; font-size: 34px; }
+.sheet-title { font-size: 40px; top: -32px; }
+.tabs .cap { font-size: 19px; }
+.divider { font-size: 20px; }
+.sheet .hint-line { font-size: 16px; }
+.eq-title { font-size: 30px; }
+.cell .lv { font-size: 21px; }
+#equipbar .cell .lv, .eq-row .cell .lv { font-size: 17px; }
+.card-title h3 { font-size: 27px; }
+.pills span { font-size: 17px; }
+.card-main { font-size: 25px; }
+.card-main .v { font-size: 30px; }
+.card-sub { font-size: 19px; }
+.card-sub span { font-size: 16px; }
+.ab-title { font-size: 22px; }
+.ability p { font-size: 19px; }
+.tip .btn { font-size: 20px; min-height: 66px; }
+.top-stats .sc-title { font-size: 28px; }
+.top-stats .big-stats b { font-size: 30px; }
+.top-stats .big-stats span { font-size: 16px; }
+.top-stats .chip b { font-size: 24px; }
+.sc-name { font-size: 21px; }
+.sc-sub { font-size: 18px; }
+.shop-card .price { font-size: 25px; }
+.link { font-size: 16px; }
+.fcard { font-size: 15px; }
+.fcard h3 { font-size: 27px; }
+.tip { overflow-x: hidden; }
+.tip .row { flex-wrap: wrap; }
+.tip .row .btn { min-width: 0; padding: 6px 8px; }
+.tip .row .btn:first-child:nth-last-child(3) { flex-basis: 100%; min-height: 56px; }
+.top-stats .chip { gap: 2px; }
+.top-stats .chip .svgi { width: 36px; height: 36px; }

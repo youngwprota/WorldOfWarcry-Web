@@ -102,5 +102,5 @@ const ART: Record<string, string> = {
 
 /** Coloured icon; falls back to nothing for unknown ids. */
 export function art(id: string, size = 24, cls = '') {
-  return `<svg class="svgi art ${cls}" width="${size}" height="${size}" viewBox="0 0 64 64" stroke="${INK}" stroke-width="3.5" stroke-linejoin="round" paint-order="stroke">${ART[id] ?? ''}</svg>`;
+  return `<svg class="svgi art ${cls}" width="${size}" height="${size}" viewBox="0 0 64 64" stroke="${INK}" stroke-width="5.5" stroke-linejoin="round" paint-order="stroke">${ART[id] ?? ''}</svg>`;
 }
