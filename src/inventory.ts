@@ -98,6 +98,7 @@ export class Inventory {
   private view: 'char' | 'bag' | null = null;
   private bagFilter: BagFilter = 'all';
 
+  onTalents: () => void = () => {};
   constructor(private ui: UI, private game: Game) {}
 
   get isOpen() { return this.view !== null; }
@@ -167,12 +168,14 @@ export class Inventory {
         <div class="wrow" id="i-weapons"></div>
         <div class="divider"><span id="i-owned-title"></span></div>
         <div class="strip" id="i-strip"></div>
-        <button class="btn primary bag-btn" id="i-bag">${art('bag', 30)} Открыть сумку</button>
+        <div class="row bag-row"><button class="btn primary bag-btn" id="i-bag">${art('bag', 30)} Сумка</button>
+          <button class="btn purple bag-btn" id="i-tal">${art('star', 30)} Таланты</button></div>
       </div>
     </div>`);
     this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, f.hero);
     this.ui.on('#i-close', () => this.close());
     this.ui.on('#i-bag', () => this.openBag());
+    this.ui.on('#i-tal', () => this.onTalents());
     this.ui.modal.querySelector('#i-rl')!.addEventListener('click', () => this.preview?.nudge(-1));
     this.ui.modal.querySelector('#i-rr')!.addEventListener('click', () => this.preview?.nudge(1));
     this.ui.modal.insertAdjacentHTML('beforeend', '<div class="tip-wrap hidden" id="i-tip"><div class="tip"></div></div>');

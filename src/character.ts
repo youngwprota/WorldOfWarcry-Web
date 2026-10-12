@@ -137,15 +137,12 @@ export class Character {
     if (this.highlighted) this.rebuildOutline();
   }
 
-  /** Player hero: a bit bigger, brighter than the world and with a light outline. */
+  /** Player hero: a bit bigger and with a dark outline (no extra brightness: it washed the textures out). */
   setHighlight(on: boolean) {
     this.highlighted = on;
     this.model.scale.multiplyScalar(on ? 1.12 : 1 / 1.12);
-    this.baseColor.setScalar(on ? 1.16 : 1);
-    for (const m of this.materials) {
-      m.color.copy(this.baseColor);
-      m.emissive.setScalar(on ? 0.07 : 0);
-    }
+    this.baseColor.setScalar(1);
+    for (const m of this.materials) m.color.copy(this.baseColor);
     this.rebuildOutline();
   }
 

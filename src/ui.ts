@@ -54,6 +54,10 @@ export class UI {
   onBag: () => void = () => {};
   onMap: () => void = () => {};
   onArmor: () => void = () => {};
+  onTalents: () => void = () => {};
+  onDebug: () => void = () => {};
+  private lastProgress = '';
+  private lastSkills = '';
   private swapCb: () => void = () => {};
   private mm = $<HTMLCanvasElement>('minimap').getContext('2d')!;
 
@@ -65,6 +69,7 @@ export class UI {
     $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('bosses').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('btn-settings').innerHTML = art('gear', 40);
+    $('lvl').addEventListener('click', () => { sfx.click(); this.onTalents(); });
     $('btn-char').insertAdjacentHTML('afterbegin', art('hero', 46));
     $('btn-bag').insertAdjacentHTML('afterbegin', art('bag', 48));
     $('btn-smith').insertAdjacentHTML('afterbegin', art('anvil', 32) + ' ');
@@ -113,6 +118,45 @@ export class UI {
     $('bosses').innerHTML = s.bosses.map((b) => `<div class="bw ui-block" title="${b.name}">
       ${b.left > 0 ? '' : '<div class="bw-ready">Готово!</div>'}${art('skull', 62, b.left > 0 ? 'dim' : '')}
       ${b.left > 0 ? `<div class="bw-time">${art('hourglass', 20)}${fmtTime(b.left)}</div>` : `<div class="bw-name">${b.name}</div>`}</div>`).join('');
+  }
+
+  /** Level badge + XP bar under the gold; "+N" when talent points are waiting. */
+  progress(level: number, xp: number, need: number, free: number) {
+    const key = `${level}|${xp}|${need}|${free}`;
+    if (key === this.lastProgress) return;
+    this.lastProgress = key;
+    const el = $('lvl');
+    (el.querySelector('.lv-badge') as HTMLElement).textContent = String(level);
+    (el.querySelector('.fill') as HTMLElement).style.width = `${need ? Math.min(100, (xp / need) * 100) : 100}%`;
+    (el.querySelector('span') as HTMLElement).textContent = need ? `${fmtK(xp)} / ${fmtK(need)}` : 'MAX';
+    el.dataset.badge = free > 0 ? `+${free}` : '';
+  }
+
+  /** The two equipped auto-cast skills with a cooldown sweep. */
+  skills(list: ({ id: string; icon: string; name: string; cd: number } | null)[]) {
+    const box = $('skills');
+    const key = list.map((x) => x?.id ?? '-').join('|');
+    if (key !== this.lastSkills) {
+      this.lastSkills = key;
+      box.innerHTML = list.map((x) => (x
+        ? `<div class="skill ui-block" data-skill="${x.id}" title="${x.name}">${art(x.icon, 40)}<i class="cd"></i></div>`
+        : '')).join('');
+      box.querySelectorAll('.skill').forEach((b) => b.addEventListener('click', () => { sfx.click(); this.onTalents(); }));
+    }
+    list.forEach((x) => {
+      if (!x) return;
+      const el = box.querySelector<HTMLElement>(`[data-skill="${x.id}"]`);
+      el?.style.setProperty('--cd', `${x.cd * 360}deg`);
+      el?.classList.toggle('ready', x.cd <= 0);
+    });
+  }
+
+  skillFlash(id: string) {
+    const el = $('skills').querySelector<HTMLElement>(`[data-skill="${id}"]`);
+    if (!el) return;
+    el.classList.remove('fire');
+    void el.offsetWidth;
+    el.classList.add('fire');
   }
 
   popStat(k: OrbKind) {
@@ -268,8 +312,10 @@ export class UI {
       <p>Управление: тяни палец в любом месте экрана (или WASD). Атака — автоматически. Смена оружия — тап по второму оружию внизу или Q.</p>
       <div class="row"><button class="btn" id="m-mute">${muted ? '🔇 Звук выкл' : '🔊 Звук вкл'}</button>
       <button class="btn" id="m-gfx">${lowGfx ? '🖥 Графика: низкая' : '🖥 Графика: высокая'}</button></div>
+      <div class="row"><button class="btn purple" id="m-debug">🛠 Дебаг-меню</button></div>
       <div class="row"><button class="btn danger" id="m-reset">Сбросить прогресс</button></div>
       <div class="row"><button class="btn primary" id="m-close">Продолжить</button></div></div>`);
+    this.on('#m-debug', () => { this.close(); close(); this.onDebug(); });
     this.on('#m-mute', () => { toggleMute(); this.close(); this.settings(!muted, lowGfx, toggleMute, toggleGfx, reset, close); });
     this.on('#m-gfx', () => { toggleGfx(); this.close(); this.settings(muted, !lowGfx, toggleMute, toggleGfx, reset, close); });
     this.on('#m-reset', () => {

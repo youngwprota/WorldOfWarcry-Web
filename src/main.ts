@@ -9,9 +9,11 @@ import { FACTIONS, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './c
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
+import { TalentsView } from './talentsview';
+import { DebugPanel } from './debug';
 import { Prologue, clearPrologue, prologueDone, type Gains } from './prologue';
 import { MapView } from './mapview';
-import { clearSave, loadSave, newSave, writeSave } from './save';
+import { loadSave, newSave, wipeAll, writeSave } from './save';
 import { UI } from './ui';
 import { BREAKABLES } from './world';
 
@@ -95,10 +97,20 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   ui.onCharacter = game.onOpenCharacter = () => { input.reset(); inv.openCharacter(); };
   ui.onBag = game.onOpenBag = () => { input.reset(); inv.openBag(); };
   ui.onArmor = ui.onCharacter;
+  const talents = new TalentsView(ui, game);
+  ui.onTalents = inv.onTalents = game.onOpenTalents = () => {
+    if (inv.isOpen) inv.close();
+    if (ui.modalOpen) return;
+    input.reset();
+    talents.open();
+  };
+  const debug = new DebugPanel(app, game);
+  ui.onDebug = () => debug.toggle(true);
   const map = new MapView(game);
   ui.onMap = game.onOpenMap = () => { if (inv.isOpen || ui.modalOpen) return; map.toggle(); };
   addEventListener('keydown', (e) => {
     if (inv.isOpen && (e.code === 'Escape' || e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyB')) inv.close();
+    else if (talents.isOpen && (e.code === 'Escape' || e.code === 'KeyT')) talents.close();
   });
   ui.onSettings = () => {
     if (!game) return;
@@ -109,7 +121,7 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
       applyGfx(!!save!.lowGfx);
       game?.persist();
     }, () => {
-      clearSave();
+      wipeAll();
       location.reload();
     }, () => { if (game) game.paused = false; });
   };
