@@ -249,5 +249,21 @@ export const ZONES: ZoneDef[] = [
 
 export const WORLD = { halfWidth: 34, zMax: 26, zMin: -222, barrierZ: -118 };
 
+/**
+ * Zone depth: packs further from the zone entrance are bigger, tougher and pay more, so progress means
+ * pushing on rather than farming the first clearing. t = 0 at `from`, 1 at `to` (spawn z); bosses and
+ * mobs from graves are not scaled.
+ */
+export interface DepthDef { from: number; to: number; hp: number; dmg: number; reward: number; scale: number }
+export const DEPTH: Partial<Record<ZoneId, DepthDef>> = {
+  forest: { from: -34, to: -90, hp: 2.2, dmg: 1.8, reward: 2, scale: 1.15 },
+};
+export function depthMul(zone: ZoneId, z: number) {
+  const d = DEPTH[zone];
+  const t = d ? Math.min(1, Math.max(0, (d.from - z) / (d.from - d.to))) : 0;
+  const k = (v: number) => 1 + (v - 1) * t;
+  return { hp: d ? k(d.hp) : 1, dmg: d ? k(d.dmg) : 1, reward: d ? k(d.reward) : 1, scale: d ? k(d.scale) : 1 };
+}
+
 export const RESPAWN_MIN_DIST = 10;
 export const LEASH = 15;

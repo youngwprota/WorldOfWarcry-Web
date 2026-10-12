@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Character } from './character';
 import {
-  COMBOS, FACTIONS, HERO, LEASH, MOBS, ORBS, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
+  COMBOS, FACTIONS, HERO, LEASH, MOBS, ORBS, depthMul, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
   type DamageType, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -58,20 +58,30 @@ class Mob {
   casting = 0;
   phase2 = false;
   awake = true;
-  constructor(public def: MobDef, public spawn: THREE.Vector3, faction: 'human' | 'orc', layer: HTMLElement) {
+  /** Depth-scaled stats (DEPTH in config): use these instead of def.dmg / def.reward / def.gold. */
+  dmg: number;
+  reward: Partial<Record<OrbKind, number>>;
+  gold: [number, number];
+  constructor(public def: MobDef, public spawn: THREE.Vector3, faction: 'human' | 'orc', layer: HTMLElement,
+    mul = { hp: 1, dmg: 1, reward: 1, scale: 1 }) {
     const [model, weapon] = def.model[faction];
-    this.ch = new Character(model, weapon, def.scale);
+    const scale = def.scale * mul.scale;
+    this.ch = new Character(model, weapon, scale);
+    this.dmg = def.dmg * mul.dmg;
+    this.reward = {};
+    for (const [k, n] of Object.entries(def.reward) as [OrbKind, number][]) this.reward[k] = Math.round(n * mul.reward);
+    this.gold = [Math.round(def.gold[0] * mul.reward), Math.round(def.gold[1] * mul.reward)];
     this.ch.position.copy(spawn);
     this.ch.facing = Math.random() * Math.PI * 2;
-    this.maxHp = this.hp = def.hp;
-    this.radius = 0.45 * def.scale;
+    this.maxHp = this.hp = Math.round(def.hp * mul.hp);
+    this.radius = 0.45 * scale;
     this.wander.copy(spawn);
     // Above the head: stats granted by the kill, weakness/resistance icons, HP bar.
     // Bosses get a bigger version with their name (coloured by difficulty) and HP numbers.
     this.hpEl = document.createElement('div');
     this.hpEl.className = def.boss ? 'mobui boss' : 'mobui';
     this.hpEl.innerHTML = (def.boss ? `<div class="bname">${def.boss.titles[faction]}</div>` : '') +
-      `<div class="rws">${rewardChips(def)}</div><div class="ris">${resistIcons(def, def.boss ? 22 : 19)}</div>` +
+      `<div class="rws">${rewardChips({ resist: def.resist, reward: this.reward })}</div><div class="ris">${resistIcons(def, def.boss ? 22 : 19)}</div>` +
       `<div class="mobhp"><div></div>${def.boss ? '<span></span>' : ''}</div>`;
     this.hpFill = this.hpEl.querySelector('.mobhp > div')!;
     layer.appendChild(this.hpEl);
@@ -253,7 +263,7 @@ export class Game {
   }
 
   private addMob(def: MobDef, at: THREE.Vector3, labels: HTMLElement) {
-    const m = new Mob(def, at, this.save.faction, labels);
+    const m = new Mob(def, at, this.save.faction, labels, def.boss ? undefined : depthMul(this.world.zoneAt(at.z).id, at.z));
     this.mobs.push(m);
     this.scene.add(m.ch.root);
     return m;
@@ -608,8 +618,8 @@ export class Game {
     this.endFight(m, 'kill');
     if (this.target?.ref === m) this.target = null;
     const d = m.def;
-    for (const [k, n] of Object.entries(d.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(m.pos, k);
-    this.dropGold(m.pos, d.gold);
+    for (const [k, n] of Object.entries(m.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(m.pos, k);
+    this.dropGold(m.pos, m.gold);
     if (d.boss) this.killBoss(m);
     else if (m.temp) m.respawnAt = Infinity;
     else {
@@ -772,7 +782,7 @@ export class Game {
         m.impact -= dt;
         if (m.impact < 0 && !this.dead && m.stun <= 0) {
           const reach = def.range + m.radius * 0.5 + HERO.radius + 0.5;
-          if (m.pos.distanceTo(hp) < reach) this.hurtHero(def.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos, m);
+          if (m.pos.distanceTo(hp) < reach) this.hurtHero(m.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos, m);
         }
       }
       // knockback
@@ -879,7 +889,7 @@ export class Game {
         f.slams++;
         if (!this.dead && this.hero.position.distanceTo(at) < radius + HERO.radius) {
           f.slamHits++;
-          this.hurtHero(m.def.dmg * dmgMul, at, m);
+          this.hurtHero(m.dmg * dmgMul, at, m);
         }
       });
     };
@@ -1283,7 +1293,8 @@ export class Game {
     if (!f) return;
     m.fight = null;
     logFight({
-      t: this.save.playTime ?? 0, mob: m.def.id, boss: !!m.def.boss, result, dur: +(this.time - f.t0).toFixed(1),
+      // Depth-scaled mobs are logged as e.g. bandit_thug×1.5 (HP multiplier rounded to 0.5).
+      t: this.save.playTime ?? 0, mob: m.maxHp > m.def.hp ? `${m.def.id}×${Math.round((m.maxHp / m.def.hp) * 2) / 2}` : m.def.id, boss: !!m.def.boss, result, dur: +(this.time - f.t0).toFixed(1),
       dealt: Math.round(f.dealt), taken: Math.round(f.taken), hits: f.hits, combos: f.combos, slams: f.slams, slamHits: f.slamHits,
       hpStart: Math.round(f.hpStart), hpEnd: Math.round(this.hp), maxHp: this.maxHp, power: Math.round(this.power),
     });
