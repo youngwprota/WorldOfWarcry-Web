@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Character } from './character';
 import {
-  COMBOS, FACTIONS, HERO, LEASH, MOBS, ORBS, depthMul, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
+  ANTI_KITE, COMBOS, FACTIONS, HERO, LEASH, MOBS, ORBS, depthMul, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
   type DamageType, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -55,6 +55,11 @@ class Mob {
   /** Game time of the last hit taken (boss regen). */
   hurtAt = -99;
   fight: FightStat | null = null;
+  // anti-kite lunge
+  edgeT = 0;
+  lungeCd = 0;
+  lungeT = 0;
+  lungeDir = new THREE.Vector3();
   casting = 0;
   phase2 = false;
   awake = true;
@@ -423,7 +428,8 @@ export class Game {
     this.moveDir.set(ix, 0, iy);
     const p = ch.position;
     if (moving) {
-      p.addScaledVector(this.moveDir, this.speed * dt);
+      const slowed = this.antiKite === 'slow' && this.time - this.lastSwing < ANTI_KITE.slowTime;
+      p.addScaledVector(this.moveDir, this.speed * (slowed ? ANTI_KITE.slowMul : 1) * dt);
       ch.walkRate = Math.min(2.4, (this.speed * this.moveDir.length()) / 2.1);
     }
     // soft push from living mobs
@@ -759,7 +765,8 @@ export class Game {
               this.lastFight = this.time;
               this.bossLogic(m, dt, dHero);
             }
-            if (m.casting <= 0) {
+            if (m.casting <= 0 && this.lungeStep(m, dt, dHero, reach)) moving = m.lungeT < ANTI_KITE.dash;
+            else if (m.casting <= 0) {
               if (dHero > reach * 0.85) moving = this.stepTo(m, hp, def.speed, dt);
               m.ch.facing = turn(m.ch.facing, Math.atan2(hp.x - m.pos.x, hp.z - m.pos.z), dt * 8);
               m.atkCd -= dt;
@@ -856,6 +863,35 @@ export class Game {
     m.pos.add(v1);
     m.ch.facing = turn(m.ch.facing, Math.atan2(v1.x, v1.z), dt * 8);
     m.ch.walkRate = speed / 2.1;
+    return true;
+  }
+
+  get antiKite() { return this.save.antiKite ?? 'slow'; }
+
+  /** 'lunge' anti-kite: a mob held at the edge of its reach aims, then dashes. True while it drives the mob. */
+  private lungeStep(m: Mob, dt: number, dHero: number, reach: number) {
+    if (this.antiKite !== 'lunge' || m.def.boss) return false;
+    const k = ANTI_KITE;
+    const hp = this.hero.position;
+    m.lungeCd -= dt;
+    if (m.lungeT > 0) {
+      m.lungeT -= dt;
+      if (m.lungeT > k.dash) {
+        // wind-up: stand and aim at the hero
+        m.lungeDir.set(hp.x - m.pos.x, 0, hp.z - m.pos.z).normalize();
+        m.ch.facing = turn(m.ch.facing, Math.atan2(m.lungeDir.x, m.lungeDir.z), dt * 10);
+      } else {
+        m.pos.addScaledVector(m.lungeDir, k.dashSpeed * dt);
+        if (m.lungeT <= 0) m.atkCd = 0; // swing as soon as it lands in reach
+      }
+      return true;
+    }
+    m.edgeT = dHero > reach && dHero < reach + k.edge ? m.edgeT + dt : 0;
+    if (m.edgeT < k.edgeTime || m.lungeCd > 0) return false;
+    m.edgeT = 0;
+    m.lungeCd = k.cd;
+    m.lungeT = k.windup + k.dash;
+    this.fx.spawn(v1.copy(m.pos).setY(2.2 * m.def.scale), '!', 'bark', 0.5);
     return true;
   }
 
@@ -1294,7 +1330,7 @@ export class Game {
     m.fight = null;
     logFight({
       // Depth-scaled mobs are logged as e.g. bandit_thug×1.5 (HP multiplier rounded to 0.5).
-      t: this.save.playTime ?? 0, mob: m.maxHp > m.def.hp ? `${m.def.id}×${Math.round((m.maxHp / m.def.hp) * 2) / 2}` : m.def.id, boss: !!m.def.boss, result, dur: +(this.time - f.t0).toFixed(1),
+      t: this.save.playTime ?? 0, mob: m.maxHp > m.def.hp ? `${m.def.id}×${Math.round((m.maxHp / m.def.hp) * 2) / 2}` : m.def.id, boss: !!m.def.boss, kite: this.antiKite, result, dur: +(this.time - f.t0).toFixed(1),
       dealt: Math.round(f.dealt), taken: Math.round(f.taken), hits: f.hits, combos: f.combos, slams: f.slams, slamHits: f.slamHits,
       hpStart: Math.round(f.hpStart), hpEnd: Math.round(this.hp), maxHp: this.maxHp, power: Math.round(this.power),
     });
@@ -1307,7 +1343,7 @@ export class Game {
     logSnap({
       t: Math.round(this.save.playTime ?? 0), zone: this.zone?.id ?? '?', power: this.power, maxHp: this.maxHp, regen: this.regen,
       gold: this.save.gold, kills: this.save.kills, deaths: heroDeaths(),
-      weapon: `${it.def} r${it.rarity} lv${it.lvl}${it.sharpen ? ` +${it.sharpen}` : ''}`, ttk,
+      weapon: `${it.def} r${it.rarity} lv${it.lvl}${it.sharpen ? ` +${it.sharpen}` : ''}`, kite: this.antiKite, ttk,
     });
   }
 }
