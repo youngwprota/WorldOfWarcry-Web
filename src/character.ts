@@ -24,7 +24,8 @@ const outlineMat = (() => {
   m.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
-      '#include <begin_vertex>\n transformed += normalize(objectNormal) * 2.8;',
+      // `normal` (not objectNormal): MeshBasicMaterial declares objectNormal only for skinned meshes.
+      '#include <begin_vertex>\n transformed += normalize(normal) * 1.4;',
     );
   };
   return m;
@@ -136,15 +137,12 @@ export class Character {
     if (this.highlighted) this.rebuildOutline();
   }
 
-  /** Player hero: a bit bigger, brighter than the world and with a light outline. */
+  /** Player hero: a bit bigger and with a dark outline (no extra brightness: it washed the textures out). */
   setHighlight(on: boolean) {
     this.highlighted = on;
     this.model.scale.multiplyScalar(on ? 1.12 : 1 / 1.12);
-    this.baseColor.setScalar(on ? 1.16 : 1);
-    for (const m of this.materials) {
-      m.color.copy(this.baseColor);
-      m.emissive.setScalar(on ? 0.07 : 0);
-    }
+    this.baseColor.setScalar(1);
+    for (const m of this.materials) m.color.copy(this.baseColor);
     this.rebuildOutline();
   }
 

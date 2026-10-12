@@ -16,6 +16,15 @@ export interface SaveData {
   kills: number;
   /** Seconds of actual play (balance log). */
   playTime?: number;
+  /** Hero level 1..100 and XP towards the next level (src/talents.ts). */
+  level: number;
+  xp: number;
+  /** Talent id → rank. */
+  talents: Record<string, number>;
+  /** Two equipped auto-cast skills (ids of learned actives). */
+  skills: (string | null)[];
+  /** Number of talent resets done (the first one is free). */
+  resets: number;
   muted: boolean;
   lowGfx?: boolean;
   /** Debug: anti-kite variant (ANTI_KITE in config). */
@@ -37,6 +46,11 @@ export function newSave(faction: FactionId): SaveData {
     barrierOpen: false,
     bosses: {},
     kills: 0,
+    level: 1,
+    xp: 0,
+    talents: {},
+    skills: [null, null],
+    resets: 0,
     muted: false,
   };
 }
@@ -51,16 +65,36 @@ export function loadSave(): SaveData | null {
     d.weapons = d.weapons.map((w) => (w ? normalizeItem(w) : null)) as SaveData['weapons'];
     d.equip ??= {};
     d.bag = (d.bag ?? []).map(normalizeItem);
+    d.level ??= 1;
+    d.xp ??= 0;
+    d.talents ??= {};
+    d.skills ??= [null, null];
+    d.resets ??= 0;
     return d;
   } catch {
     return null;
   }
 }
 
+/** Set by wipeAll(): nothing may write the save again before the page reloads. */
+let wiped = false;
+
 export function writeSave(d: SaveData) {
+  if (wiped) return;
   try { localStorage.setItem(KEY, JSON.stringify(d)); } catch { /* private mode: play without saving */ }
 }
 
 export function clearSave() {
   try { localStorage.removeItem(KEY); } catch { /* ignore */ }
+}
+
+/**
+ * Full progress reset: every "warcry-*" key (hero save, finished prologue) is removed and autosaves
+ * are blocked, so the reload starts a new game from the prologue.
+ */
+export function wipeAll() {
+  wiped = true;
+  try {
+    for (const k of Object.keys(localStorage)) if (k.startsWith('warcry-')) localStorage.removeItem(k);
+  } catch { /* ignore */ }
 }

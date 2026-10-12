@@ -80,6 +80,8 @@ export interface FactionDef {
   name: string;
   fantasy: string;
   hero: string;
+  /** Model + weapon shown on the faction-select stage (the race's champion). */
+  preview: [string, string];
   startWeapon: string;
   passiveName: string;
   passiveText: string;
@@ -91,7 +93,7 @@ export interface FactionDef {
 
 export const FACTIONS: Record<FactionId, FactionDef> = {
   human: {
-    id: 'human', name: 'Люди', fantasy: 'Дисциплина, защита, свет', hero: 'human_knight', startWeapon: 'sword',
+    id: 'human', name: 'Люди', fantasy: 'Дисциплина, защита, свет', hero: 'human_knight', preview: ['paladin', 'hammer_human_paladin'], startWeapon: 'sword',
     passiveName: 'Святой щит',
     passiveText: 'Щит на 15% HP, восстанавливается через 6 с без урона. +10% HP, +10% реген.',
     color: '#3f7fd8',
@@ -100,7 +102,7 @@ export const FACTIONS: Record<FactionId, FactionDef> = {
     campfire: 'campfire',
   },
   orc: {
-    id: 'orc', name: 'Орки', fantasy: 'Ярость, натиск, сила', hero: 'orc_grunt', startWeapon: 'axe',
+    id: 'orc', name: 'Орки', fantasy: 'Ярость, натиск, сила', hero: 'orc_grunt', preview: ['orc_chieftain', 'axe_orc_chieftain'], startWeapon: 'axe',
     passiveName: 'Жажда крови',
     passiveText: 'Чем меньше HP, тем больше урон (до +30%). +10% урон, +5% скорость бега.',
     color: '#c0392b',
@@ -127,6 +129,8 @@ export interface MobDef {
   /** Fixed power orbs dropped on death (shown above the HP bar). */
   reward: Partial<Record<OrbKind, number>>;
   gold: [number, number];
+  /** Experience for the kill (bosses: x2 on the first kill). */
+  xp: number;
   respawn: number; // seconds
   boss?: BossDef;
 }
@@ -163,19 +167,19 @@ export const MOBS: Record<string, MobDef> = {
     id: 'bandit_thug', name: 'Разбойник',
     model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['peasant', 'axe'] },
     anim: 'AxeAttack', hp: 110, dmg: 9, aps: 0.7, range: 1.5, speed: 3.0, aggro: 7, scale: 1,
-    resist: { slash: 'weak' }, reward: { hp: 1, power: 1 }, gold: [1, 3], respawn: 45,
+    resist: { slash: 'weak' }, reward: { hp: 1, power: 1 }, gold: [1, 3], xp: 10, respawn: 45,
   },
   bandit_fighter: {
     id: 'bandit_fighter', name: 'Головорез',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
     anim: 'SwordAttack', hp: 220, dmg: 16, aps: 0.8, range: 1.6, speed: 3.4, aggro: 7.5, scale: 1.08,
-    resist: { slash: 'weak' }, reward: { power: 2, hp: 1 }, gold: [2, 5], respawn: 60,
+    resist: { slash: 'weak' }, reward: { power: 2, hp: 1 }, gold: [2, 5], xp: 16, respawn: 60,
   },
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
     anim: 'AxeAttack', hp: 5200, dmg: 30, aps: 0.6, range: 2.4, speed: 3.6, aggro: 9, scale: 1.9,
-    resist: { slash: 'weak' }, reward: { power: 5, hp: 4, regen: 2, speed: 2 }, gold: [60, 90], respawn: 180,
+    resist: { slash: 'weak' }, reward: { power: 5, hp: 4, regen: 2, speed: 2 }, gold: [60, 90], xp: 300, respawn: 180,
     boss: {
       ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest',
       slamRadius: 4.2, slamMul: 2.4, chaseMul: 1.4, phase2Dmg: 1.2,
@@ -185,25 +189,25 @@ export const MOBS: Record<string, MobDef> = {
     id: 'skeleton_worker', name: 'Мертвяк',
     model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
     anim: 'SwordAttack', hp: 140, dmg: 8, aps: 0.8, range: 1.4, speed: 2.8, aggro: 7, scale: 1,
-    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { regen: 1, hp: 1, power: 1 }, gold: [3, 6], respawn: 50,
+    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { regen: 1, hp: 1, power: 1 }, gold: [3, 6], xp: 22, respawn: 50,
   },
   skeleton_warrior: {
     id: 'skeleton_warrior', name: 'Скелет-копейщик',
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
     anim: 'SwordAttack', hp: 260, dmg: 15, aps: 0.75, range: 2.0, speed: 3.0, aggro: 8, scale: 1.08,
-    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { power: 2, hp: 1 }, gold: [4, 8], respawn: 70,
+    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { power: 2, hp: 1 }, gold: [4, 8], xp: 28, respawn: 70,
   },
   ghost: {
     id: 'ghost', name: 'Призрак',
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
     anim: 'SwordAttack', hp: 130, dmg: 14, aps: 1.0, range: 1.4, speed: 4.3, aggro: 9, scale: 1,
-    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { speed: 2, power: 1 }, gold: [4, 7], respawn: 60,
+    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { speed: 2, power: 1 }, gold: [4, 7], xp: 26, respawn: 60,
   },
   death: {
     id: 'death', name: 'Смерть',
     model: { human: ['undead_king', 'sword_undead_king'], orc: ['undead_king', 'sword_undead_king'] },
     anim: 'SwordAttack', hp: 4500, dmg: 19, aps: 0.6, range: 2.6, speed: 3.4, aggro: 10, scale: 2.1,
-    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { power: 8, hp: 6, regen: 3, speed: 3 }, gold: [150, 220], respawn: 300,
+    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { power: 8, hp: 6, regen: 3, speed: 3 }, gold: [150, 220], xp: 800, respawn: 300,
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery',
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,

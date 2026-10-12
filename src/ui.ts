@@ -12,7 +12,7 @@ import type { World } from './world';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toString();
-const STAT_ICON: Record<OrbKind, string> = { power: 'sword', hp: 'heart', regen: 'regen', speed: 'boot' };
+export const STAT_ICON: Record<OrbKind, string> = { power: 'sword', hp: 'heart', regen: 'regen', speed: 'boot' };
 
 export interface HudState {
   hp: number; maxHp: number; shield: number; shieldMax: number; gold: number;
@@ -33,6 +33,15 @@ function fmtTime(sec: number) {
   return `${s}s`;
 }
 
+/** One line of a dialogue; a line with choices waits for an answer (GDD 4.2: no wrong answers). */
+export interface DialogueLine {
+  who: string;
+  /** Art icon id (src/art.ts) shown in the round portrait. */
+  portrait: string;
+  text: string;
+  choices?: { text: string; then?: DialogueLine[] }[];
+}
+
 export class UI {
   readonly app = $('app');
   readonly modal = $('modal');
@@ -45,6 +54,10 @@ export class UI {
   onBag: () => void = () => {};
   onMap: () => void = () => {};
   onArmor: () => void = () => {};
+  onTalents: () => void = () => {};
+  onDebug: () => void = () => {};
+  private lastProgress = '';
+  private lastSkills = '';
   private swapCb: () => void = () => {};
   private mm = $<HTMLCanvasElement>('minimap').getContext('2d')!;
 
@@ -56,6 +69,7 @@ export class UI {
     $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('bosses').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('btn-settings').innerHTML = art('gear', 40);
+    $('lvl').addEventListener('click', () => { sfx.click(); this.onTalents(); });
     $('btn-char').insertAdjacentHTML('afterbegin', art('hero', 46));
     $('btn-bag').insertAdjacentHTML('afterbegin', art('bag', 48));
     $('btn-smith').insertAdjacentHTML('afterbegin', art('anvil', 32) + ' ');
@@ -104,6 +118,45 @@ export class UI {
     $('bosses').innerHTML = s.bosses.map((b) => `<div class="bw ui-block" title="${b.name}">
       ${b.left > 0 ? '' : '<div class="bw-ready">Готово!</div>'}${art('skull', 62, b.left > 0 ? 'dim' : '')}
       ${b.left > 0 ? `<div class="bw-time">${art('hourglass', 20)}${fmtTime(b.left)}</div>` : `<div class="bw-name">${b.name}</div>`}</div>`).join('');
+  }
+
+  /** Level badge + XP bar under the gold; "+N" when talent points are waiting. */
+  progress(level: number, xp: number, need: number, free: number) {
+    const key = `${level}|${xp}|${need}|${free}`;
+    if (key === this.lastProgress) return;
+    this.lastProgress = key;
+    const el = $('lvl');
+    (el.querySelector('.lv-badge') as HTMLElement).textContent = String(level);
+    (el.querySelector('.fill') as HTMLElement).style.width = `${need ? Math.min(100, (xp / need) * 100) : 100}%`;
+    (el.querySelector('span') as HTMLElement).textContent = need ? `${fmtK(xp)} / ${fmtK(need)}` : 'MAX';
+    el.dataset.badge = free > 0 ? `+${free}` : '';
+  }
+
+  /** The two equipped auto-cast skills with a cooldown sweep. */
+  skills(list: ({ id: string; icon: string; name: string; cd: number } | null)[]) {
+    const box = $('skills');
+    const key = list.map((x) => x?.id ?? '-').join('|');
+    if (key !== this.lastSkills) {
+      this.lastSkills = key;
+      box.innerHTML = list.map((x) => (x
+        ? `<div class="skill ui-block" data-skill="${x.id}" title="${x.name}">${art(x.icon, 40)}<i class="cd"></i></div>`
+        : '')).join('');
+      box.querySelectorAll('.skill').forEach((b) => b.addEventListener('click', () => { sfx.click(); this.onTalents(); }));
+    }
+    list.forEach((x) => {
+      if (!x) return;
+      const el = box.querySelector<HTMLElement>(`[data-skill="${x.id}"]`);
+      el?.style.setProperty('--cd', `${x.cd * 360}deg`);
+      el?.classList.toggle('ready', x.cd <= 0);
+    });
+  }
+
+  skillFlash(id: string) {
+    const el = $('skills').querySelector<HTMLElement>(`[data-skill="${id}"]`);
+    if (!el) return;
+    el.classList.remove('fire');
+    void el.offsetWidth;
+    el.classList.add('fire');
   }
 
   popStat(k: OrbKind) {
@@ -259,9 +312,10 @@ export class UI {
       <p>Управление: тяни палец в любом месте экрана (или WASD). Атака — автоматически. Смена оружия — тап по второму оружию внизу или Q.</p>
       <div class="row"><button class="btn" id="m-mute">${muted ? '🔇 Звук выкл' : '🔊 Звук вкл'}</button>
       <button class="btn" id="m-gfx">${lowGfx ? '🖥 Графика: низкая' : '🖥 Графика: высокая'}</button></div>
-      <div class="row"><button class="btn" id="m-kite">🐞 Анти-кайт: ${kite.label}</button></div>
+      <div class="row"><button class="btn purple" id="m-debug">🛠 Дебаг-меню</button><button class="btn" id="m-kite">🐞 Анти-кайт: ${kite.label}</button></div>
       <div class="row"><button class="btn" id="m-log">📊 Лог баланса</button><button class="btn danger" id="m-reset">Сбросить прогресс</button></div>
       <div class="row"><button class="btn primary" id="m-close">Продолжить</button></div></div>`);
+    this.on('#m-debug', () => { this.close(); close(); this.onDebug(); });
     this.on('#m-mute', () => { toggleMute(); this.close(); this.settings(!muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog, kite); });
     this.on('#m-gfx', () => { toggleGfx(); this.close(); this.settings(muted, !lowGfx, toggleMute, toggleGfx, reset, close, showLog, kite); });
     this.on('#m-reset', () => {
@@ -298,7 +352,77 @@ export class UI {
     this.on('#m-no', () => { this.close(); no(); });
   }
 
-  factionSelect(onPick: (f: FactionId) => void, onConfirm: (f: FactionId) => void) {
+  /**
+   * Bottom dialogue box: portrait, name, typed text (tap shows it at once), 1–3 answers and an
+   * always-visible "Пропустить" (GDD 4.2 / 6.2). `done` fires once, after the last line or a skip.
+   */
+  dialogue(lines: DialogueLine[], done: () => void) {
+    const queue = [...lines];
+    const box = document.createElement('div');
+    box.id = 'dialogue';
+    box.className = 'ui-block';
+    box.innerHTML = `<button class="btn dlg-skip">Пропустить</button>
+      <div class="dlg-who"><div class="dlg-portrait"></div><b></b></div>
+      <div class="dlg-text"></div><div class="dlg-choices"></div><div class="dlg-next"></div>`;
+    this.app.appendChild(box);
+    const who = box.querySelector('b')!;
+    const portrait = box.querySelector<HTMLElement>('.dlg-portrait')!;
+    const textEl = box.querySelector<HTMLElement>('.dlg-text')!;
+    const choicesEl = box.querySelector<HTMLElement>('.dlg-choices')!;
+    let line: DialogueLine | null = null;
+    let shown = 0;
+    let timer = 0;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearInterval(timer);
+      box.remove();
+      done();
+    };
+    const reveal = () => {
+      clearInterval(timer);
+      if (!line) return;
+      shown = line.text.length;
+      textEl.textContent = line.text;
+      box.classList.add('ready');
+      if (!line.choices) return;
+      choicesEl.innerHTML = line.choices.map((c, i) => `<button class="btn blue" data-i="${i}">${c.text}</button>`).join('');
+      choicesEl.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sfx.click();
+        queue.unshift(...(line!.choices![+b.dataset.i!].then ?? []));
+        next();
+      }));
+    };
+    const next = () => {
+      line = queue.shift() ?? null;
+      if (!line) { finish(); return; }
+      who.textContent = line.who;
+      portrait.innerHTML = art(line.portrait, 54);
+      choicesEl.innerHTML = '';
+      box.classList.toggle('ask', !!line.choices);
+      box.classList.remove('ready');
+      shown = 0;
+      textEl.textContent = '';
+      clearInterval(timer);
+      timer = window.setInterval(() => {
+        if (!line) return;
+        shown += 2;
+        textEl.textContent = line.text.slice(0, shown);
+        if (shown >= line.text.length) reveal();
+      }, 28);
+    };
+    box.addEventListener('click', () => {
+      if (!line) return;
+      if (shown < line.text.length) reveal();
+      else if (!line.choices) { sfx.click(); next(); }
+    });
+    box.querySelector('.dlg-skip')!.addEventListener('click', (e) => { e.stopPropagation(); sfx.click(); finish(); });
+    next();
+  }
+
+  factionSelect(onPick: (f: FactionId) => void, onConfirm: (f: FactionId) => void, lead = '') {
     let sel: FactionId | null = null;
     const card = (f: FactionId) => {
       const d = FACTIONS[f];
@@ -308,7 +432,7 @@ export class UI {
         <div class="pas">${d.passiveName}</div><div>${d.passiveText}</div>
         <div class="pas">Старт: ${art(w.id, 22)} ${w.name}</div></div>`;
     };
-    this.open(`<div class="factions ui-block"><h1>Выбери, чьим воином вернёшься</h1>
+    this.open(`<div class="factions ui-block">${lead ? `<p class="lead">${lead}</p>` : ''}<h1>Выбери, чьим воином вернёшься</h1>
       <div class="fcards">${card('human')}${card('orc')}</div>
       <button class="btn primary" id="m-go" disabled>Воскреснуть</button></div>`, true);
     const go = this.modal.querySelector<HTMLButtonElement>('#m-go')!;
@@ -322,7 +446,7 @@ export class UI {
     go.addEventListener('click', () => {
       if (!sel) return;
       const f = sel;
-      this.confirm(`${FACTIONS[f].name}?`, 'Выбор делается один раз и навсегда.', () => onConfirm(f), () => this.factionSelect(onPick, onConfirm));
+      this.confirm(`${FACTIONS[f].name}?`, 'Выбор делается один раз и навсегда.', () => onConfirm(f), () => this.factionSelect(onPick, onConfirm, lead));
     });
   }
 
