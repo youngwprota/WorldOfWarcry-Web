@@ -540,8 +540,10 @@ export class Game {
     const arc = fin ? fin.arc : w.arc;
     const range = w.range + (fin ? fin.rangeAdd : 0);
     let hits = 0;
+    const only = !fin && w.single ? this.target?.ref : null;
     sfx.swing();
     for (const m of this.mobs) {
+      if (only && m !== only) continue;
       if (!m.alive || !m.awake || m.rise > 0 || !this.inShape(m.pos, m.radius, shape, arc, range)) continue;
       const { dmg, tier } = this.damageFor(w.type, m.def.resist, fin ? fin.mult : 1);
       const f = this.fightOf(m);
@@ -555,6 +557,7 @@ export class Game {
       hits++;
     }
     for (const b of this.props) {
+      if (only && b !== only) continue;
       if (!b.alive || !this.inShape(b.pos, b.radius, shape, arc, range)) continue;
       this.hitProp(b, (fin ? 3 : 1) * RESIST_MULT[b.def.resist[w.type] ?? 'normal'], b.def.resist[w.type] ?? 'normal');
       hits++;

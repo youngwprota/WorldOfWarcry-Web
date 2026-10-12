@@ -34,12 +34,14 @@ export interface WeaponDef {
   model: Record<FactionId, string>;
   icon: string;
   stun?: number; // chance
+  /** Plain swings hit only the current target (the combo finisher still hits an area). */
+  single?: boolean;
 }
 
 export const WEAPONS: Record<string, WeaponDef> = {
   sword: {
     id: 'sword', name: 'Меч', type: 'slash', dmg: 20, aps: 1.15, shape: 'arc', arc: 140, range: 2.3,
-    anim: 'SwordAttack', model: { human: 'sword_human_knight', orc: 'sword_orc_warrior' }, icon: '🗡️',
+    anim: 'SwordAttack', model: { human: 'sword_human_knight', orc: 'sword_orc_warrior' }, icon: '🗡️', single: true,
   },
   axe: {
     id: 'axe', name: 'Топор', type: 'slash', dmg: 25, aps: 0.95, shape: 'arc', arc: 160, range: 2.3,
@@ -160,13 +162,13 @@ export const MOBS: Record<string, MobDef> = {
   bandit_thug: {
     id: 'bandit_thug', name: 'Разбойник',
     model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['peasant', 'axe'] },
-    anim: 'AxeAttack', hp: 56, dmg: 6, aps: 0.7, range: 1.5, speed: 3.0, aggro: 7, scale: 1,
+    anim: 'AxeAttack', hp: 110, dmg: 9, aps: 0.7, range: 1.5, speed: 3.0, aggro: 7, scale: 1,
     resist: { slash: 'weak' }, reward: { hp: 1, power: 1 }, gold: [1, 3], respawn: 45,
   },
   bandit_fighter: {
     id: 'bandit_fighter', name: 'Головорез',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 110, dmg: 10, aps: 0.8, range: 1.6, speed: 3.4, aggro: 7.5, scale: 1.08,
+    anim: 'SwordAttack', hp: 220, dmg: 16, aps: 0.8, range: 1.6, speed: 3.4, aggro: 7.5, scale: 1.08,
     resist: { slash: 'weak' }, reward: { power: 2, hp: 1 }, gold: [2, 5], respawn: 60,
   },
   bandit_chief: {
@@ -211,9 +213,9 @@ export const MOBS: Record<string, MobDef> = {
 
 export type OrbKind = 'power' | 'hp' | 'regen' | 'speed';
 export const ORBS: Record<OrbKind, { color: number; css: string; label: string; value: number; unit: string }> = {
-  power: { color: 0xff3b3b, css: '#ff4d4d', label: 'Урон', value: 1, unit: '' },
-  hp: { color: 0x39e05a, css: '#4cff6a', label: 'Здоровье', value: 3, unit: '' },
-  regen: { color: 0x3cc8ff, css: '#4fd2ff', label: 'Реген', value: 0.05, unit: '%/с' },
+  power: { color: 0xff3b3b, css: '#ff4d4d', label: 'Урон', value: 0.6, unit: '' },
+  hp: { color: 0x39e05a, css: '#4cff6a', label: 'Здоровье', value: 2, unit: '' },
+  regen: { color: 0x3cc8ff, css: '#4fd2ff', label: 'Реген', value: 0.02, unit: '%/с' },
   speed: { color: 0xffd23c, css: '#ffd84d', label: 'Скорость', value: 0.05, unit: ' м/с' },
 };
 export const fmtOrb = (k: OrbKind, n = 1) => `+${+(ORBS[k].value * n).toFixed(2)}`;
