@@ -34,3 +34,12 @@ export function rewardChips(def: Target) {
     .map(([k, n]) => `<span class="rw" style="color:${ORBS[k].css}" title="${ORBS[k].label}"><i style="background:${ORBS[k].css}"></i>${fmtOrb(k, n)}</span>`)
     .join('');
 }
+
+/** Butcher-style compact numbers: 950, 3.05K, 33.5K, 1.2M. */
+export function fmtK(n: number) {
+  const a = Math.abs(n);
+  if (a < 1000) return String(Math.round(n * 10) / 10);
+  const [v, s] = a < 1e6 ? [n / 1e3, 'K'] : [n / 1e6, 'M'];
+  const d = Math.abs(v) < 10 ? 2 : Math.abs(v) < 100 ? 1 : 0;
+  return +v.toFixed(d) + s;
+}

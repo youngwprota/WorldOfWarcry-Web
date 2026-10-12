@@ -1,3 +1,6 @@
+import '@fontsource/rubik/600.css';
+import '@fontsource/rubik/700.css';
+import '@fontsource/rubik/900.css';
 import * as THREE from 'three';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
