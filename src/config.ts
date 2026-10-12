@@ -201,8 +201,8 @@ export const MOBS: Record<string, MobDef> = {
 
 export type OrbKind = 'power' | 'hp' | 'regen' | 'speed';
 export const ORBS: Record<OrbKind, { color: number; css: string; label: string; value: number; unit: string }> = {
-  power: { color: 0xff3b3b, css: '#ff4d4d', label: 'Урон', value: 2, unit: '' },
-  hp: { color: 0x39e05a, css: '#4cff6a', label: 'Здоровье', value: 6, unit: '' },
+  power: { color: 0xff3b3b, css: '#ff4d4d', label: 'Урон', value: 1, unit: '' },
+  hp: { color: 0x39e05a, css: '#4cff6a', label: 'Здоровье', value: 3, unit: '' },
   regen: { color: 0x3cc8ff, css: '#4fd2ff', label: 'Реген', value: 0.05, unit: '%/с' },
   speed: { color: 0xffd23c, css: '#ffd84d', label: 'Скорость', value: 0.05, unit: ' м/с' },
 };
