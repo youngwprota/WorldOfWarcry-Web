@@ -22,13 +22,16 @@
 }
 .stroke { color: #fff; text-shadow: var(--stroke); }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; height: 100%; background: radial-gradient(circle at 50% 30%, #2c2a3a, #111018); color: var(--text); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+/* fixed body: no page scroll / rubber-band on iOS, size = visible area (follows the address bar) */
+html, body { margin: 0; height: 100%; overscroll-behavior: none; background: radial-gradient(circle at 50% 30%, #2c2a3a, #111018); color: var(--text); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+body { position: fixed; inset: 0; }
 button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Portrait play area: full screen on phones, 9:16 column on desktop. */
 #app {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  height: 100%; width: min(100%, calc(100vh * 9 / 16)); max-width: 100%;
+  height: 100%; width: min(100%, calc(100vh * 9 / 16)); width: min(100%, calc(100dvh * 9 / 16)); max-width: 100%;
   overflow: hidden; background: var(--bg); box-shadow: 0 0 60px #000a;
 }
 @media (max-aspect-ratio: 9/16) { #app { width: 100%; height: 100%; } }
