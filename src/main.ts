@@ -11,6 +11,7 @@ import { Input } from './input';
 import { Inventory } from './inventory';
 import { MapView } from './mapview';
 import { clearSave, loadSave, newSave, writeSave } from './save';
+import { clearLog, report } from './balancelog';
 import { UI } from './ui';
 import { BREAKABLES } from './world';
 
@@ -94,7 +95,7 @@ function startGame(faction: FactionId, fresh: boolean) {
   addEventListener('keydown', (e) => {
     if (inv.isOpen && (e.code === 'Escape' || e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyB')) inv.close();
   });
-  ui.onSettings = () => {
+  ui.onSettings = function open() {
     if (!game) return;
     game.paused = true;
     input.reset();
@@ -106,8 +107,9 @@ function startGame(faction: FactionId, fresh: boolean) {
       // Drop the game first: reload fires visibilitychange(hidden), whose persist() would rewrite the save.
       game = null;
       clearSave();
+      clearLog();
       location.reload();
-    }, () => { if (game) game.paused = false; });
+    }, () => { if (game) game.paused = false; }, () => ui.balanceLog(report(), open));
   };
   if (fresh) {
     ui.flash();

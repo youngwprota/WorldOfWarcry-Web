@@ -14,6 +14,8 @@ export interface SaveData {
   /** Real-time stamps (ms) so bosses come back while the game is closed (GDD 3.2). */
   bosses: Record<string, { firstKill: boolean; deadUntil: number }>;
   kills: number;
+  /** Seconds of actual play (balance log). */
+  playTime?: number;
   muted: boolean;
   lowGfx?: boolean;
 }

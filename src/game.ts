@@ -16,6 +16,10 @@ import { BREAKABLES, World, makeBreakable, type BreakableDef, type BreakableSpot
 import { UI } from './ui';
 import { resistIcons, rewardChips } from './icons';
 import { seeThrough } from './seethrough';
+import { heroDeaths, logFight, logSnap } from './balancelog';
+
+/** Running counters of one fight with a mob (balance log). */
+interface FightStat { t0: number; dealt: number; taken: number; hits: number; combos: number; slams: number; slamHits: number; hpStart: number }
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
@@ -50,6 +54,7 @@ class Mob {
   special = 4;
   /** Game time of the last hit taken (boss regen). */
   hurtAt = -99;
+  fight: FightStat | null = null;
   casting = 0;
   phase2 = false;
   awake = true;
@@ -318,6 +323,9 @@ export class Game {
     if (this.paused) { this.render(0); return; }
     dt = Math.min(dt, 1 / 20);
     this.time += dt;
+    const played = this.save.playTime ?? 0;
+    this.save.playTime = played + dt;
+    if (Math.floor(this.save.playTime / 60) > Math.floor(played / 60)) this.snapshot();
     if (this.input.pressed('KeyQ') || this.input.pressed('Space')) this.swapWeapon();
     if (this.input.pressed('KeyI') || this.input.pressed('KeyC')) { this.onOpenCharacter(); return; }
     if (this.input.pressed('KeyB')) { this.onOpenBag(); return; }
@@ -536,6 +544,9 @@ export class Game {
     for (const m of this.mobs) {
       if (!m.alive || !m.awake || m.rise > 0 || !this.inShape(m.pos, m.radius, shape, arc, range)) continue;
       const { dmg, tier } = this.damageFor(w.type, m.def.resist, fin ? fin.mult : 1);
+      const f = this.fightOf(m);
+      f.hits++;
+      if (fin) f.combos++;
       this.damageMob(m, dmg, tier, fin ? fin.knock : 3.5);
       if (m.alive && !m.def.boss) {
         if (fin?.stun) m.stun = Math.max(m.stun, fin.stun);
@@ -567,6 +578,7 @@ export class Game {
   }
 
   private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5) {
+    this.fightOf(m).dealt += Math.min(dmg, m.hp);
     m.hp -= dmg;
     m.hurtAt = this.time;
     m.ch.hit();
@@ -590,6 +602,7 @@ export class Game {
     m.hpEl.classList.remove('show');
     m.respawnTotal = m.def.respawn;
     this.save.kills++;
+    this.endFight(m, 'kill');
     if (this.target?.ref === m) this.target = null;
     const d = m.def;
     for (const [k, n] of Object.entries(d.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(m.pos, k);
@@ -725,6 +738,7 @@ export class Game {
         } else if (m.state === 'chase') {
           if (this.dead || heroInCamp || dSpawn > leash || hp.distanceTo(m.spawn) > leash + 4) {
             m.state = 'return';
+            this.endFight(m, 'reset');
           } else {
             const reach = def.range + m.radius * 0.5 + HERO.radius;
             if (def.boss) {
@@ -755,7 +769,7 @@ export class Game {
         m.impact -= dt;
         if (m.impact < 0 && !this.dead && m.stun <= 0) {
           const reach = def.range + m.radius * 0.5 + HERO.radius + 0.5;
-          if (m.pos.distanceTo(hp) < reach) this.hurtHero(def.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos);
+          if (m.pos.distanceTo(hp) < reach) this.hurtHero(def.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos, m);
         }
       }
       // knockback
@@ -858,7 +872,12 @@ export class Game {
         sfx.slam();
         this.shake = Math.max(this.shake, 0.45);
         this.particles.burst(v2.copy(at).setY(0.2), 0x8a7a6a, 14, 0.18, 7, 0.7);
-        if (!this.dead && this.hero.position.distanceTo(at) < radius + HERO.radius) this.hurtHero(m.def.dmg * dmgMul, at);
+        const f = this.fightOf(m);
+        f.slams++;
+        if (!this.dead && this.hero.position.distanceTo(at) < radius + HERO.radius) {
+          f.slamHits++;
+          this.hurtHero(m.def.dmg * dmgMul, at, m);
+        }
       });
     };
     sfx.telegraph();
@@ -878,6 +897,7 @@ export class Game {
   }
 
   private respawnMob(m: Mob) {
+    m.fight = null;
     m.state = 'idle';
     m.hp = m.maxHp;
     m.phase2 = false;
@@ -889,11 +909,12 @@ export class Game {
     m.ch.root.visible = true;
   }
 
-  private hurtHero(raw: number, from: THREE.Vector3) {
+  private hurtHero(raw: number, from: THREE.Vector3, src?: Mob) {
     if (this.dead) return;
     // GDD 10.5: reduction = defense / (defense + 100)
     let dmg = Math.max(1, Math.round(raw * (100 / (100 + this.defense)) * (0.9 + Math.random() * 0.2)));
     this.lastHurt = this.lastFight = this.time;
+    if (src) this.fightOf(src).taken += Math.min(dmg, this.hp + this.shield);
     if (this.shield > 0) {
       const absorbed = Math.min(this.shield, dmg);
       this.shield -= absorbed;
@@ -909,6 +930,7 @@ export class Game {
     this.ui.hurtFlash();
     if (this.hp <= 0) {
       this.hp = 0;
+      for (const m of this.mobs) this.endFight(m, 'death');
       this.dead = true;
       this.deadT = 0;
       this.target = null;
@@ -1247,6 +1269,33 @@ export class Game {
   }
 
   persist() { writeSave(this.save); }
+
+  // ---------- balance log ----------
+  private fightOf(m: Mob) {
+    return (m.fight ??= { t0: this.time, dealt: 0, taken: 0, hits: 0, combos: 0, slams: 0, slamHits: 0, hpStart: this.hp });
+  }
+
+  private endFight(m: Mob, result: 'kill' | 'reset' | 'death') {
+    const f = m.fight;
+    if (!f) return;
+    m.fight = null;
+    logFight({
+      t: this.save.playTime ?? 0, mob: m.def.id, boss: !!m.def.boss, result, dur: +(this.time - f.t0).toFixed(1),
+      dealt: Math.round(f.dealt), taken: Math.round(f.taken), hits: f.hits, combos: f.combos, slams: f.slams, slamHits: f.slamHits,
+      hpStart: Math.round(f.hpStart), hpEnd: Math.round(this.hp), maxHp: this.maxHp, power: Math.round(this.power),
+    });
+  }
+
+  private snapshot() {
+    const it = this.weaponItem;
+    const ttk: Record<string, number> = {};
+    for (const d of Object.values(MOBS)) if (d.boss) ttk[d.id] = d.hp / Math.max(1, this.heroDps(this.weapon.type, d.resist));
+    logSnap({
+      t: Math.round(this.save.playTime ?? 0), zone: this.zone?.id ?? '?', power: this.power, maxHp: this.maxHp, regen: this.regen,
+      gold: this.save.gold, kills: this.save.kills, deaths: heroDeaths(),
+      weapon: `${it.def} r${it.rarity} lv${it.lvl}${it.sharpen ? ` +${it.sharpen}` : ''}`, ttk,
+    });
+  }
 }
 
 
