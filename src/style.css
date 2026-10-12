@@ -555,3 +555,82 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .sheet .grid { grid-template-columns: repeat(5, 1fr); gap: 8px; }
 .sheet .grid .cell .lv { font-size: 16px; }
 .sheet-body { padding-bottom: 22px; }
+
+/* ---------- wood & gloss skin (reference: Butcher Hero) ---------- */
+:root {
+  /* wood grain: stretched fractal noise, drawn once as a background image */
+  --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='180'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.006 0.11' numOctaves='3' seed='7'/><feColorMatrix values='0 0 0 0 0.23  0 0 0 0 0.12  0 0 0 0 0.05  0 0 0 0.9 -0.18'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+  --planks: repeating-linear-gradient(180deg, transparent 0 42px, #00000055 42px 44px, #ffffff1c 44px 45px, transparent 45px 46px);
+  --bolt: #f1d3a0 0 2px, #7a5432 2.5px 4px, #2a180c 4.5px 5.5px, transparent 6px;
+  --bolts: radial-gradient(circle at 14px 14px, var(--bolt)), radial-gradient(circle at calc(100% - 14px) 14px, var(--bolt)),
+    radial-gradient(circle at 14px calc(100% - 14px), var(--bolt)), radial-gradient(circle at calc(100% - 14px) calc(100% - 14px), var(--bolt));
+  --bolts-top: radial-gradient(circle at 18px 18px, var(--bolt)), radial-gradient(circle at calc(100% - 18px) 18px, var(--bolt));
+  --gloss: linear-gradient(#ffffff4d, #ffffff10 46%, #ffffff00 47%);
+  --wood-light: linear-gradient(#a8774c, #8a5d3a);
+  --wood-mid: linear-gradient(#94653f, #74502f);
+  --wood-deep: linear-gradient(#5a3b26, #432a1a);
+}
+/* panels: planks + grain + corner bolts */
+.panel, .tip, .fcard { background: var(--bolts), var(--grain), var(--planks), var(--wood-mid); background-size: auto, 360px 180px, auto, auto; }
+.sheet { background: var(--bolts-top), var(--grain), var(--planks), var(--wood-mid); background-size: auto, 360px 180px, auto, auto; box-shadow: inset 0 4px 0 #ffffff2e, inset 0 0 0 3px #c48a5240, 0 -10px 40px #000a; }
+.shop-card { background: var(--grain), var(--wood-light); background-size: 360px 180px, auto; }
+.top-stats { background: var(--grain), var(--planks), linear-gradient(#4b3020f0, #362114f0); background-size: 360px 180px, auto, auto; border: 4px solid var(--ink); box-shadow: inset 0 3px 0 #ffffff1f, inset 0 0 0 3px #c48a5230, 0 6px 0 #0007; }
+.well, .stat-card { background: var(--grain), var(--wood-deep); background-size: 360px 180px, auto; box-shadow: inset 0 4px 0 #0005, inset 0 0 0 2px #0003, 0 2px 0 #ffffff1f; }
+.equipped { background: var(--grain), var(--planks), var(--wood-deep); background-size: 360px 180px, auto, auto; box-shadow: inset 0 3px 0 #ffffff1a; }
+#equipbar { background: var(--grain), linear-gradient(#3e271800, #3e2718e6 30%, #2a1a0ff2); background-size: 360px 180px, auto; border-top: 0; }
+.chip, .top-stats .chip { background: var(--gloss), var(--grain), var(--wood-light); background-size: auto, 360px 180px, auto; border: 3px solid var(--ink); box-shadow: inset 0 -4px 0 #0003, 0 3px 0 #0006; }
+.sc-name { background: var(--grain), var(--wood-deep); background-size: 360px 180px, auto; border: 2px solid #0006; }
+.pills span { background: var(--grain), var(--wood-deep); background-size: 360px 180px, auto; border: 2px solid #0006; }
+.divider::before, .divider::after { height: 6px; border-radius: 3px; background: var(--wood-deep); box-shadow: inset 0 2px 0 #0005, 0 1px 0 #ffffff26; }
+.divider span::before, .divider span::after { content: '◆'; color: #c48a52; margin: 0 8px; font-size: 12px; text-shadow: var(--stroke-s); }
+.char .paper { background: radial-gradient(ellipse at 50% 70%, #ffd9a033 0%, transparent 60%), var(--grain), var(--wood-deep); background-size: auto, 360px 180px, auto; box-shadow: inset 0 6px 14px #0008; }
+.cell.empty { background: var(--grain), var(--wood-deep); background-size: 360px 180px, auto; box-shadow: inset 0 4px 0 #0005; }
+/* glossy candy surfaces */
+.btn, .xbtn, .side-btn, .tab.on, .tab.hero { background: var(--gloss), linear-gradient(var(--c1), var(--c2)); }
+.tab { background: var(--gloss), var(--grain), var(--wood-light); background-size: auto, 360px 180px, auto; }
+.tab.on { --c1: #ffe04a; --c2: #ffa412; }
+.tab.hero { --c1: #6fd77a; --c2: #2c9b48; }
+.round-btn { background: var(--gloss), radial-gradient(circle at 50% 35%, #7d8899, #3c4350); }
+.cell:not(.empty) { background: var(--gloss), radial-gradient(circle at 50% 38%, var(--c1) 0%, var(--c2) 85%); }
+.cell.r3:not(.empty), .cell.r2:not(.empty) { background: var(--gloss), radial-gradient(circle at 50% 42%, #ffffff55 0 18%, transparent 46%), radial-gradient(circle at 50% 38%, var(--c1) 0%, var(--c2) 85%); }
+.ribbon { background: var(--gloss), linear-gradient(#ff8fd0, #d94aa6); position: relative; }
+.pill, #goal, #buffs div, .bw-time { background: linear-gradient(#3e2718e0, #24160ee0); border: 2px solid #000000aa; box-shadow: inset 0 2px 0 #ffffff1a; }
+.bw-ready { background: var(--gloss), linear-gradient(#8cf26a, #2fb847); }
+#loading { background: var(--grain), var(--planks), var(--wood-deep); background-size: 360px 180px, auto, auto; }
+#minimap, #bigmap { box-shadow: 0 0 0 5px #b07a48, 0 0 0 6px #7a4f2c, 0 0 0 9px var(--ink), 0 6px 14px #0009; }
+
+/* bigger top icons and numbers: fill the space like the reference */
+.top-stats { padding: 10px 10px 14px; }
+.top-stats .sc-title { font-size: 28px; }
+.top-stats .big-stats { display: grid; grid-template-columns: repeat(3, 1fr); margin: 6px 0 14px; }
+.top-stats .big-stats div { justify-content: center; gap: 0; }
+.top-stats .big-stats .svgi { width: 62px; height: 62px; margin-right: -4px; }
+.top-stats .big-stats b { font-size: 31px; letter-spacing: -0.5px; }
+.top-stats .big-stats span { font-size: 14px; left: 4px; bottom: -6px; }
+.top-stats .chips { gap: 8px; }
+.top-stats .chip { min-height: 56px; gap: 4px; padding: 6px 4px; }
+.top-stats .chip .svgi { width: 40px; height: 40px; }
+.top-stats .chip b { font-size: 23px; }
+.top-stats .chip small { font-size: 12px; }
+#stats { font-size: 23px; gap: 8px 18px; }
+#stats .svgi { width: 34px; height: 34px; }
+.round-btn { width: 64px; height: 64px; }
+.round-btn .svgi { width: 46px; height: 46px; }
+.pill { height: 44px; font-size: 24px; }
+.pill .svgi { width: 34px; height: 34px; }
+.side-btn .svgi { width: 56px; height: 56px; }
+.tab .svgi { width: 38px; height: 38px; }
+.cell .ic.art { width: 78%; height: 78%; }
+/* layer counts: --bolts = 4 layers, --bolts-top = 2 layers */
+.panel, .tip, .fcard { background-size: auto, auto, auto, auto, 360px 180px, auto, auto; background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, repeat, repeat, repeat; }
+.sheet { background-size: auto, auto, 360px 180px, auto, auto; background-repeat: no-repeat, no-repeat, repeat, repeat, repeat; }
+.top-stats { margin-top: calc(6px + env(safe-area-inset-top)); padding: 6px 8px 10px; }
+.top-stats .sc-title { font-size: 25px; }
+.top-stats .sc-title small { display: none; }
+.top-stats .big-stats { margin: 2px 0 10px; }
+.top-stats .big-stats .svgi { width: 56px; height: 56px; margin-right: -2px; }
+.top-stats .big-stats b { font-size: 28px; }
+.top-stats .chip { min-height: 50px; }
+.top-stats .chip .svgi { width: 38px; height: 38px; }
+.top-stats .chip b { font-size: 22px; }
+.sheet { margin-top: 40px; }
