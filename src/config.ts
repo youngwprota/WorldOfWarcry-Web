@@ -6,6 +6,9 @@ export type FactionId = 'human' | 'orc';
 export type ZoneId = 'camp' | 'forest' | 'cemetery';
 export type AttackAnim = 'SwordAttack' | 'AxeAttack';
 
+/** HUD and windows are laid out in px for this screen; on a smaller screen they shrink as a whole (src/ui.ts fit). */
+export const UI_BASE = { w: 400, h: 720 };
+
 export const RESIST_MULT: Record<ResistTier, number> = { weak: 1.5, normal: 1, resist: 0.5, immune: 0.25 };
 export const DAMAGE_TYPE_NAME: Record<DamageType, string> = {
   slash: 'режущий', crush: 'дробящий', pierce: 'колющий', fire: 'огонь',

@@ -33,9 +33,9 @@
 ## Шаги
 - [x] 1. Диагностика: npm run dev, в браузере размеры 360×640, 375×667, 390×664 (Safari с панелями), 412×915
   и ландшафт 844×390. Скриншоты HUD, сумки, окна героя, талантов, пролога. Список проблем → handoff.
-- [ ] 2. Viewport: `dvh` в `#app`, body `position: fixed`, `text-size-adjust`, запрет overscroll. Проверить,
+- [x] 2. Viewport: `dvh` в `#app`, body `position: fixed`, `text-size-adjust`, запрет overscroll. Проверить,
   что канвас и `#app` совпадают с видимой областью.
-- [ ] 3. `UI_BASE` в config.ts. resize() в main.ts считает s и пишет `--ui` на `#app`, а `ui.scale` читают
+- [x] 3. `UI_BASE` в config.ts. resize() в main.ts считает s и пишет `--ui` на `#app`, а `ui.scale` читают
   стрелки.
 - [ ] 4. CSS-масштаб для `#hud`, `#modal`, `#dialogue`, `.ad-overlay`, `#debug` (если мешает). Проверить, что тапы
   попадают в кнопки и джойстик работает (input.ts берёт rect `#app`, его не масштабируем).

@@ -34,6 +34,7 @@ function resize() {
   const w = app.clientWidth;
   const h = app.clientHeight;
   renderer.setSize(w, h, false);
+  ui.fit();
   return { w, h };
 }
 addEventListener('resize', resize);
