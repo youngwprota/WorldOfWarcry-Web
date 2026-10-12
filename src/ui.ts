@@ -1,27 +1,42 @@
 import * as THREE from 'three';
 import {
-  DAMAGE_TYPE_COLOR, DAMAGE_TYPE_NAME, FACTIONS, ORBS, RARITY, SHARPEN, WEAPONS, WORLD, ZONES,
+  DAMAGE_TYPE_NAME, FACTIONS, SHARPEN, WEAPONS, WORLD, ZONES,
   type FactionId, type OrbKind, type ZoneDef,
 } from './config';
-import { scrapValue, type Item } from './items';
-import { resistIcons, rewardChips } from './icons';
+import { ARMOR_SLOTS, cellHtml, scrapValue, type ArmorSlot, type Item } from './items';
+import { DAMAGE_TYPE_ICON, fmtK, icon, resistIcons, rewardChips } from './icons';
+import { art } from './art';
 import type { MobDef } from './config';
 import { sfx } from './audio';
 import type { World } from './world';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toString();
+export const STAT_ICON: Record<OrbKind, string> = { power: 'sword', hp: 'heart', regen: 'regen', speed: 'boot' };
 
 export interface HudState {
   hp: number; maxHp: number; shield: number; shieldMax: number; gold: number;
   stats: { power: number; hp: number; regen: number; speed: number };
   goal: string;
   buffs: string[];
+  /** Boss widgets on the left: seconds until respawn, 0 = alive. */
+  bosses: { name: string; left: number }[];
+}
+
+/** Butcher-style timer: 9h 23m, 4m 05s, 12s. */
+function fmtTime(sec: number) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${String(s).padStart(2, '0')}s`;
+  return `${s}s`;
 }
 
 /** One line of a dialogue; a line with choices waits for an answer (GDD 4.2: no wrong answers). */
 export interface DialogueLine {
   who: string;
+  /** Art icon id (src/art.ts) shown in the round portrait. */
   portrait: string;
   text: string;
   choices?: { text: string; then?: DialogueLine[] }[];
@@ -38,6 +53,7 @@ export class UI {
   onCharacter: () => void = () => {};
   onBag: () => void = () => {};
   onMap: () => void = () => {};
+  onArmor: () => void = () => {};
   private swapCb: () => void = () => {};
   private mm = $<HTMLCanvasElement>('minimap').getContext('2d')!;
 
@@ -47,9 +63,20 @@ export class UI {
     $('btn-char').addEventListener('click', () => { sfx.click(); this.onCharacter(); });
     $('btn-bag').addEventListener('click', () => { sfx.click(); this.onBag(); });
     $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
+    $('bosses').addEventListener('click', () => { sfx.click(); this.onMap(); });
+    $('btn-settings').innerHTML = art('gear', 40);
+    $('btn-char').insertAdjacentHTML('afterbegin', art('hero', 46));
+    $('btn-bag').insertAdjacentHTML('afterbegin', art('bag', 48));
+    $('btn-smith').insertAdjacentHTML('afterbegin', art('anvil', 32) + ' ');
+    $('gold').querySelector('i')!.outerHTML = art('coin', 28);
+    $('armorbar').addEventListener('click', (e) => {
+      if (!(e.target as HTMLElement).closest('[data-armor]')) return;
+      sfx.click();
+      this.onArmor();
+    });
     const stats = $('stats');
     stats.innerHTML = (['power', 'hp', 'regen', 'speed'] as OrbKind[])
-      .map((k) => `<div class="st" data-k="${k}"><i style="background:${ORBS[k].css}"></i><span></span></div>`)
+      .map((k) => `<div class="st" data-k="${k}">${art(STAT_ICON[k], 26)}<span></span></div>`)
       .join('');
   }
 
@@ -73,16 +100,19 @@ export class UI {
     (hp.querySelector('.fill') as HTMLElement).style.width = `${(s.hp / s.maxHp) * 100}%`;
     (hp.querySelector('.shield') as HTMLElement).style.width = `${(s.shield / Math.max(1, total)) * 100}%`;
     (hp.querySelector('span') as HTMLElement).textContent = `${Math.ceil(s.hp)} / ${s.maxHp}${s.shield > 0 ? `  +${Math.ceil(s.shield)}🛡` : ''}`;
-    $('gold').textContent = String(s.gold);
+    ($('gold').querySelector('span') as HTMLElement).textContent = fmtK(s.gold);
     const st = s.stats;
     const vals: Record<OrbKind, string> = {
-      power: `Урон ${st.power}`, hp: `HP ${st.hp}`, regen: `Реген ${fmt1(st.regen)}%/с`, speed: `Бег ${fmt1(st.speed)} м/с`,
+      power: fmtK(st.power), hp: fmtK(st.hp), regen: `${fmt1(st.regen)}%`, speed: fmt1(st.speed),
     };
     $('stats').querySelectorAll<HTMLElement>('.st').forEach((el) => {
       (el.querySelector('span') as HTMLElement).textContent = vals[el.dataset.k as OrbKind];
     });
     $('goal').innerHTML = s.goal;
     $('buffs').innerHTML = s.buffs.map((b) => `<div>${b}</div>`).join('');
+    $('bosses').innerHTML = s.bosses.map((b) => `<div class="bw ui-block" title="${b.name}">
+      ${b.left > 0 ? '' : '<div class="bw-ready">Готово!</div>'}${art('skull', 62, b.left > 0 ? 'dim' : '')}
+      ${b.left > 0 ? `<div class="bw-time">${art('hourglass', 20)}${fmtTime(b.left)}</div>` : `<div class="bw-name">${b.name}</div>`}</div>`).join('');
   }
 
   popStat(k: OrbKind) {
@@ -105,30 +135,24 @@ export class UI {
     b.dataset.badge = full ? '!' : n > 0 ? String(n) : '';
   }
 
-  weapons(items: (Item | null)[], active: number, dmg: (it: Item) => number) {
+  /** Bottom "equipped" bar: two weapons (tap the other one to swap) and the six armour slots. */
+  weapons(items: (Item | null)[], active: number, dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>) {
     const box = $('weapons');
-    box.innerHTML = '';
-    // inactive slot first so the active one sits in the corner under the thumb
-    const order = active === 0 ? [1, 0] : [0, 1];
-    for (const i of order) {
+    box.innerHTML = [0, 1].map((i) => {
       const it = items[i];
-      const b = document.createElement('button');
-      b.className = 'wslot' + (i === active ? ' active' : '') + (it ? '' : ' empty');
-      if (it) {
-        const w = WEAPONS[it.def];
-        b.style.borderColor = RARITY[it.rarity].color;
-        b.innerHTML = `${w.icon}<span class="t" style="color:${DAMAGE_TYPE_COLOR[w.type]}">${DAMAGE_TYPE_NAME[w.type]}</span>` +
-          (it.sharpen ? `<span class="lvl">+${it.sharpen}</span>` : '') + (i !== active ? '<span class="swap">⇄</span>' : '');
-        b.title = `${w.name}: ${Math.round(dmg(it))} урона`;
-      } else {
-        b.textContent = 'пусто';
-      }
-      if (i !== active && it) b.addEventListener('click', () => this.swapCb());
-      box.appendChild(b);
-    }
+      const on = i === active;
+      const tag = !on && it ? '<span class="swap">⇄</span>' : '';
+      const title = it ? `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"` : '';
+      return cellHtml(it, `data-w="${i}" ${title}`, 'sword', tag, on ? 'wslot active' : 'wslot');
+    }).join('');
+    box.querySelectorAll<HTMLElement>('[data-w]').forEach((b) => {
+      if (+b.dataset.w! !== active && items[+b.dataset.w!]) b.addEventListener('click', () => this.swapCb());
+    });
+    $('armorbar').innerHTML = ARMOR_SLOTS.map((x) => cellHtml(equip[x.id], `data-armor="${x.id}" title="${x.name}"`, x.icon)).join('');
   }
 
   zoneBanner(z: ZoneDef) {
+    $('zone-label').textContent = z.name;
     const el = $('zone-banner');
     el.innerHTML = z.name + (z.recommend ? `<small>Рекомендуемый урон: ${DAMAGE_TYPE_NAME[z.recommend]}</small>` : '<small>Безопасная зона</small>');
     el.classList.add('show');
@@ -183,24 +207,30 @@ export class UI {
     this.modal.querySelector(sel)?.addEventListener('click', () => { sfx.click(); fn(); });
   }
 
+  /** Smith styled as the Butcher Hero shop: ribbon header, item cards with a price button. */
   smithPanel(items: (Item | null)[], gold: number, dmg: (it: Item) => number,
     sharpen: (slot: number) => void, scrap: (slot: number) => void, close: () => void) {
     const count = items.filter(Boolean).length;
-    const rows = items.map((it, i) => {
+    const cards = items.map((it, i) => {
       if (!it) return '';
       const w = WEAPONS[it.def];
       const max = it.sharpen >= SHARPEN.max;
       const cost = SHARPEN.cost(it.sharpen);
-      return `<div class="smith-item" style="border-color:${RARITY[it.rarity].color}">
-        <div class="ic">${w.icon}</div>
-        <div class="info"><b>${w.name} ${it.sharpen ? '+' + it.sharpen : ''}</b><br>${RARITY[it.rarity].name} · ${DAMAGE_TYPE_NAME[w.type]} · урон ${Math.round(dmg(it))}</div>
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <button class="btn primary" data-sharpen="${i}" ${max || gold < cost ? 'disabled' : ''}>${max ? 'Максимум' : `Заточить +8%<br>${cost} 🪙`}</button>
-          ${count > 1 ? `<button class="btn" data-scrap="${i}">Разобрать +${scrapValue(it)}</button>` : ''}
-        </div></div>`;
+      const now = dmg(it);
+      const next = (now * (1 + SHARPEN.perLevel * (it.sharpen + 1))) / (1 + SHARPEN.perLevel * it.sharpen);
+      return `<div class="shop-card">
+        <div class="sc-name">${w.name}${it.sharpen ? ` +${it.sharpen}` : ''}</div>
+        <div class="sc-sub">${max ? 'максимум' : `${icon(DAMAGE_TYPE_ICON[w.type], '#9fe3ff', 14)} ${fmtK(now)} <em>›</em> <b>${fmtK(next)}</b>`}</div>
+        ${cellHtml(it, 'disabled')}
+        <button class="btn primary price" data-sharpen="${i}" ${max || gold < cost ? 'disabled' : ''}>${max ? 'MAX' : `${art('coin', 26)} ${fmtK(cost)}`}</button>
+        ${count > 1 ? `<button class="link" data-scrap="${i}">разобрать +${fmtK(scrapValue(it))}</button>` : ''}
+      </div>`;
     }).join('');
-    this.open(`<div class="panel"><h2>⚒ Кузнец</h2><p>Золото: <b style="color:var(--gold)">${gold}</b></p>${rows}
-      <div class="row"><button class="btn" id="m-close">Готово</button></div></div>`);
+    this.open(`<div class="panel shop">
+      <div class="shop-head"><div class="pill">${art('coin', 28)}<span>${fmtK(gold)}</span></div><h2>Кузнец</h2><button class="xbtn" id="m-close">✕</button></div>
+      <div class="ribbon">Заточка +8% урона</div>
+      <div class="shop-grid">${cards}</div>
+      <p>Заточка до +${SHARPEN.max}. Лишнее оружие можно разобрать на золото.</p></div>`);
     this.modal.querySelectorAll<HTMLButtonElement>('[data-sharpen]').forEach((b) => b.addEventListener('click', () => sharpen(+b.dataset.sharpen!)));
     this.modal.querySelectorAll<HTMLButtonElement>('[data-scrap]').forEach((b) => b.addEventListener('click', () => scrap(+b.dataset.scrap!)));
     this.on('#m-close', () => { this.close(); close(); });
@@ -235,7 +265,7 @@ export class UI {
 
   settings(muted: boolean, lowGfx: boolean, toggleMute: () => void, toggleGfx: () => void, reset: () => void, close: () => void) {
     this.open(`<div class="panel"><h2>Настройки</h2>
-      <p>Управление: тяни палец в любом месте экрана (или WASD). Атака — автоматически. Смена оружия — кнопка ⇄ или Q.</p>
+      <p>Управление: тяни палец в любом месте экрана (или WASD). Атака — автоматически. Смена оружия — тап по второму оружию внизу или Q.</p>
       <div class="row"><button class="btn" id="m-mute">${muted ? '🔇 Звук выкл' : '🔊 Звук вкл'}</button>
       <button class="btn" id="m-gfx">${lowGfx ? '🖥 Графика: низкая' : '🖥 Графика: высокая'}</button></div>
       <div class="row"><button class="btn danger" id="m-reset">Сбросить прогресс</button></div>
@@ -264,9 +294,9 @@ export class UI {
     const box = document.createElement('div');
     box.id = 'dialogue';
     box.className = 'ui-block';
-    box.innerHTML = `<button class="dlg-skip">Пропустить ⏭</button>
+    box.innerHTML = `<button class="btn dlg-skip">Пропустить</button>
       <div class="dlg-who"><div class="dlg-portrait"></div><b></b></div>
-      <div class="dlg-text"></div><div class="dlg-choices"></div><div class="dlg-next">▼</div>`;
+      <div class="dlg-text"></div><div class="dlg-choices"></div><div class="dlg-next"></div>`;
     this.app.appendChild(box);
     const who = box.querySelector('b')!;
     const portrait = box.querySelector<HTMLElement>('.dlg-portrait')!;
@@ -290,7 +320,7 @@ export class UI {
       textEl.textContent = line.text;
       box.classList.add('ready');
       if (!line.choices) return;
-      choicesEl.innerHTML = line.choices.map((c, i) => `<button class="btn" data-i="${i}">${c.text}</button>`).join('');
+      choicesEl.innerHTML = line.choices.map((c, i) => `<button class="btn blue" data-i="${i}">${c.text}</button>`).join('');
       choicesEl.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', (e) => {
         e.stopPropagation();
         sfx.click();
@@ -302,7 +332,7 @@ export class UI {
       line = queue.shift() ?? null;
       if (!line) { finish(); return; }
       who.textContent = line.who;
-      portrait.textContent = line.portrait;
+      portrait.innerHTML = art(line.portrait, 54);
       choicesEl.innerHTML = '';
       box.classList.toggle('ask', !!line.choices);
       box.classList.remove('ready');
@@ -333,7 +363,7 @@ export class UI {
       return `<div class="fcard ui-block" data-f="${f}" style="border-top:5px solid ${d.color}">
         <h3>${d.name}</h3><div class="fan">${d.fantasy}</div>
         <div class="pas">${d.passiveName}</div><div>${d.passiveText}</div>
-        <div class="pas">Старт: ${w.icon} ${w.name}</div></div>`;
+        <div class="pas">Старт: ${art(w.id, 22)} ${w.name}</div></div>`;
     };
     this.open(`<div class="factions ui-block">${lead ? `<p class="lead">${lead}</p>` : ''}<h1>Выбери, чьим воином вернёшься</h1>
       <div class="fcards">${card('human')}${card('orc')}</div>

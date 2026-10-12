@@ -1,3 +1,6 @@
+import '@fontsource/rubik/600.css';
+import '@fontsource/rubik/700.css';
+import '@fontsource/rubik/900.css';
 import * as THREE from 'three';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
@@ -91,6 +94,7 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   const inv = new Inventory(ui, game);
   ui.onCharacter = game.onOpenCharacter = () => { input.reset(); inv.openCharacter(); };
   ui.onBag = game.onOpenBag = () => { input.reset(); inv.openBag(); };
+  ui.onArmor = ui.onCharacter;
   const map = new MapView(game);
   ui.onMap = game.onOpenMap = () => { if (inv.isOpen || ui.modalOpen) return; map.toggle(); };
   addEventListener('keydown', (e) => {
@@ -149,8 +153,9 @@ function factionScreen(gains: Gains) {
   const ground = new THREE.Mesh(new THREE.CircleGeometry(10, 48).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x5d5872 }));
   scene.add(ground);
   const cam = new THREE.PerspectiveCamera(50, app.clientWidth / app.clientHeight, 0.1, 50);
-  cam.position.set(0, 3.2, 10.5);
-  cam.lookAt(0, -0.2, 0);
+  // Cards cover the lower half of the screen: keep the champions in the upper half.
+  cam.position.set(0, 3.4, 11.5);
+  cam.lookAt(0, -1.5, 0);
   const heroes = {} as Record<FactionId, Character>;
   for (const f of ['human', 'orc'] as FactionId[]) {
     const [model, weapon] = FACTIONS[f].preview;

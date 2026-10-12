@@ -29,7 +29,7 @@ export class Input {
       const r = area.getBoundingClientRect();
       this.ox = e.clientX - r.left;
       this.oy = e.clientY - r.top;
-      this.radius = Math.max(44, Math.min(r.width, r.height) * 0.12);
+      this.radius = Math.max(56, Math.min(r.width, r.height) * 0.16);
       this.base.style.width = this.base.style.height = `${this.radius * 2}px`;
       this.base.style.left = `${this.ox}px`;
       this.base.style.top = `${this.oy}px`;

@@ -9,7 +9,8 @@ import { HERO, MOBS, ORBS, fmtOrb, type OrbKind } from './config';
 import { FloatingText, Particles, Pickups } from './fx';
 import type { Input } from './input';
 import { seeThrough } from './seethrough';
-import type { DialogueLine, UI } from './ui';
+import { art } from './art';
+import { STAT_ICON, type DialogueLine, type UI } from './ui';
 
 /** Power orbs picked up in the prologue; they carry over to the new hero. */
 export type Gains = Record<OrbKind, number>;
@@ -24,8 +25,8 @@ export function clearPrologue() {
 }
 
 const LICH_NAME = 'Король-лич';
-const LICH_FACE = '👑';
-const HERO_FACE = '💀';
+const LICH_FACE = 'skull';
+const HERO_FACE = 'hero';
 const LICH = new THREE.Vector3(0, 0, -7);
 const WAKE = new THREE.Vector3(0, 0, -2.2);
 const ARENA_R = 21;
@@ -339,7 +340,7 @@ export class Prologue {
     el.classList.add('show');
     el.classList.toggle('done', this.stage === 'return');
     el.innerHTML = this.stage === 'return'
-      ? '<small>Упокоить кости</small>Вернись к <b>Королю-личу</b>'
+      ? '<small>Упокоить кости</small>Вернись к <b>Личу</b>'
       : `<small>Упокоить кости</small>Скелеты: <b>${this.kills} / ${SKELETON_SPAWNS.length}</b>`;
   }
 
@@ -351,10 +352,14 @@ export class Prologue {
   private get power() { return this.stat('power'); }
 
   private renderStats(pop?: OrbKind) {
-    const names: Record<OrbKind, string> = { power: 'Урон', hp: 'HP', regen: 'Реген', speed: 'Бег' };
+    // Same look as the main HUD stats (#stats): coloured icon + number.
+    const fmt = (k: OrbKind) => {
+      const v = this.stat(k);
+      return k === 'regen' ? `${+v.toFixed(1)}%` : k === 'speed' ? String(+v.toFixed(1)) : String(Math.round(v));
+    };
     const el = document.getElementById('pro-stats')!;
     el.innerHTML = (['power', 'hp', 'regen', 'speed'] as OrbKind[])
-      .map((k) => `<div data-k="${k}"><i style="background:${ORBS[k].css}"></i>${names[k]} ${this.stat(k)}${k === 'regen' ? '%/с' : k === 'speed' ? ' м/с' : ''}</div>`)
+      .map((k) => `<div class="st" data-k="${k}">${art(STAT_ICON[k], 38)}<span>${fmt(k)}</span></div>`)
       .join('');
     if (pop) {
       const d = el.querySelector<HTMLElement>(`[data-k="${pop}"]`)!;
