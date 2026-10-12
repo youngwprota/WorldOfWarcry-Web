@@ -168,9 +168,12 @@ export const MOBS: Record<string, MobDef> = {
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
-    anim: 'AxeAttack', hp: 1400, dmg: 16, aps: 0.6, range: 2.4, speed: 3.6, aggro: 9, scale: 1.9,
+    anim: 'AxeAttack', hp: 2700, dmg: 13, aps: 0.6, range: 2.4, speed: 3.6, aggro: 9, scale: 1.9,
     resist: { slash: 'weak' }, reward: { power: 5, hp: 4, regen: 2, speed: 2 }, gold: [60, 90], respawn: 180,
-    boss: { ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, slamRadius: 4.2, zone: 'forest' },
+    boss: {
+      ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest',
+      slamRadius: 4.2, slamMul: 4.6, chaseMul: 2.6, phase2Dmg: 1.3,
+    },
   },
   skeleton_worker: {
     id: 'skeleton_worker', name: 'Мертвяк',
