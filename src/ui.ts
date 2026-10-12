@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  DAMAGE_TYPE_NAME, FACTIONS, SHARPEN, WEAPONS, WORLD, ZONES,
+  DAMAGE_TYPE_NAME, FACTIONS, SHARPEN, UI_BASE, WEAPONS, WORLD, ZONES,
   type FactionId, type OrbKind, type ZoneDef,
 } from './config';
 import { ARMOR_SLOTS, cellHtml, scrapValue, type ArmorSlot, type Item } from './items';
@@ -86,6 +86,13 @@ export class UI {
   }
 
   size() { return { w: this.app.clientWidth, h: this.app.clientHeight }; }
+  /** UI scale for small screens: #hud, #modal and friends are scale(--ui), their px are virtual (screen px / scale). */
+  scale = 1;
+  fit() {
+    const { w, h } = this.size();
+    this.scale = Math.min(1, w / UI_BASE.w, h / UI_BASE.h);
+    this.app.style.setProperty('--ui', String(this.scale));
+  }
   get modalOpen() { return this.modal.classList.contains('show'); }
 
   showHud(on: boolean) { $('hud').classList.toggle('hidden', !on); }
@@ -507,8 +514,9 @@ export class UI {
     const m = Math.max(Math.abs(x) / 0.85, y > 0 ? y / 0.55 : -y / 0.62);
     x /= m;
     y /= m;
-    const px = (x * 0.5 + 0.5) * w;
-    const py = (-y * 0.5 + 0.5) * h;
+    // #hud is scaled by --ui: its px are screen px / scale
+    const px = ((x * 0.5 + 0.5) * w) / this.scale;
+    const py = ((-y * 0.5 + 0.5) * h) / this.scale;
     el.style.display = 'block';
     el.style.transform = `translate(${px - 13}px, ${py - 13}px) rotate(${Math.atan2(-y, x)}rad)`;
   }
