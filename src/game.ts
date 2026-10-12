@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Character } from './character';
 import {
   ANTI_KITE, COMBOS, FACTIONS, HERO, LEASH, MOBS, ORBS, depthMul, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
-  type DamageType, type MobDef, type OrbKind, type ZoneDef,
+  type AntiKite, type DamageType, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
@@ -55,11 +55,6 @@ class Mob {
   /** Game time of the last hit taken (boss regen). */
   hurtAt = -99;
   fight: FightStat | null = null;
-  // anti-kite lunge
-  edgeT = 0;
-  lungeCd = 0;
-  lungeT = 0;
-  lungeDir = new THREE.Vector3();
   casting = 0;
   phase2 = false;
   awake = true;
@@ -765,8 +760,7 @@ export class Game {
               this.lastFight = this.time;
               this.bossLogic(m, dt, dHero);
             }
-            if (m.casting <= 0 && this.lungeStep(m, dt, dHero, reach)) moving = m.lungeT < ANTI_KITE.dash;
-            else if (m.casting <= 0) {
+            if (m.casting <= 0) {
               if (dHero > reach * 0.85) moving = this.stepTo(m, hp, def.speed, dt);
               m.ch.facing = turn(m.ch.facing, Math.atan2(hp.x - m.pos.x, hp.z - m.pos.z), dt * 8);
               m.atkCd -= dt;
@@ -866,34 +860,8 @@ export class Game {
     return true;
   }
 
-  get antiKite() { return this.save.antiKite ?? 'slow'; }
-
-  /** 'lunge' anti-kite: a mob held at the edge of its reach aims, then dashes. True while it drives the mob. */
-  private lungeStep(m: Mob, dt: number, dHero: number, reach: number) {
-    if (this.antiKite !== 'lunge' || m.def.boss) return false;
-    const k = ANTI_KITE;
-    const hp = this.hero.position;
-    m.lungeCd -= dt;
-    if (m.lungeT > 0) {
-      m.lungeT -= dt;
-      if (m.lungeT > k.dash) {
-        // wind-up: stand and aim at the hero
-        m.lungeDir.set(hp.x - m.pos.x, 0, hp.z - m.pos.z).normalize();
-        m.ch.facing = turn(m.ch.facing, Math.atan2(m.lungeDir.x, m.lungeDir.z), dt * 10);
-      } else {
-        m.pos.addScaledVector(m.lungeDir, k.dashSpeed * dt);
-        if (m.lungeT <= 0) m.atkCd = 0; // swing as soon as it lands in reach
-      }
-      return true;
-    }
-    m.edgeT = dHero > reach && dHero < reach + k.edge ? m.edgeT + dt : 0;
-    if (m.edgeT < k.edgeTime || m.lungeCd > 0) return false;
-    m.edgeT = 0;
-    m.lungeCd = k.cd;
-    m.lungeT = k.windup + k.dash;
-    this.fx.spawn(v1.copy(m.pos).setY(2.2 * m.def.scale), '!', 'bark', 0.5);
-    return true;
-  }
+  /** Old saves may hold the removed 'lunge' variant: anything but 'off' means slow. */
+  get antiKite(): AntiKite { return this.save.antiKite === 'off' ? 'off' : 'slow'; }
 
   private bossColor(m: Mob) {
     // Time-to-kill against the hero's current weapon decides the name colour (GDD 6.4).

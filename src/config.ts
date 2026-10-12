@@ -266,17 +266,12 @@ export function depthMul(zone: ZoneId, z: number) {
 }
 
 /**
- * Anti-kite variants, switched in ⚙ (debug) to compare by feel and in the balance log:
- * - slow: the hero runs slower for a moment after each swing, so hitting while backing off lets mobs catch up;
- * - lunge: a mob kept at the edge of its reach winds up and dashes at the hero (not bosses).
+ * Anti-kite (debug toggle in ⚙): the hero runs slower for a moment after each swing, so hitting while
+ * backing off lets mobs catch up.
  */
-export type AntiKite = 'off' | 'slow' | 'lunge';
-export const ANTI_KITE_NAMES: Record<AntiKite, string> = { off: 'выкл', slow: 'замедление', lunge: 'выпад' };
-export const ANTI_KITE = {
-  slowMul: 0.55, slowTime: 0.5, // speed × slowMul for slowTime s after a swing starts
-  edge: 2.2, edgeTime: 0.6, // hero within reach..reach+edge for edgeTime s triggers the lunge
-  windup: 0.35, dash: 0.25, dashSpeed: 10, cd: 3, // aim, then dash dashSpeed·dash m; cooldown per mob
-};
+export type AntiKite = 'off' | 'slow';
+export const ANTI_KITE_NAMES: Record<AntiKite, string> = { off: 'выкл', slow: 'замедление' };
+export const ANTI_KITE = { slowMul: 0.55, slowTime: 0.5 }; // speed × slowMul for slowTime s after a swing starts
 
 export const RESPAWN_MIN_DIST = 10;
 export const LEASH = 15;

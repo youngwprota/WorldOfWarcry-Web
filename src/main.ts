@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { ANTI_KITE_NAMES, FACTIONS, MOBS, WEAPONS, type AntiKite, type FactionId } from './config';
+import { ANTI_KITE_NAMES, FACTIONS, MOBS, WEAPONS, type FactionId } from './config';
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
@@ -110,10 +110,9 @@ function startGame(faction: FactionId, fresh: boolean) {
       clearLog();
       location.reload();
     }, () => { if (game) game.paused = false; }, () => ui.balanceLog(report(), open), {
-      label: ANTI_KITE_NAMES[save!.antiKite ?? 'slow'],
+      label: ANTI_KITE_NAMES[save!.antiKite === 'off' ? 'off' : 'slow'],
       cycle: () => {
-        const modes = Object.keys(ANTI_KITE_NAMES) as AntiKite[];
-        save!.antiKite = modes[(modes.indexOf(save!.antiKite ?? 'slow') + 1) % modes.length];
+        save!.antiKite = save!.antiKite === 'off' ? 'slow' : 'off';
         game?.persist();
         open();
       },
