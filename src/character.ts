@@ -15,6 +15,21 @@ const shadowTex = (() => {
   g.fillRect(0, 0, 64, 64);
   return new THREE.CanvasTexture(c);
 })();
+/**
+ * Inverted-hull outline: back faces of the same (skinned) mesh pushed out along the normals.
+ * Works with skinning because the push happens in bind space, before the bones move it.
+ */
+const outlineMat = (() => {
+  const m = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide });
+  m.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\n transformed += normalize(objectNormal) * 2.8;',
+    );
+  };
+  return m;
+})();
+
 const shadowGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const shadowMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false });
 
@@ -38,6 +53,8 @@ export class Character {
   private materials: THREE.MeshLambertMaterial[] = [];
   private flashT = 0;
   private baseColor = new THREE.Color(1, 1, 1);
+  private highlighted = false;
+  private outlines: THREE.Mesh[] = [];
 
   private idleL: THREE.AnimationAction;
   private walkL: THREE.AnimationAction;
@@ -116,6 +133,48 @@ export class Character {
     if (this.weapon) this.weapon.removeFromParent();
     this.weapon = name ? attachWeapon(this.model, name) : null;
     this.weapon?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
+    if (this.highlighted) this.rebuildOutline();
+  }
+
+  /** Player hero: a bit bigger, brighter than the world and with a light outline. */
+  setHighlight(on: boolean) {
+    this.highlighted = on;
+    this.model.scale.multiplyScalar(on ? 1.12 : 1 / 1.12);
+    this.baseColor.setScalar(on ? 1.16 : 1);
+    for (const m of this.materials) {
+      m.color.copy(this.baseColor);
+      m.emissive.setScalar(on ? 0.07 : 0);
+    }
+    this.rebuildOutline();
+  }
+
+  private rebuildOutline() {
+    for (const o of this.outlines) o.removeFromParent();
+    this.outlines = [];
+    if (!this.highlighted) return;
+    const meshes: THREE.Mesh[] = [];
+    this.model.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && m.visible && m.material !== outlineMat) meshes.push(m);
+    });
+    for (const m of meshes) {
+      let o: THREE.Mesh;
+      if ((m as THREE.SkinnedMesh).isSkinnedMesh) {
+        const sm = m as THREE.SkinnedMesh;
+        const so = new THREE.SkinnedMesh(sm.geometry, outlineMat);
+        so.bind(sm.skeleton, sm.bindMatrix);
+        o = so;
+      } else {
+        o = new THREE.Mesh(m.geometry, outlineMat); // weapon: same cm space, same push
+        o.scale.copy(m.scale);
+      }
+      o.position.copy(m.position);
+      o.quaternion.copy(m.quaternion);
+      o.frustumCulled = false;
+      o.castShadow = false;
+      m.parent!.add(o);
+      this.outlines.push(o);
+    }
   }
 
   get position() { return this.root.position; }
@@ -161,6 +220,7 @@ export class Character {
       }
       this.outfitParts.set(part, { model: want, meshes });
     }
+    if (this.highlighted) this.rebuildOutline();
   }
 
   /** Full-body spin (sword combo "Вихрь"). */

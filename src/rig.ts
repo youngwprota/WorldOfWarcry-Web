@@ -2,20 +2,22 @@ import * as THREE from 'three';
 import { assets } from './assets';
 
 /**
- * Per-weapon grip tweaks. The grip is derived from geometry (bottom of the weapon's long Y axis),
- * then the blade is aimed along the fist axis (hand-local +Z) tilted up toward the forearm.
+ * Per-weapon grip tweaks. The grip is derived from geometry (bottom of the weapon's long axis),
+ * then the blade is aimed along the fist axis (hand-local +Z = forward when the arm hangs),
+ * pushed a little outward from the body (hand-local +Y) and tilted up toward the forearm (+X),
+ * so blades do not cut through the helmet or the torso.
  */
-export const WEAPON_GRIPS: Record<string, { tilt?: number; grip?: number; scale?: number; roll?: number }> = {
-  sword_human_knight: { scale: 0.75, grip: 0.1 },
-  sword_soldier: { scale: 0.8, grip: 0.12 },
-  sword_orc_warrior: { scale: 0.8, grip: 0.12 },
-  sword_undead_king: { scale: 0.85, grip: 0.12 },
-  axe_orc_grunt: { scale: 0.85, grip: 0.18 },
-  axe_orc_chieftain: { scale: 0.9, grip: 0.18 },
-  axe_orc_peon: { scale: 0.9, grip: 0.2 },
-  axe: { scale: 0.9, grip: 0.2 },
-  hammer_human_paladin: { scale: 0.9, grip: 0.18 },
-  spear_undead_warrior: { scale: 0.8, grip: 0.4, tilt: 0.2 },
+export const WEAPON_GRIPS: Record<string, { tilt?: number; out?: number; grip?: number; scale?: number; roll?: number }> = {
+  sword_human_knight: { scale: 0.6, grip: 0.1 },
+  sword_soldier: { scale: 0.7, grip: 0.12 },
+  sword_orc_warrior: { scale: 0.68, grip: 0.12 },
+  sword_undead_king: { scale: 0.75, grip: 0.12 },
+  axe_orc_grunt: { scale: 0.7, grip: 0.16, roll: Math.PI },
+  axe_orc_chieftain: { scale: 0.78, grip: 0.16, roll: Math.PI },
+  axe_orc_peon: { scale: 0.78, grip: 0.18, roll: Math.PI },
+  axe: { scale: 0.78, grip: 0.18, roll: Math.PI },
+  hammer_human_paladin: { scale: 0.75, grip: 0.16 },
+  spear_undead_warrior: { scale: 0.7, grip: 0.4, tilt: 0.1, out: 0.15 },
 };
 
 /** Palm centre in hand_r space (cm). */
@@ -69,8 +71,8 @@ export function attachWeapon(character: THREE.Object3D, weapon: string): THREE.O
   offset.add(pivot);
   holder.add(offset);
   // Weapon +Y -> fist axis (hand +Z) tilted toward the forearm (hand +X).
-  const tilt = cfg.tilt ?? 0.55;
-  const dir = new THREE.Vector3(Math.sin(tilt), 0, Math.cos(tilt)).normalize();
+  const tilt = cfg.tilt ?? 0.22;
+  const dir = new THREE.Vector3(Math.sin(tilt), cfg.out ?? 0.4, Math.cos(tilt)).normalize();
   holder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   if (cfg.roll) holder.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), cfg.roll));
   holder.position.copy(PALM);

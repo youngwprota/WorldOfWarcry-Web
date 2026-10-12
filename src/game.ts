@@ -40,6 +40,11 @@ class Mob {
   hpFill: HTMLDivElement;
   respawnEl: HTMLDivElement;
   respawnTotal = 0;
+  /** Spawned by a prop (grave): no respawn, removed after death. */
+  temp = false;
+  removed = false;
+  /** Seconds left of the "crawling out of the ground" intro; untargetable meanwhile. */
+  rise = 0;
   private lastSec = -1;
   // boss
   special = 4;
@@ -55,11 +60,14 @@ class Mob {
     this.radius = 0.45 * def.scale;
     this.wander.copy(spawn);
     // Above the head: stats granted by the kill, weakness/resistance icons, HP bar.
+    // Bosses get a bigger version with their name (coloured by difficulty) and HP numbers.
     this.hpEl = document.createElement('div');
-    this.hpEl.className = 'mobui';
-    this.hpEl.innerHTML = `<div class="rws">${rewardChips(def)}</div><div class="ris">${resistIcons(def)}</div><div class="mobhp"><div></div></div>`;
+    this.hpEl.className = def.boss ? 'mobui boss' : 'mobui';
+    this.hpEl.innerHTML = (def.boss ? `<div class="bname">${def.boss.titles[faction]}</div>` : '') +
+      `<div class="rws">${rewardChips(def)}</div><div class="ris">${resistIcons(def, def.boss ? 22 : 19)}</div>` +
+      `<div class="mobhp"><div></div>${def.boss ? '<span></span>' : ''}</div>`;
     this.hpFill = this.hpEl.querySelector('.mobhp > div')!;
-    if (!def.boss) layer.appendChild(this.hpEl);
+    layer.appendChild(this.hpEl);
     // Respawn loader shown at the (invisible) spawn point while the mob is dead.
     this.respawnEl = document.createElement('div');
     this.respawnEl.className = 'respawn' + (def.boss ? ' boss' : '');
@@ -89,6 +97,8 @@ class Breakable {
   flash = 0;
   uiEl: HTMLDivElement;
   hpFill: HTMLDivElement;
+  respawnEl: HTMLDivElement;
+  private lastSec = -1;
   constructor(public spot: BreakableSpot, layer: HTMLElement) {
     this.def = BREAKABLES[spot.kind];
     this.uiEl = document.createElement('div');
@@ -96,6 +106,11 @@ class Breakable {
     this.uiEl.innerHTML = `<div class="rws">${rewardChips(this.def)}</div><div class="ris">${resistIcons(this.def, 16)}</div><div class="mobhp"><div></div></div>`;
     this.hpFill = this.uiEl.querySelector('.mobhp > div')!;
     layer.appendChild(this.uiEl);
+    // Same respawn loader as mobs, shown where the prop stood.
+    this.respawnEl = document.createElement('div');
+    this.respawnEl.className = 'respawn prop';
+    this.respawnEl.innerHTML = '<div class="ring"></div><span></span>';
+    layer.appendChild(this.respawnEl);
     this.obj = makeBreakable(spot.kind);
     this.obj.position.set(spot.x, 0, spot.z);
     this.obj.rotation.y = spot.rot;
@@ -107,6 +122,12 @@ class Breakable {
   }
   get pos() { return this.obj.position; }
   get radius() { return this.def.r; }
+  setRespawnText(sec: number, waiting: boolean) {
+    const s = Math.max(0, Math.ceil(sec));
+    if (s === this.lastSec && !waiting) return;
+    this.lastSec = s;
+    (this.respawnEl.lastChild as HTMLElement).textContent = waiting ? 'отойди' : String(s);
+  }
 }
 
 export class Game {
@@ -133,6 +154,7 @@ export class Game {
   newItems = 0;
   onOpenCharacter: () => void = () => {};
   onOpenBag: () => void = () => {};
+  onOpenMap: () => void = () => {};
   private time = 0;
   private hp: number;
   private shield = 0;
@@ -152,8 +174,13 @@ export class Game {
   private nearFire = false;
   paused = false;
   private moveDir = new THREE.Vector3();
+  /** Player HP (+ human shield) floating above the hero's head. */
+  private heroBar!: { el: HTMLDivElement; fill: HTMLDivElement; shield: HTMLDivElement; text: HTMLSpanElement };
+
+  private labels: HTMLElement;
 
   constructor(public save: SaveData, private input: Input, public ui: UI, labels: HTMLElement) {
+    this.labels = labels;
     const f = FACTIONS[save.faction];
     this.camera = new THREE.PerspectiveCamera(46, 9 / 16, 0.5, 70);
     this.scene.fog = new THREE.FogExp2(0xbfe0f5, 0.015);
@@ -176,6 +203,7 @@ export class Game {
     this.hero = new Character(f.hero, null, 1);
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
+    this.hero.setHighlight(true);
     this.hero.position.set(0, 0, 3);
     this.hero.facing = Math.PI;
     this.scene.add(this.hero.root);
@@ -201,6 +229,11 @@ export class Game {
     }
 
     this.fx = new FloatingText(labels, this.camera);
+    const hb = document.createElement('div');
+    hb.className = 'herohp';
+    hb.innerHTML = '<div class="fill"></div><div class="shield"></div><span></span>';
+    labels.appendChild(hb);
+    this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, shield: hb.querySelector('.shield')!, text: hb.querySelector('span')! };
     this.particles = new Particles(this.scene);
     this.telegraphs = new Telegraphs(this.scene);
     this.pickups = new Pickups(this.scene);
@@ -286,6 +319,7 @@ export class Game {
     if (this.input.pressed('KeyQ') || this.input.pressed('Space')) this.swapWeapon();
     if (this.input.pressed('KeyI') || this.input.pressed('KeyC')) { this.onOpenCharacter(); return; }
     if (this.input.pressed('KeyB')) { this.onOpenBag(); return; }
+    if (this.input.pressed('KeyM')) { this.onOpenMap(); return; }
     this.updateHero(dt);
     this.updateMobs(dt);
     this.updateProps(dt);
@@ -341,6 +375,16 @@ export class Game {
     this.hemi.groundColor.copy(this.env.hemiGround);
     const { w, h } = this.ui.size();
     this.fx.update(dt, w, h);
+    // hero HP bar above the head
+    v1.copy(hp).setY(2.45).project(this.camera);
+    const hb = this.heroBar;
+    hb.el.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
+    hb.el.classList.toggle('dead', this.dead);
+    const total = this.maxHp + this.shieldMax;
+    hb.fill.style.width = `${(this.hp / this.maxHp) * 100}%`;
+    hb.shield.style.width = `${(this.shield / Math.max(1, total)) * 100}%`;
+    hb.text.textContent = `${Math.ceil(this.hp)}`;
+    hb.el.classList.toggle('low', this.hp < this.maxHp * 0.3);
     this.updateMobBars(w, h);
     this.hudT -= dt;
     if (this.hudT <= 0) { this.hudT = 0.1; this.refreshHud(false); }
@@ -364,7 +408,7 @@ export class Game {
     }
     // soft push from living mobs
     for (const m of this.mobs) {
-      if (!m.alive || !m.awake) continue;
+      if (!m.alive || !m.awake || m.rise > 0) continue;
       const dx = p.x - m.pos.x;
       const dz = p.z - m.pos.z;
       const rr = m.radius + HERO.radius;
@@ -390,7 +434,7 @@ export class Game {
       let best: Target | null = null;
       let bd = Infinity;
       for (const m of this.mobs) {
-        if (!m.alive || !m.awake) continue;
+        if (!m.alive || !m.awake || m.rise > 0) continue;
         const d = m.pos.distanceTo(p) - m.radius;
         if (d < reach && d < bd) { bd = d; best = { kind: 'mob', ref: m }; }
       }
@@ -485,7 +529,7 @@ export class Game {
     let hits = 0;
     sfx.swing();
     for (const m of this.mobs) {
-      if (!m.alive || !m.awake || !this.inShape(m.pos, m.radius, shape, arc, range)) continue;
+      if (!m.alive || !m.awake || m.rise > 0 || !this.inShape(m.pos, m.radius, shape, arc, range)) continue;
       const { dmg, tier } = this.damageFor(w.type, m.def.resist, fin ? fin.mult : 1);
       this.damageMob(m, dmg, tier, fin ? fin.knock : 3.5);
       if (m.alive && !m.def.boss) {
@@ -545,6 +589,7 @@ export class Game {
     for (const [k, n] of Object.entries(d.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(m.pos, k);
     this.dropGold(m.pos, d.gold);
     if (d.boss) this.killBoss(m);
+    else if (m.temp) m.respawnAt = Infinity;
     else {
       m.respawnAt = this.time + d.respawn;
       if (Math.random() < 0.07) this.pickups.spawnItem(m.pos, rollItem(this.zoneLevel(m.pos.z)));
@@ -561,7 +606,6 @@ export class Game {
     this.telegraphs.clear();
     this.shake = 0.6;
     sfx.levelUp();
-    this.ui.hideBoss();
     const lvl = this.zoneLevel(m.pos.z);
     const drops: Item[] = [];
     if (!rec.firstKill) {
@@ -625,8 +669,18 @@ export class Game {
   private updateMobs(dt: number) {
     const hp = this.hero.position;
     const heroInCamp = this.world.zoneAt(hp.z).id === 'camp';
+    let removed = false;
     for (const m of this.mobs) {
       const dHero = m.pos.distanceTo(hp);
+      if (m.rise > 0 && m.state !== 'dead') {
+        // crawling out of the grave
+        m.rise -= dt;
+        m.pos.y = -1.9 * Math.max(0, m.rise) / 1.3;
+        m.ch.facing = Math.atan2(hp.x - m.pos.x, hp.z - m.pos.z);
+        m.ch.update(dt, false);
+        if (m.rise <= 0) m.pos.y = 0;
+        continue;
+      }
       // Sleep far away mobs (GDD 5: "мобы дальше радиуса активности спят").
       m.awake = dHero < 40;
       m.ch.root.visible = m.state !== 'dead' ? dHero < 34 : m.ch.root.visible && dHero < 34;
@@ -635,6 +689,7 @@ export class Game {
         m.ch.update(dt, false, m.deadT < 3 && dHero < 34);
         if (m.deadT > 2.2) m.ch.position.y = -(m.deadT - 2.2) * 0.8;
         if (m.deadT > 4) m.ch.root.visible = false;
+        if (m.temp && m.deadT > 4.5) { this.removeMob(m); removed = true; continue; }
         if (this.time >= m.respawnAt && m.spawn.distanceTo(hp) > RESPAWN_MIN_DIST) this.respawnMob(m);
         continue;
       }
@@ -716,7 +771,43 @@ export class Game {
       // mobs never enter the camp
       if (m.pos.z > -20) m.pos.z = -20;
       m.ch.update(dt, moving, dHero < 34);
-      if (def.boss) this.ui.updateBoss(m.def.boss!.titles[this.faction], m.hp, m.maxHp, dHero < 22 && m.state === 'chase', this.bossColor(m), def);
+    }
+    if (removed) this.mobs = this.mobs.filter((m) => !m.removed);
+  }
+
+  private removeMob(m: Mob) {
+    this.scene.remove(m.ch.root);
+    m.hpEl.remove();
+    m.respawnEl.remove();
+    m.state = 'dead';
+    m.removed = true;
+  }
+
+  /** Data-driven prop events (BREAKABLES[kind].onBreak). */
+  private runBreakEvents(b: Breakable) {
+    for (const ev of b.def.onBreak ?? []) {
+      if (Math.random() >= ev.chance) continue;
+      if (ev.type === 'spawnMob') {
+        const live = this.mobs.filter((m) => m.temp && m.alive).length;
+        const n = Math.min(ev.count ?? 1, 8 - live);
+        for (let i = 0; i < n; i++) {
+          const at = new THREE.Vector3(b.pos.x + (Math.random() - 0.5) * 0.8, 0, b.pos.z + (Math.random() - 0.5) * 0.8);
+          const m = new Mob(MOBS[ev.mob], at, this.save.faction, this.labels);
+          m.temp = true;
+          m.rise = 1.3;
+          m.state = 'chase';
+          m.atkCd = 0.8;
+          m.pos.y = -1.9;
+          this.mobs.push(m);
+          this.scene.add(m.ch.root);
+        }
+        if (n > 0) {
+          this.particles.burst(v1.copy(b.pos).setY(0.2), 0x5a4a3a, 14, 0.16, 5, 0.9);
+          this.shake = Math.max(this.shake, 0.2);
+          sfx.telegraph();
+          if (ev.bark) this.fx.spawn(v2.copy(b.pos).setY(2.6), ev.bark, 'bark', 1.8);
+        }
+      }
     }
   }
 
@@ -797,7 +888,9 @@ export class Game {
     this.hp -= dmg;
     this.hero.hit();
     sfx.hurt();
-    this.fx.spawn(v1.copy(this.hero.position).setY(2), `-${dmg}`, 'hurt', 0.7);
+    // Fully absorbed by the human shield: show it in shield blue instead of "-0".
+    if (dmg > 0) this.fx.spawn(v1.copy(this.hero.position).setY(2), `-${dmg}`, 'hurt', 0.7);
+    else this.fx.spawn(v1.copy(this.hero.position).setY(2), '🛡', 'hurt', 0.5, { color: '#6cc6ff' });
     void from;
     this.ui.hurtFlash();
     if (this.hp <= 0) {
@@ -853,12 +946,13 @@ export class Game {
     if (b.hp > 0) return;
     b.alive = false;
     b.obj.visible = false;
-    b.respawnAt = this.time + 30 + Math.random() * 30;
+    b.respawnAt = this.time + b.def.respawn;
     if (this.target?.ref === b) this.target = null;
     sfx.break();
     this.particles.burst(v1.copy(b.pos).setY(0.6), b.def.color, 10, 0.22, 6, 1.1);
     for (const [k, n] of Object.entries(b.def.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(b.pos, k);
     this.dropGold(b.pos, b.def.gold);
+    this.runBreakEvents(b);
     if (Math.random() < 0.025) this.pickups.spawnItem(b.pos, rollItem(this.zoneLevel(b.pos.z)));
   }
 
@@ -898,9 +992,22 @@ export class Game {
       b.uiEl.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
       b.hpFill.style.width = `${Math.max(0, b.hp / b.def.hits) * 100}%`;
     }
+    for (const b of this.props) {
+      const show = !b.alive && b.pos.distanceTo(hp) < 22;
+      if (!show) { if (b.respawnEl.classList.contains('show')) b.respawnEl.classList.remove('show'); continue; }
+      v1.copy(b.pos).setY(0.4).project(this.camera);
+      if (Math.abs(v1.x) > 1.1 || Math.abs(v1.y) > 1.1) { b.respawnEl.classList.remove('show'); continue; }
+      const left = b.respawnAt - this.time;
+      const waiting = left <= 0;
+      b.respawnEl.classList.add('show');
+      b.respawnEl.classList.toggle('waiting', waiting);
+      b.respawnEl.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -50%)`;
+      b.respawnEl.style.setProperty('--p', `${Math.min(1, Math.max(0, 1 - left / b.def.respawn)) * 360}deg`);
+      b.setRespawnText(left, waiting);
+    }
     for (const m of this.mobs) {
       // HP bar + weakness icons + kill reward over living mobs near the hero.
-      const show = m.alive && !m.def.boss && m.ch.root.visible && m.pos.distanceTo(hp) < 16;
+      const show = m.alive && m.ch.root.visible && m.pos.distanceTo(hp) < (m.def.boss ? 24 : 16);
       if (!show) { if (m.hpEl.classList.contains('show')) m.hpEl.classList.remove('show'); }
       else {
         v1.copy(m.pos).setY(2.15 * m.def.scale).project(this.camera);
@@ -908,9 +1015,13 @@ export class Game {
         m.hpEl.classList.toggle('hurt', m.hp < m.maxHp);
         m.hpEl.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
         m.hpFill.style.width = `${(m.hp / m.maxHp) * 100}%`;
+        if (m.def.boss) {
+          (m.hpEl.querySelector('.mobhp span') as HTMLElement).textContent = `${Math.ceil(m.hp)} / ${m.maxHp}`;
+          (m.hpEl.querySelector('.bname') as HTMLElement).style.color = this.bossColor(m);
+        }
       }
       // Respawn loader at the spawn point (appears once the corpse has gone).
-      const dead = m.state === 'dead' && (m.deadT > 2.5 || m.def.boss) && m.spawn.distanceTo(hp) < 30;
+      const dead = m.state === 'dead' && !m.temp && (m.deadT > 2.5 || m.def.boss) && m.spawn.distanceTo(hp) < 30;
       if (!dead) { if (m.respawnEl.classList.contains('show')) m.respawnEl.classList.remove('show'); continue; }
       v1.copy(m.spawn).setY(0.6).project(this.camera);
       if (Math.abs(v1.x) > 1.1 || Math.abs(v1.y) > 1.1) { m.respawnEl.classList.remove('show'); continue; }
@@ -1074,6 +1185,20 @@ export class Game {
     if (alive.length) return { text: 'Боссы вернулись — <b>фарм</b> снаряжения', at: alive[alive.length - 1] };
     const t = Math.ceil(Math.min(fm.respawnAt, cm.respawnAt) - this.time);
     return { text: `Боссы вернутся через <b>${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}</b>`, at: null };
+  }
+
+  /** Snapshot for the full-screen world map. */
+  mapInfo() {
+    const g = this.goal();
+    return {
+      hero: { x: this.hero.position.x, z: this.hero.position.z, facing: this.hero.facing },
+      goal: { text: g.text, x: g.at?.spawn.x ?? null, z: g.at?.spawn.z ?? null },
+      mobs: this.mobs.filter((m) => m.alive && !m.def.boss).map((m) => ({ x: m.pos.x, z: m.pos.z })),
+      bosses: this.mobs.filter((m) => m.def.boss).map((m) => ({
+        x: m.spawn.x, z: m.spawn.z, name: m.def.boss!.titles[this.faction], alive: m.alive,
+        respawnIn: m.alive ? 0 : Math.max(0, m.respawnAt - this.time),
+      })),
+    };
   }
 
   refreshHud(full: boolean) {

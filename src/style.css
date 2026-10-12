@@ -54,6 +54,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .rw { display: inline-flex; align-items: center; gap: 2px; }
 .rw i { width: 6px; height: 6px; border-radius: 50%; border: 1px solid #000; }
 .mobui.prop .mobhp { width: 40px; height: 6px; }
+.mobui.boss { opacity: 1; gap: 2px; }
+.mobui.boss .bname { font-size: 14px; font-weight: 900; text-shadow: 0 2px 0 #000, 0 0 4px #000; white-space: nowrap; }
+.mobui.boss .rws { font-size: 12px; }
+.mobui.boss .mobhp { position: relative; width: 130px; height: 13px; border: 2px solid #000; border-radius: 7px; }
+.mobui.boss .mobhp > div { background: linear-gradient(#c45cff, #7a1fd1); }
+.mobui.boss .mobhp span { position: absolute; inset: 0; font-size: 9px; font-weight: 900; display: flex; align-items: center; justify-content: center; text-shadow: 0 1px 0 #000; }
+/* player HP over the head */
+.herohp { position: absolute; left: 0; top: 0; width: 70px; height: 11px; background: #000b; border: 2px solid #000; border-radius: 6px; overflow: hidden; box-shadow: 0 0 0 1px #ffffff55; }
+.herohp .fill { position: absolute; inset: 0; width: 100%; background: linear-gradient(#7dff7a, #2fb84a); transition: width 0.12s; }
+.herohp.low .fill { background: linear-gradient(#ff6a5c, #e8413b); }
+.herohp .shield { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(#a6e2ff, #6cc6ff); opacity: 0.9; }
+.herohp span { position: absolute; inset: 0; font-size: 9px; font-weight: 900; line-height: 1; display: flex; align-items: center; justify-content: center; text-shadow: 0 1px 0 #000, 0 0 2px #000; }
+.herohp.dead { display: none; }
+#hp, #bossbar { display: none !important; }
 .mobui.prop .mobhp > div { background: #e0a040; }
 .ftext.dmg.small { font-size: 12px; }
 #bossbar .binfo { display: flex; justify-content: center; align-items: center; gap: 10px; margin-bottom: 3px; }
@@ -88,7 +102,23 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #gold { margin-top: 6px; font-weight: 900; font-size: 18px; color: var(--gold); text-shadow: 0 2px 0 #000; }
 #gold::before { content: ''; display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff3b0, var(--gold) 50%, #b07800); margin-right: 5px; vertical-align: -1px; }
 .top-right { position: absolute; right: 10px; top: calc(10px + env(safe-area-inset-top)); display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-#minimap { width: 104px; height: 104px; border-radius: 12px; border: 2px solid #000; background: #0006; }
+#minimap { width: 108px; height: 108px; border-radius: 50%; border: 3px solid #1b1a24; box-shadow: 0 0 0 2px #c9a24a, 0 4px 12px #0008; background: #0006; cursor: zoom-in; pointer-events: auto; }
+
+/* minimap expanded in place */
+#bigmap { position: absolute; right: 10px; top: calc(10px + env(safe-area-inset-top)); width: 108px; height: 108px; border-radius: 50%; border: 3px solid #1b1a24; overflow: hidden; background: transparent; display: none; z-index: 6; box-shadow: 0 0 0 2px #c9a24a, 0 8px 30px #000a; transition: width 0.25s ease, height 0.25s ease; }
+#bigmap.show { display: block; }
+#bigmap canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#bigmap canvas:active { cursor: grabbing; }
+.bm-tools { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 6px; opacity: 0; transition: opacity 0.2s 0.1s; }
+#bigmap.open .bm-tools, #bigmap.open .wm-legend { opacity: 1; }
+.bm-tools button { width: 44px; height: 44px; border-radius: 12px; border: 2px solid #000; background: var(--panel); font-size: 20px; font-weight: 900; box-shadow: 0 3px 0 #0008; }
+.wm-legend { position: absolute; left: 8px; right: 60px; bottom: 8px; opacity: 0; transition: opacity 0.2s 0.1s; display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; font-weight: 700; background: #0009; padding: 8px 10px; border-radius: 10px; }
+.wm-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.wm-legend i { width: 10px; height: 10px; display: inline-block; border-radius: 50%; border: 1px solid #000; }
+.lg-hero { background: #fff; }
+.lg-goal { background: transparent; border: 2px solid #ffb238 !important; }
+.lg-fire { background: #ffa020; }
+.lg-mob { background: #ff4a4a; border-radius: 2px !important; }
 #goal { max-width: 150px; font-size: 12px; font-weight: 700; background: var(--panel); border: 1px solid var(--panel-edge); padding: 6px 8px; border-radius: 10px; text-align: right; }
 #goal b { color: var(--accent); }
 #bossbar { position: absolute; top: calc(150px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); width: 78%; text-align: center; }

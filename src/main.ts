@@ -6,6 +6,7 @@ import { FACTIONS, MOBS, WEAPONS, type FactionId } from './config';
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
+import { MapView } from './mapview';
 import { clearSave, loadSave, newSave, writeSave } from './save';
 import { UI } from './ui';
 import { BREAKABLES } from './world';
@@ -84,6 +85,8 @@ function startGame(faction: FactionId, fresh: boolean) {
   const inv = new Inventory(ui, game);
   ui.onCharacter = game.onOpenCharacter = () => { input.reset(); inv.openCharacter(); };
   ui.onBag = game.onOpenBag = () => { input.reset(); inv.openBag(); };
+  const map = new MapView(game);
+  ui.onMap = game.onOpenMap = () => { if (inv.isOpen || ui.modalOpen) return; map.toggle(); };
   addEventListener('keydown', (e) => {
     if (inv.isOpen && (e.code === 'Escape' || e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyB')) inv.close();
   });

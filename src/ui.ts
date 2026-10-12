@@ -29,6 +29,7 @@ export class UI {
   onSettings: () => void = () => {};
   onCharacter: () => void = () => {};
   onBag: () => void = () => {};
+  onMap: () => void = () => {};
   private swapCb: () => void = () => {};
   private mm = $<HTMLCanvasElement>('minimap').getContext('2d')!;
 
@@ -37,6 +38,7 @@ export class UI {
     $('btn-settings').addEventListener('click', () => { sfx.click(); this.onSettings(); });
     $('btn-char').addEventListener('click', () => { sfx.click(); this.onCharacter(); });
     $('btn-bag').addEventListener('click', () => { sfx.click(); this.onBag(); });
+    $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
     const stats = $('stats');
     stats.innerHTML = (['power', 'hp', 'regen', 'speed'] as OrbKind[])
       .map((k) => `<div class="st" data-k="${k}"><i style="background:${ORBS[k].css}"></i><span></span></div>`)
@@ -281,7 +283,7 @@ export class UI {
     g.clearRect(0, 0, S, S);
     g.save();
     g.beginPath();
-    g.roundRect(0, 0, S, S, 20);
+    g.arc(S / 2, S / 2, S / 2, 0, Math.PI * 2);
     g.clip();
     const tx = (x: number) => S / 2 + (x - hero.x) * scale;
     const tz = (z: number) => S / 2 + (z - hero.z) * scale;
