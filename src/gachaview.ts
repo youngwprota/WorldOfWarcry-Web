@@ -4,7 +4,7 @@ import { sfx } from './audio';
 import { GACHA, RARITY } from './config';
 import { bannerItem, pull } from './gacha';
 import type { Game } from './game';
-import { itemLines, type Item } from './items';
+import { cellHtml, itemIconId, itemLines, itemName, type Item } from './items';
 import type { UI } from './ui';
 
 /** Hammer angle (deg): raised before a blow, resting on the anvil at the strike. */
@@ -258,8 +258,21 @@ export class GachaView {
 
   private reveal() {
     this.stop();
-    sfx.reveal(this.item!.rarity);
-    this.ui.toast(this.where);
-    this.renderBanner();
+    const it = this.item!;
+    const rar = RARITY[it.rarity];
+    sfx.reveal(it.rarity);
+    this.q('#g-body').innerHTML = `
+      <div class="g-flash" style="--rc:${rar.color}"></div>
+      <div class="g-result r${it.rarity}" style="--rc:${rar.color}">
+        <div class="g-rays"></div>
+        <div class="g-tag">${rar.name}</div>
+        <div class="g-weapon g-rise">${art(itemIconId(it), 170)}</div>
+        <div class="g-name">${itemName(it, this.game.faction)}</div>
+        <div class="g-got">${cellHtml(it, 'disabled')}<div class="g-lines">${itemLines(it).map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('')}</div></div>
+        <div class="g-where">${this.where}</div>
+      </div>
+      <div class="g-btns"><button class="btn" id="g-back">Назад</button><button class="btn primary" id="g-again">Ещё раз</button></div>`;
+    this.ui.on('#g-back', () => this.renderBanner());
+    this.ui.on('#g-again', () => this.forge());
   }
 }

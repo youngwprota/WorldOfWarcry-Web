@@ -907,3 +907,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .g-hammer { position: absolute; left: -3px; top: -78px; width: 150px; height: 150px; transform-origin: 18% 84%; transform: rotate(-45deg); z-index: 2; filter: drop-shadow(0 4px 0 #0008); }
 .g-hint { position: absolute; bottom: calc(22px + env(safe-area-inset-bottom)); font-size: 13px; font-weight: 700; color: #f0dcc0aa; animation: pulse 1s ease-in-out infinite alternate; }
 .g-sparks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
+.g-flash { position: absolute; inset: 0; z-index: 5; pointer-events: none; background: radial-gradient(circle at 50% 45%, #fff 0%, var(--rc) 45%, transparent 100%); animation: g-flash 0.7s ease-out forwards; }
+@keyframes g-flash { from { opacity: 1; } to { opacity: 0; } }
+.g-result { position: relative; width: 100%; max-width: 400px; text-align: center; padding: 10px 0; }
+.g-result .g-rays { background: repeating-conic-gradient(color-mix(in srgb, var(--rc) 35%, transparent) 0 8deg, transparent 8deg 22deg); }
+.g-result .g-tag { background: var(--rc); }
+.g-result .g-name { color: var(--rc); font-size: 28px; }
+.g-result .g-weapon { filter: drop-shadow(0 0 22px var(--rc)) drop-shadow(0 4px 0 #0008); }
+.g-result.r0 .g-weapon { filter: drop-shadow(0 4px 0 #0008); }
+.g-rise { animation: g-rise 0.7s cubic-bezier(0.2, 1.4, 0.4, 1) both, g-float 2.4s 0.7s ease-in-out infinite alternate; }
+@keyframes g-rise { from { transform: translateY(90px) scale(0.4); opacity: 0; } to { transform: none; opacity: 1; } }
+.g-result.r3 .g-name { font-size: 32px; animation: g-pop 0.5s 0.3s both; }
+@keyframes g-pop { from { transform: scale(2); opacity: 0; } to { transform: none; opacity: 1; } }
+.g-got { position: relative; display: flex; align-items: center; gap: 10px; margin-top: 10px; text-align: left; }
+.g-got .cell { flex: none; }
+.g-got .g-lines { flex: 1; }
+.g-where { position: relative; margin-top: 10px; font-size: 14px; font-weight: 700; color: #f0dcc0; text-shadow: 0 1px 0 #0008; }
+.g-btns { display: flex; gap: 10px; width: 100%; max-width: 360px; }
