@@ -336,7 +336,7 @@ function dummyDps(h: Hero, weapons: [Item | null, Item | null], zone: ZoneId) {
 const tokenChance = (u: Unit) => (u.kind === 'mob' ? GACHA.token[mobRank(MOBS[u.def])] : 0);
 
 interface Snap { t: number; zone: string; power: number; maxHp: number; regen: number; defense: number; weapons: string; kills: number; deaths: number; pulls: number; win: Record<string, number> }
-interface FightRec { def: string; depth: number; dur: number; swings: number; taken: number; maxHp: number; win: boolean }
+interface FightRec { def: string; depth: number; t: number; first: boolean; dur: number; swings: number; taken: number; maxHp: number; win: boolean }
 interface RunOut { snaps: Snap[]; bossAt: Record<string, number>; bossDur: Record<string, number>; fights: FightRec[]; pulls: number[]; deaths: number }
 
 const BOSSES = Object.values(MOBS).filter((d) => d.boss);
@@ -465,7 +465,8 @@ function run(seed: number): RunOut {
       const foe = foeOf(u);
       const r = fight(h, foe);
       t += r.dur;
-      out.fights.push({ def: u.def, depth: u.depth, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: st.maxHp, win: r.win });
+      const first = !out.fights.some((f) => f.def === u.def && f.depth === u.depth);
+      out.fights.push({ def: u.def, depth: u.depth, t, first, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: st.maxHp, win: r.win });
       if (!r.win) {
         out.deaths++;
         t += 5;
@@ -548,12 +549,14 @@ for (const b of BOSSES) {
 const at = (m: number) => pct(runs.map((r) => r.pulls.filter((x) => x <= m * 60).length), 0.5);
 say(`\nКрутки (медиана): 10 мин ${at(10)}, 20 мин ${at(20)}, 30 мин ${at(30)}; смертей за прогон ${pct(runs.map((r) => r.deaths), 0.5)}`);
 if (OPT.mobs) {
-  say('\n== Мобы (все прогоны): боёв | ударов | длительность с | урон по герою % HP | поражений');
+  say('\n== Мобы: боёв | первый бой: когда, ударов, с, урон по герою % HP | все бои: ударов, с, % HP | поражений');
   const by = new Map<string, FightRec[]>();
   for (const r of runs) for (const f of r.fights) { const k = `${f.def}${f.depth ? `@${f.depth.toFixed(1)}` : ''}`; by.set(k, [...(by.get(k) ?? []), f]); }
   for (const [k, fs] of [...by].sort()) {
-    const avg = (g: (f: FightRec) => number) => fs.reduce((a, f) => a + g(f), 0) / fs.length;
-    say(`${k.padEnd(22)} ${String(fs.length).padStart(4)} | ${avg((f) => f.swings).toFixed(1).padStart(5)} | ${avg((f) => f.dur).toFixed(1).padStart(5)} | ${Math.round(avg((f) => (100 * f.taken) / f.maxHp)).toString().padStart(4)}% | ${fs.filter((f) => !f.win).length}`);
+    const avg = (g: (f: FightRec) => number, a = fs) => a.reduce((x, f) => x + g(f), 0) / Math.max(1, a.length);
+    const fst = fs.filter((f) => f.first);
+    const cols = (a: FightRec[]) => `${avg((f) => f.swings, a).toFixed(1).padStart(5)} ${avg((f) => f.dur, a).toFixed(1).padStart(5)} ${(Math.round(avg((f) => (100 * f.taken) / f.maxHp, a)) + '%').padStart(5)}`;
+    say(`${k.padEnd(22)} ${String(fs.length).padStart(4)} | ${mmss(avg((f) => f.t, fst))} ${cols(fst)} | ${cols(fs)} | ${fs.filter((f) => !f.win).length}`);
   }
 }
 say(`\n(${((Date.now() - t0) / 1000).toFixed(1)} с)`);
