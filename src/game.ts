@@ -742,8 +742,8 @@ export class Game {
         continue;
       }
       const m = u as Mob;
-      // daggers: +stack.add per stack on this mob, the finisher counts them twice; then one more stack
-      const stackMul = w.stack ? 1 + w.stack.add * m.stacks * (fin ? 2 : 1) : 1;
+      // daggers: +stack.add per stack on this mob, then one more stack
+      const stackMul = w.stack ? 1 + w.stack.add * m.stacks : 1;
       const { dmg, tier } = this.damageFor(w.type, m.def.resist, (fin ? fin.mult : 1) * stackMul * crowd);
       if (w.stack) m.setStacks(Math.min(w.stack.max, m.stacks + 1), this.time);
       const f = this.fightOf(m);
