@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { Character } from './character';
 import {
-  ANTI_KITE, COMBOS, FACTIONS, HERO, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
-  type AntiKite, type DamageType, type MobDef, type OrbKind, type ZoneDef,
+  COMBOS, FACTIONS, HERO, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
+  type DamageType, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
@@ -463,8 +463,7 @@ export class Game {
     this.moveDir.set(ix, 0, iy);
     const p = ch.position;
     if (moving) {
-      const slowed = this.antiKite === 'slow' && this.time - this.lastSwing < ANTI_KITE.slowTime;
-      p.addScaledVector(this.moveDir, this.speed * (slowed ? ANTI_KITE.slowMul : 1) * dt);
+      p.addScaledVector(this.moveDir, this.speed * dt);
       ch.walkRate = Math.min(2.4, (this.speed * this.moveDir.length()) / 2.1);
     }
     // soft push from living mobs
@@ -919,8 +918,6 @@ export class Game {
     return true;
   }
 
-  /** Old saves may hold the removed 'lunge' variant: anything but 'off' means slow. */
-  get antiKite(): AntiKite { return this.save.antiKite === 'off' ? 'off' : 'slow'; }
 
   private bossColor(m: Mob) {
     // Time-to-kill against the hero's current weapon decides the name colour (GDD 6.4).
@@ -1647,7 +1644,7 @@ export class Game {
     m.fight = null;
     logFight({
       // Depth-scaled mobs are logged as e.g. bandit_thug×1.5 (HP multiplier rounded to 0.5).
-      t: this.save.playTime ?? 0, mob: m.maxHp > m.def.hp ? `${m.def.id}×${Math.round((m.maxHp / m.def.hp) * 2) / 2}` : m.def.id, boss: !!m.def.boss, kite: this.antiKite, result, dur: +(this.time - f.t0).toFixed(1),
+      t: this.save.playTime ?? 0, mob: m.maxHp > m.def.hp ? `${m.def.id}×${Math.round((m.maxHp / m.def.hp) * 2) / 2}` : m.def.id, boss: !!m.def.boss, result, dur: +(this.time - f.t0).toFixed(1),
       dealt: Math.round(f.dealt), taken: Math.round(f.taken), hits: f.hits, combos: f.combos, slams: f.slams, slamHits: f.slamHits,
       hpStart: Math.round(f.hpStart), hpEnd: Math.round(this.hp), maxHp: this.maxHp, power: Math.round(this.power),
     });
@@ -1660,7 +1657,7 @@ export class Game {
     logSnap({
       t: Math.round(this.save.playTime ?? 0), zone: this.zone?.id ?? '?', power: this.power, maxHp: this.maxHp, regen: this.regen,
       gold: this.save.gold, kills: this.save.kills, deaths: heroDeaths(),
-      weapon: `${it.def} r${it.rarity} lv${it.lvl}${it.sharpen ? ` +${it.sharpen}` : ''}`, kite: this.antiKite, ttk,
+      weapon: `${it.def} r${it.rarity} lv${it.lvl}${it.sharpen ? ` +${it.sharpen}` : ''}`, ttk,
     });
   }
 }

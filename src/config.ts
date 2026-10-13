@@ -274,13 +274,5 @@ export function depthMul(zone: ZoneId, z: number) {
   return { hp: d ? k(d.hp) : 1, dmg: d ? k(d.dmg) : 1, reward: d ? k(d.reward) : 1, scale: d ? k(d.scale) : 1 };
 }
 
-/**
- * Anti-kite (debug toggle in ⚙): the hero runs slower for a moment after each swing, so hitting while
- * backing off lets mobs catch up.
- */
-export type AntiKite = 'off' | 'slow';
-export const ANTI_KITE_NAMES: Record<AntiKite, string> = { off: 'выкл', slow: 'замедление' };
-export const ANTI_KITE = { slowMul: 0.55, slowTime: 0.5 }; // speed × slowMul for slowTime s after a swing starts
-
 export const RESPAWN_MIN_DIST = 10;
 export const LEASH = 15;

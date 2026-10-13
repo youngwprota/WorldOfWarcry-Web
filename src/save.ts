@@ -1,4 +1,4 @@
-import { FACTIONS, HERO, type AntiKite, type FactionId } from './config';
+import { FACTIONS, HERO, type FactionId } from './config';
 import { makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
 
 export interface SaveData {
@@ -27,8 +27,6 @@ export interface SaveData {
   resets: number;
   muted: boolean;
   lowGfx?: boolean;
-  /** Debug: anti-kite variant (ANTI_KITE in config). */
-  antiKite?: AntiKite;
 }
 
 const KEY = 'warcry-save-v1';

@@ -6,7 +6,7 @@ import './grade';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { ANTI_KITE_NAMES, FACTIONS, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
+import { FACTIONS, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
@@ -129,14 +129,7 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
       wipeAll();
       clearLog();
       location.reload();
-    }, () => { if (game) game.paused = false; }, () => ui.balanceLog(report(), open), {
-      label: ANTI_KITE_NAMES[save!.antiKite === 'off' ? 'off' : 'slow'],
-      cycle: () => {
-        save!.antiKite = save!.antiKite === 'off' ? 'slow' : 'off';
-        game?.persist();
-        open();
-      },
-    });
+    }, () => { if (game) game.paused = false; }, () => ui.balanceLog(report(), open));
   };
   if (fresh) {
     ui.flash();
