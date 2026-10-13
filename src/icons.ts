@@ -32,8 +32,21 @@ const SVG: Record<string, string> = {
 };
 
 /** Any UI icon: silhouette in `color` with an ink outline. */
+const imgCache = new Map<string, HTMLImageElement>();
+/** The same icon as an image for canvas drawing (cached; draws once loaded). */
+export function iconImage(id: string, color: string) {
+  const key = id + color;
+  let img = imgCache.get(key);
+  if (!img) {
+    img = new Image();
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(icon(id, color, 64));
+    imgCache.set(key, img);
+  }
+  return img;
+}
+
 export function icon(id: string, color = '#fff', size = 24, cls = '') {
-  return `<svg class="svgi ${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" style="color:${color}" fill="currentColor" stroke="${INK}" stroke-width="2.2" stroke-linejoin="round" paint-order="stroke">${SVG[id] ?? ''}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" class="svgi ${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" style="color:${color}" fill="currentColor" stroke="${INK}" stroke-width="2.2" stroke-linejoin="round" paint-order="stroke">${SVG[id] ?? ''}</svg>`;
 }
 
 export function weaponSvg(id: string, color: string, size = 16) {
@@ -41,7 +54,7 @@ export function weaponSvg(id: string, color: string, size = 16) {
 }
 
 /** Small corner badge: which weapon family deals this damage type. */
-export const DAMAGE_TYPE_ICON: Record<DamageType, string> = { slash: 'axe', crush: 'hammer', pierce: 'sword', fire: 'sword' };
+export const DAMAGE_TYPE_ICON: Record<DamageType, string> = { slash: 'sword', chop: 'axe', crush: 'hammer' };
 
 export const TIER_COLOR: Record<ResistTier, string> = {
   weak: '#4cff6a', normal: '#ffffff', resist: '#ffa030', immune: '#ff3b3b',
@@ -57,10 +70,13 @@ export function resistIcons(def: Target, size = 19) {
   }).join('');
 }
 
-/** "+2 +6" chips in orb colours: permanent stats granted by the kill. */
-export function rewardChips(def: Target) {
+/**
+ * "+2 +6" chips in orb colours: permanent stats granted by the kill. `raw`: the numbers are stat units
+ * already (a micro-boss's bonus, e.g. hp 500 → "+500"), not orb counts.
+ */
+export function rewardChips(def: Pick<Target, 'reward'>, raw = false) {
   return (Object.entries(def.reward) as [OrbKind, number][])
-    .map(([k, n]) => `<span class="rw" style="color:${ORBS[k].css}" title="${ORBS[k].label}"><i style="background:${ORBS[k].css}"></i>${fmtOrb(k, n)}</span>`)
+    .map(([k, n]) => `<span class="rw" style="color:${ORBS[k].css}" title="${ORBS[k].label}"><i style="background:${ORBS[k].css}"></i>${raw ? `+${n}` : fmtOrb(k, n)}</span>`)
     .join('');
 }
 

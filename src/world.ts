@@ -1,14 +1,16 @@
 import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
+import { FogOfWar } from './fog';
+import { FACTIONS, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, type SpawnerDef, type DamageType, type FactionId, type OrbReward, type ResistTier, type ZoneId } from './config';
 import {
-  FACTIONS, HERO, WORLD, ZONES, type DamageType, type FactionId, type OrbKind, type ResistTier, type ZoneId,
-} from './config';
+  ARENA, FORT, GATE, ISLAND, MAP_BOX, PATH, PATH_W, GATES, RIDGES, angleOf, gateDist, edgePoint, heightAt, inCamp, pathAt, pathDist, progressAt, rimCliff, rimTrees,
+  shoreR, walkR, walkable, zoneAt, zoneIdAt, zoneWeights,
+} from './island';
+import type { Gate } from './island';
 import {
-  buildFlowers, buildGrass, buildGround, buildMist, buildPond, fbm, heightAt, pathX, windTime, zoneAt, type Pond,
+  bakeGroundMaps, buildFlowers, buildGrass, buildGround, buildMist, buildOcean, buildPond, windTime, zoneTexture, type Pond,
 } from './terrain';
-
-export { pathX };
 
 /** Deterministic RNG so the map is the same every session. */
 export function rng(seed: number) {
@@ -23,9 +25,14 @@ export function rng(seed: number) {
 }
 
 export interface Obstacle { x: number; z: number; r: number; }
-export interface SpawnPoint { x: number; z: number; mob: string; zone: ZoneId; }
-export interface BreakableSpot { x: number; z: number; kind: string; zone: ZoneId; rot: number; }
-export interface Campfire { id: string; name: string; x: number; z: number; zone: ZoneId; }
+/**
+ * A fixed spawner of one unit — a mob or a breakable prop (config SPAWNERS / PROP_SPAWNERS).
+ * `unit` + `kind`: MOBS id or BREAKABLES kind; `id` keys its saved charge state; `charges`: cooldowns per kill / break;
+ * `depth` 0..1: how far along its zone's stretch of the trail a mob sits (DEPTH scaling); `rot`: a prop's facing.
+ */
+export interface SpawnPoint {
+  id: string; unit: 'mob' | 'prop'; kind: string; x: number; z: number; charges: number[]; zone: ZoneId; depth: number; rot: number;
+}
 
 /**
  * Something that happens when a prop is destroyed (data-driven; add new types here).
@@ -39,8 +46,8 @@ export interface BreakableDef {
   color: number;
   scale: number;
   gold: [number, number];
-  /** Fixed power orbs, shown above the HP bar like on mobs. */
-  reward: Partial<Record<OrbKind, number>>;
+  /** Fixed power orbs, shown above the HP bar like on mobs — one stat only. */
+  reward: OrbReward;
   /** Material resistances: wood is easy to chop, stone needs a hammer. */
   resist: Partial<Record<DamageType, ResistTier>>;
   r: number;
@@ -49,20 +56,21 @@ export interface BreakableDef {
   onBreak?: BreakEvent[];
 }
 const GRAVE_RISE: BreakEvent[] = [{ type: 'spawnMob', mob: 'skeleton_worker', chance: 0.35, bark: 'Кто потревожил мой сон?!' }];
-const WOOD: BreakableDef['resist'] = { slash: 'weak', crush: 'resist' };
-const STONE: BreakableDef['resist'] = { slash: 'resist', crush: 'weak' };
+// wood is easy to chop, stone needs a hammer
+const WOOD: BreakableDef['resist'] = { chop: 'weak', crush: 'resist' };
+const STONE: BreakableDef['resist'] = { slash: 'resist', chop: 'resist', crush: 'weak' };
 export const BREAKABLES: Record<string, BreakableDef> = {
   barrel: { model: 'barrel', hits: 2, color: 0x8a5a2b, scale: 0.85, gold: [1, 3], reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
   orc_barrel: { model: 'orc_barrel', hits: 2, color: 0x7a4a22, scale: 0.85, gold: [1, 3], reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
   box: { model: 'box_small_1', hits: 1, color: 0xa87a45, scale: 0.9, gold: [0, 2], reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
-  box_large: { model: 'box_large_1', hits: 3, color: 0xa87a45, scale: 0.8, gold: [3, 6], reward: { power: 1, hp: 1 }, resist: WOOD, r: 0.7, respawn: 60 },
+  box_large: { model: 'box_large_1', hits: 3, color: 0xa87a45, scale: 0.8, gold: [3, 6], reward: { power: 2 }, resist: WOOD, r: 0.7, respawn: 60 },
   orc_box: { model: 'orc_box_small_1', hits: 1, color: 0x8a5a2b, scale: 0.9, gold: [0, 2], reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
   bush: { model: null, hits: 1, color: 0x3f8f2f, scale: 1, gold: [0, 1], reward: { regen: 1 }, resist: { slash: 'weak', crush: 'resist' }, r: 0.6, respawn: 25 },
   tomb1: { model: 'undead_tomb_stone_1', hits: 2, color: 0x77748a, scale: 0.75, gold: [1, 4], reward: { power: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   tomb2: { model: 'undead_tomb_stone_2', hits: 2, color: 0x77748a, scale: 0.75, gold: [1, 4], reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   tomb3: { model: 'undead_tomb_stone_3', hits: 2, color: 0x77748a, scale: 0.75, gold: [1, 4], reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   tomb4: { model: 'undead_tomb_stone_4', hits: 2, color: 0x77748a, scale: 0.75, gold: [1, 4], reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  coffin: { model: 'undead_coffin', hits: 3, color: 0x5a3c2c, scale: 0.34, gold: [4, 8], reward: { power: 1, hp: 1 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
+  coffin: { model: 'undead_coffin', hits: 3, color: 0x5a3c2c, scale: 0.34, gold: [4, 8], reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
 };
 
 const bushGeo = new THREE.IcosahedronGeometry(0.55, 0);
@@ -100,19 +108,45 @@ interface Inst { x: number; z: number; s: number; r?: number; y?: number; tint?:
 const LEAF_TINTS = [0xffffff, 0xd4ecb0, 0xa8d488, 0x8fc47a, 0xc2e09a];
 const leaf = (r: () => number) => LEAF_TINTS[Math.floor(r() * LEAF_TINTS.length)];
 
+/** Position in a local frame: `fwd` along angle a (0 = +Z), `side` to its local +X. */
+const local = (cx: number, cz: number, a: number, side: number, fwd: number) =>
+  ({ x: cx + side * Math.cos(a) + fwd * Math.sin(a), z: cz - side * Math.sin(a) + fwd * Math.cos(a) });
+/** Angle (0 = +Z) of the trail where it leaves a circle of radius r around a point, going backward or forward. */
+function trailExit(cx: number, cz: number, r: number, forward: boolean) {
+  const sc = progressAt(cx, cz);
+  for (let s = sc; forward ? s < PATH.length : s > 0; s += forward ? 0.5 : -0.5) {
+    const p = pathAt(s);
+    if (Math.hypot(p.x - cx, p.z - cz) >= r) return Math.atan2(p.x - cx, p.z - cz);
+  }
+  return forward ? Math.PI : 0;
+}
+const bandKey = (x: number, z: number) => Math.floor(x / 24) * 1000 + Math.floor(z / 24);
+function bands(items: Inst[]) {
+  const b = new Map<number, Inst[]>();
+  for (const it of items) {
+    const k = bandKey(it.x, it.z);
+    if (!b.has(k)) b.set(k, []);
+    b.get(k)!.push(it);
+  }
+  return [...b.values()];
+}
+
 /** Everything placed into the level (static models are cloned; repeated decor is instanced). */
 export class World {
   readonly group = new THREE.Group();
   readonly obstacles: Obstacle[] = [];
+  /** Every spawner on the island: mobs and breakable props alike. */
   readonly spawns: SpawnPoint[] = [];
-  readonly breakables: BreakableSpot[] = [];
-  readonly campfires: Campfire[] = [];
   readonly bosses: { mob: string; x: number; z: number }[] = [];
-  readonly ponds: Pond[] = [{ x: -21, z: -74, r: 5.5 }];
-  smithy = new THREE.Vector3();
-  barrier!: THREE.Group;
-  barrierOpen = false;
-  private barrierMat!: THREE.ShaderMaterial;
+  readonly ponds: Pond[] = [{ x: 11, z: -83, r: 5 }];
+  /** Baked island picture (ground + ocean) for the minimap and the world map; see mapToCanvas. */
+  readonly mapCanvas: HTMLCanvasElement;
+  readonly gate = GATE;
+  /** Fog of war over unexplored land (state is loaded/saved by Game). */
+  readonly fog: FogOfWar;
+  /** Passages between locations; each is shut by a magic barrier until opened. */
+  private gateStones: Inst[] = [];
+  readonly gates: { def: Gate; mesh: THREE.Mesh; mat: THREE.ShaderMaterial; obstacles: Obstacle[]; open: boolean }[] = [];
   private flames: THREE.Mesh[] = [];
   private time = { value: 0 };
   private mist: ReturnType<typeof buildMist>;
@@ -121,7 +155,11 @@ export class World {
   private packCenters: [number, number][] = [];
 
   constructor(public faction: FactionId) {
-    this.group.add(buildGround(this.ponds));
+    const maps = bakeGroundMaps(this.ponds);
+    this.mapCanvas = maps.map;
+    this.group.add(buildGround(maps.ground));
+    const zoneTex = zoneTexture();
+    this.group.add(buildOcean(this.time, maps.shoreTex));
     for (const p of this.ponds) {
       this.group.add(buildPond(p, this.time));
       this.obstacles.push({ x: p.x, z: p.z, r: p.r * 0.85 });
@@ -130,33 +168,34 @@ export class World {
     this.buildForest();
     this.buildBarrier();
     this.buildCemetery();
-    this.buildWilderness();
+    this.buildRim();
     const free = (x: number, z: number) => this.free(x, z, 0.2);
     this.grass = [buildGrass(free, this.ponds), buildFlowers(free)];
     this.group.add(...this.grass);
-    this.mist = buildMist(this.time);
+    this.mist = buildMist(this.time, zoneTex);
     this.group.add(this.mist.group);
+    this.fog = new FogOfWar(this.time);
+    this.group.add(this.fog.mesh);
   }
 
-  zoneAt(z: number) { return zoneAt(z); }
+  zoneAt(x: number, z: number) { return zoneAt(x, z); }
 
   /** Environment colours (and fog density) blended across zone borders. */
-  envAt(z: number, out: { sky: THREE.Color; fog: THREE.Color; hemiSky: THREE.Color; hemiGround: THREE.Color; density: number }) {
-    const h = 8;
-    const i = ZONES.indexOf(zoneAt(z));
-    const zone = ZONES[i];
-    let other = zone;
-    let k = 0;
-    const dNorth = z - zone.z[1];
-    const dSouth = zone.z[0] - z;
-    if (dNorth < h && ZONES[i + 1]) { other = ZONES[i + 1]; k = 0.5 * (1 - dNorth / h); }
-    else if (dSouth < h && ZONES[i - 1]) { other = ZONES[i - 1]; k = 0.5 * (1 - dSouth / h); }
+  envAt(x: number, z: number, out: { sky: THREE.Color; fog: THREE.Color; hemiSky: THREE.Color; hemiGround: THREE.Color; density: number }) {
+    const w = zoneWeights(x, z);
+    const sum = w.reduce((a, b) => a + b, 0) || 1;
     const tmp = new THREE.Color();
-    out.sky.set(zone.sky).lerp(tmp.set(other.sky), k);
-    out.fog.set(zone.fog).lerp(tmp.set(other.fog), k);
-    out.hemiSky.set(zone.hemi[0]).lerp(tmp.set(other.hemi[0]), k);
-    out.hemiGround.set(zone.hemi[1]).lerp(tmp.set(other.hemi[1]), k);
-    out.density = THREE.MathUtils.lerp(zone.fogDensity, other.fogDensity, k);
+    out.sky.setRGB(0, 0, 0); out.fog.setRGB(0, 0, 0); out.hemiSky.setRGB(0, 0, 0); out.hemiGround.setRGB(0, 0, 0);
+    out.density = 0;
+    ZONES.forEach((zd, i) => {
+      const k = w[i] / sum;
+      if (k <= 0) return;
+      out.sky.add(tmp.set(zd.sky).multiplyScalar(k));
+      out.fog.add(tmp.set(zd.fog).multiplyScalar(k));
+      out.hemiSky.add(tmp.set(zd.hemi[0]).multiplyScalar(k));
+      out.hemiGround.add(tmp.set(zd.hemi[1]).multiplyScalar(k));
+      out.density += zd.fogDensity * k;
+    });
   }
 
   // ---------- placement helpers ----------
@@ -183,10 +222,10 @@ export class World {
     return this.minYCache.get(name)!;
   }
 
-  /** Is a spot free of obstacles, ponds and the main path? */
+  /** Is a spot on the walkable island, free of obstacles, ponds and (optionally) the trail? */
   free(x: number, z: number, pad = 0.6, avoidPath = false) {
-    if (Math.abs(x) > WORLD.halfWidth || z > WORLD.zMax || z < WORLD.zMin) return false;
-    if (avoidPath && z < -12 && Math.abs(x - pathX(z)) < 3) return false;
+    if (!walkable(x, z, pad)) return false;
+    if (avoidPath && pathDist(x, z) < PATH_W * 0.5 + 1.6) return false;
     for (const o of this.obstacles) if ((x - o.x) ** 2 + (z - o.z) ** 2 < (o.r + pad) ** 2) return false;
     return true;
   }
@@ -214,18 +253,22 @@ export class World {
     return m;
   }
 
+  /** Like place(), but first slides the spot towards the island centre until it is walkable with `pad` room. */
+  private placeInside(name: string, x: number, z: number, scale: number, rot: number, pad = 3, collide: number | 'auto' = 'auto') {
+    for (let i = 0; i < 40 && !walkable(x, z, pad); i++) {
+      const d = Math.hypot(ISLAND.cx - x, ISLAND.cz - z) || 1;
+      x += (ISLAND.cx - x) / d;
+      z += (ISLAND.cz - z) / d;
+    }
+    return this.place(name, x, z, scale, rot, collide);
+  }
+
   /**
-   * Instanced copies of a model (trees, rocks, poles). Items are split into 24 m bands along the
-   * map so each band has its own bounding sphere and off-screen bands are frustum-culled.
+   * Instanced copies of a model (trees, rocks, poles). Items are split into 24 m tiles so each tile
+   * has its own bounding sphere and off-screen tiles are frustum-culled.
    */
   private scatter(name: string, items: Inst[], shadow = true) {
-    const bands = new Map<number, Inst[]>();
-    for (const it of items) {
-      const k = Math.floor(it.z / 24);
-      if (!bands.has(k)) bands.set(k, []);
-      bands.get(k)!.push(it);
-    }
-    for (const band of bands.values()) this.scatterBand(name, band, shadow);
+    for (const band of bands(items)) this.scatterBand(name, band, shadow);
   }
 
   private scatterBand(name: string, items: Inst[], shadow: boolean) {
@@ -255,14 +298,8 @@ export class World {
     });
   }
 
-  /** Cheap low-poly pines for the far hills (~30 triangles each vs ~2000 for the elf trees). */
+  /** Cheap low-poly pines for the rim (~30 triangles each vs ~2000 for the elf trees). */
   private pines(items: Inst[]) {
-    const bands = new Map<number, Inst[]>();
-    for (const it of items) {
-      const k = Math.floor(it.z / 24);
-      if (!bands.has(k)) bands.set(k, []);
-      bands.get(k)!.push(it);
-    }
     const trunk = new THREE.CylinderGeometry(0.15, 0.25, 1.4, 5).translate(0, 0.7, 0);
     const c1 = new THREE.ConeGeometry(1.4, 2.6, 7).translate(0, 2.4, 0);
     const c2 = new THREE.ConeGeometry(1.0, 2.0, 7).translate(0, 3.6, 0);
@@ -271,7 +308,7 @@ export class World {
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const col = new THREE.Color();
-    for (const band of bands.values()) {
+    for (const band of bands(items)) {
       const meshes = [new THREE.InstancedMesh(trunk, trunkMat, band.length), new THREE.InstancedMesh(c1, leafMat, band.length), new THREE.InstancedMesh(c2, leafMat, band.length)];
       band.forEach((t, i) => {
         q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), t.r ?? 0);
@@ -279,19 +316,13 @@ export class World {
         col.set(t.tint ?? 0x4f8a3c);
         meshes.forEach((im, j) => { im.setMatrixAt(i, m); if (j) im.setColorAt(i, col); });
       });
-      for (const im of meshes) { im.receiveShadow = true; im.computeBoundingSphere(); this.group.add(im); }
+      for (const im of meshes) { im.castShadow = true; im.receiveShadow = true; im.computeBoundingSphere(); this.group.add(im); }
     }
   }
 
   /** Bare spooky trees: instanced trunk + three crooked branches. */
   private deadTrees(items: Inst[]) {
-    const bands = new Map<number, Inst[]>();
-    for (const it of items) {
-      const k = Math.floor(it.z / 24);
-      if (!bands.has(k)) bands.set(k, []);
-      bands.get(k)!.push(it);
-    }
-    for (const band of bands.values()) this.deadTreeBand(band);
+    for (const band of bands(items)) this.deadTreeBand(band);
   }
 
   private deadTreeBand(items: Inst[]) {
@@ -333,10 +364,64 @@ export class World {
     this.scatter(model, items);
   }
 
+  /** Spots already taken by spread(): everything scattered with it keeps its distance from the rest. */
+  private taken: [number, number][] = [];
+
+  /** Up to `count` spots from `gen` that pass `ok` and are at least `minD` from every earlier spread() spot. */
+  private spread(count: number, minD: number, gen: () => { x: number; z: number }, ok: (x: number, z: number) => boolean, all = false) {
+    const out: { x: number; z: number }[] = [];
+    // `all`: spawners from the config must all get a spot, so the spacing is relaxed step by step if needed
+    for (let d = minD; out.length < count && d >= (all ? 2 : minD); d *= 0.8) {
+      for (let i = 0; i < count * 40 && out.length < count; i++) {
+        const p = gen();
+        if (!ok(p.x, p.z) || this.taken.some(([x, z]) => (x - p.x) ** 2 + (z - p.z) ** 2 < d * d)) continue;
+        out.push(p);
+        this.taken.push([p.x, p.z]);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Single mobs spread evenly along stretches of the trail ([s0, s1] arc-length ranges), alternating sides,
+   * 6–13 m off it and away from each other (no clumps). Each spawn gets `depth` 0..1
+   * (first..last) for zone depth scaling.
+   */
+  private mobsAlong(ranges: [number, number][], mobs: SpawnerDef[], zone: ZoneId, r: () => number) {
+    const total = ranges.reduce((t, [a, b]) => t + (b - a), 0);
+    const sAt = (d: number) => {
+      for (const [a, b] of ranges) { if (d <= b - a) return a + d; d -= b - a; }
+      return ranges[ranges.length - 1][1];
+    };
+    const ok = (q: { x: number; z: number }) => walkable(q.x, q.z, 3) && zoneIdAt(q.x, q.z) === zone && pathDist(q.x, q.z) > 4 && !inCamp(q.x, q.z, 4)
+      && !this.packCenters.some(([x, z]) => Math.hypot(x - q.x, z - q.z) < 9);
+    mobs.forEach((def, i) => {
+      const d = ((i + 0.5) / mobs.length) * total;
+      let c: { x: number; z: number } | null = null;
+      for (const ds of [0, 4, -4, 8, -8]) {
+        const p = pathAt(sAt(Math.min(total, Math.max(0, d + ds))));
+        for (const side of [i % 2 ? 1 : -1, i % 2 ? -1 : 1]) {
+          for (const off of i % 4 < 2 ? [7, 10, 13] : [12, 9, 6]) {
+            const q = { x: p.x + p.tz * side * off, z: p.z - p.tx * side * off };
+            if (ok(q)) { c = q; break; }
+          }
+          if (c) break;
+        }
+        if (c) break;
+      }
+      if (!c) { const p = pathAt(sAt(d)); c = { x: p.x + p.tz * 6, z: p.z - p.tx * 6 }; }
+      c.x += (r() - 0.5) * 1.5;
+      c.z += (r() - 0.5) * 1.5;
+      this.packCenters.push([c.x, c.z]);
+      this.taken.push([c.x, c.z]);
+      this.addSpawn(`${zone}:${i}`, def, c.x, c.z, zone, mobs.length > 1 ? i / (mobs.length - 1) : 0, 0);
+    });
+  }
+
   // ---------- camp ----------
   private buildCamp() {
     const H = this.faction === 'human';
-    const cz = 3;
+    const cz = ISLAND.campZ;
     // palisade around the camp, gate to the north (towards the forest)
     this.palisade(0, cz, 16.5, [Math.PI], 0.27);
     const tower = H ? 'tower_human_small_1' : 'orc_high_stand';
@@ -344,20 +429,17 @@ export class World {
     this.place(tower, 5.4, cz - 15.8, H ? 0.75 : 0.65, 0, 1.4);
     // buildings of the hero's race around the plaza
     const B = H
-      ? { big: 'human_house_large', mid: 'human_house_mid', small: 'human_house_small', smith: 'smithy_building', barrack: 'barrack_Lv2', tower: 'tower_big' }
-      : { big: 'orc_house_Lv2', mid: 'orc_house_Lv1', small: 'orc_cabin', smith: 'orc_smithy_Lv1', barrack: 'orc_barrack_Lv2', tower: 'orc_tower_Lv2' };
+      ? { big: 'human_house_large', mid: 'human_house_mid', small: 'human_house_small', barrack: 'barrack_Lv2', tower: 'tower_big' }
+      : { big: 'orc_house_Lv2', mid: 'orc_house_Lv1', small: 'orc_cabin', barrack: 'orc_barrack_Lv2', tower: 'orc_tower_Lv2' };
     this.place(B.big, -10, cz + 8.5, 0.62, Math.PI * 0.8);
     this.place(B.mid, 10, cz + 9, 0.62, -Math.PI * 0.78);
     this.place(B.small, -11.5, cz - 3.5, H ? 0.62 : 0.85, Math.PI / 2);
-    this.place(B.smith, 12, cz - 3, 0.55, -Math.PI / 2);
     this.place(B.barrack, 0, cz + 12.5, 0.5, Math.PI);
     this.place(B.tower, -12.5, cz - 11, 0.45, 0.6);
-    this.smithy.set(8.6, 0, cz - 3);
     // yard props
     const f = FACTIONS[this.faction];
     this.place(f.campProps[0], -3.2, cz - 13.8, 0.42, 0, 0.4); // banners at the gate
     this.place(f.campProps[0], 3.2, cz - 13.8, 0.42, 0, 0.4);
-    this.place(H ? 'anvil_big' : 'orc_anvil', 8.4, cz - 0.4, 0.5, 0.3, 0.6);
     this.place(H ? 'practice_dummy' : 'orc_practice_dummy', -7.5, cz - 8.5, 0.65, 0.2, 0.5);
     this.place(H ? 'practice_dummy' : 'orc_practice_dummy', -9.8, cz - 7.2, 0.65, -0.4, 0.5);
     this.place(H ? 'target' : 'orc_practice_aim', 8.5, cz - 9.5, 0.9, -0.3, 0.5);
@@ -384,161 +466,138 @@ export class World {
       this.place('shield', 11.6, cz - 6.5, 0.8, -Math.PI / 2, 0);
       this.place('spear', 11.6, cz - 7.3, 0.8, -Math.PI / 2, 0);
     }
-    this.addCampfire('camp', 'Лагерь', -4.5, -1, 'camp');
+    this.campfireDecor(-4.5, cz - 1); // decoration only
     // camp crates (tutorial-ish), just outside the gate
-    for (const [x, z, k] of [[-6, -18, 'barrel'], [-5, -19.5, 'box'], [6, -19, 'box'], [7, -17.5, 'barrel']] as const) {
-      this.breakables.push({ x, z, kind: k, zone: 'camp', rot: x });
-    }
+    const spots = [[-6, -18.5], [-5, -20], [5, -19.5], [6, -18], [-7, -21], [7, -21]];
+    PROP_SPAWNERS.camp.slice(0, spots.length).forEach((d, i) => this.addProp('camp', i, d, spots[i][0], cz + spots[i][1], 'forest', spots[i][0]));
   }
 
-  addCampfire(id: string, name: string, x: number, z: number, zone: ZoneId) {
-    const model = zone === 'camp' ? FACTIONS[this.faction].campfire : 'campfire';
-    this.place(model, x, z, 0.42, 0, 0.8);
+  /** A spawner from the config; without `charges` it has one endless charge with the unit's own respawn time. */
+  private addSpawn(id: string, d: SpawnerDef, x: number, z: number, zone: ZoneId, depth: number, rot: number) {
+    const respawn = d.unit === 'mob' ? MOBS[d.id].respawn : BREAKABLES[d.id].respawn;
+    this.spawns.push({ id, unit: d.unit, kind: d.id, x, z, charges: d.charges ?? [respawn], zone, depth, rot });
+  }
+  /** A breakable prop spawner from config PROP_SPAWNERS[group][i]. */
+  private addProp(group: string, i: number, d: SpawnerDef, x: number, z: number, zone: ZoneId, rot: number) {
+    this.addSpawn(`prop:${group}:${i}`, d, x, z, zone, 0, rot);
+  }
+
+  /** The camp's fire: model and a flickering flame, no gameplay. */
+  private campfireDecor(x: number, z: number) {
+    this.place(FACTIONS[this.faction].campfire, x, z, 0.42, 0, 0.8);
     const flame = new THREE.Mesh(
       new THREE.ConeGeometry(0.35, 1, 6).translate(0, 0.5, 0),
       new THREE.MeshBasicMaterial({ color: 0xffa020, transparent: true, opacity: 0.85 }),
     );
     flame.position.set(x, 0.15, z);
-    const glow = new THREE.Mesh(
-      new THREE.CircleGeometry(HERO.campfireRadius, 32).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0xffb040, transparent: true, opacity: 0.12, depthWrite: false }),
-    );
-    glow.position.set(x, 0.03, z);
-    this.group.add(flame, glow);
+    this.group.add(flame);
     this.flames.push(flame);
-    this.campfires.push({ id, name, x, z, zone });
   }
 
-  // ---------- forest ----------
+  // ---------- forest: the hub in the middle of the island, the settlement at its centre ----------
   private buildForest() {
     const r = rng(23);
     const H = this.faction === 'human';
-    const packs: [number, number, string[]][] = [
-      [-6, -34, ['bandit_thug', 'bandit_thug']],
-      [10, -40, ['bandit_thug', 'bandit_thug', 'bandit_thug']],
-      [-14, -48, ['bandit_thug', 'bandit_fighter']],
-      [4, -55, ['bandit_thug', 'bandit_thug', 'bandit_fighter']],
-      [-15, -62, ['bandit_fighter', 'bandit_thug']],
-      [16, -64, ['bandit_thug', 'bandit_thug', 'bandit_thug']],
-      [-4, -78, ['bandit_fighter', 'bandit_fighter', 'bandit_thug']],
-      [14, -84, ['bandit_thug', 'bandit_fighter', 'bandit_thug']],
-      [-14, -90, ['bandit_fighter', 'bandit_thug', 'bandit_thug']],
-      [11, -92, ['bandit_fighter', 'bandit_fighter']],
-    ];
-    for (const [x, z, mobs] of packs) {
-      this.packCenters.push([x, z]);
-      mobs.forEach((mob, i) => this.spawns.push({ x: x + Math.cos(i * 2.2) * 1.8, z: z + Math.sin(i * 2.2) * 1.8, mob, zone: 'forest' }));
-    }
+    const sFort = progressAt(FORT.x, FORT.z);
+    const s0 = progressAt(-3, -80);
+    const s1 = sFort - 16;
+    this.mobsAlong([[s0, s1], [sFort + 15, GATE.s - 10]], SPAWNERS.forest ?? [], 'forest', r);
 
-    // Lumber camp (east)
-    this.place('woodcutter_building', 27, -44, 0.55, -Math.PI / 2);
-    this.place('wood_pile_big', 21.5, -39.5, 0.5, 0.3);
-    this.place('elf_log_pile', 21, -49, 0.5, 1.2);
-    this.place('saw', 24.5, -52, 0.45, 0.4, 0.8);
-    this.place('wood_pile_small', 19.5, -44.5, 0.6, 0.8, 0.6);
-    // Abandoned farm (west) with a well
-    this.place('human_house_small', -27, -40, 0.5, Math.PI / 2);
-    this.place('elf_well', -20.5, -35, 0.36, 0, 1.1);
-    this.place('wood_pile_small', -23.5, -45.5, 0.6, 0.2, 0.6);
-    this.place('bucket', -19, -36.5, 0.8, 0, 0);
-    // Pond rocks & reeds handled by terrain; a few stones around it
-    for (const [x, z, s] of [[-26.5, -70, 1.6], [-15.5, -78, 1.3], [-24, -80, 1.1]] as const) this.place('orc_stone_big', x, z, s, x * 3);
-    // Old mine (east, in the hillside)
-    this.place('mine_enterance', 29.5, -80, 0.5, -Math.PI / 2);
-    this.place('minecart', 24, -78.5, 0.55, 0.3, 0.6);
-    this.scatter('mine_rail_piece', [0, 1, 2, 3].map((i) => ({ x: 26.5 - i * 0.9, z: -80, s: 0.55, r: Math.PI / 2 })), false);
-    this.place('box_small_2', 23.5, -82.5, 0.8, 0.5, 0.5);
-
-    // Bandit fort around the boss: built from the enemy race's kit.
-    const fx = 0;
-    const fz = -105;
-    // gates on both sides: the path to the cemetery runs through the fort
-    const north = Math.atan2(pathX(WORLD.barrierZ) - fx, -12) ;
-    this.palisade(fx, fz, 12, [0, north], 0.36);
+    // Lumber camp in the north-east of the forest
+    const L = { x: 28, z: -68 };
+    this.place('woodcutter_building', L.x + 4, L.z + 2, 0.55, -Math.PI / 2);
+    this.place('wood_pile_big', L.x - 1.5, L.z + 6.5, 0.5, 0.3);
+    this.place('elf_log_pile', L.x - 2, L.z - 3, 0.5, 1.2);
+    this.place('saw', L.x + 1.5, L.z - 6, 0.45, 0.4, 0.8);
+    this.place('wood_pile_small', L.x - 3.5, L.z + 1.5, 0.6, 0.8, 0.6);
+    // Abandoned farm (south-west of the settlement) with a well
+    const F = { x: -19, z: -32 };
+    this.place('human_house_small', F.x - 4, F.z - 1, 0.5, Math.PI / 2);
+    this.place('elf_well', F.x + 2.5, F.z + 4, 0.36, 0, 1.1);
+    this.place('wood_pile_small', F.x - 0.5, F.z - 6.5, 0.6, 0.2, 0.6);
+    this.place('bucket', F.x + 4, F.z + 2.5, 0.8, 0, 0);
+    // Rocks around the pond
+    const pond = this.ponds[0];
+    for (const [dx, dz, s] of [[-5.5, 4, 1.6], [5.5, -4, 1.3], [-3, -6, 1.1]] as const) this.place('orc_stone_big', pond.x + dx, pond.z + dz, s, dx * 3);
+    // Bandit fort around the boss, built from the enemy race's kit. The trail runs through two gates.
+    const fx = FORT.x;
+    const fz = FORT.z;
+    const aIn = trailExit(fx, fz, FORT.r, false);
+    const aOut = trailExit(fx, fz, FORT.r, true);
+    this.palisade(fx, fz, FORT.r, [aIn, aOut], 0.36);
+    // decorations laid out with the entrance at local +Z; skip anything standing in the trail
+    const exitDir = { x: Math.sin(aOut), z: Math.cos(aOut) };
+    const inTrail = (x: number, z: number) => {
+      const dx = x - fx;
+      const dz = z - fz;
+      const along = dx * exitDir.x + dz * exitDir.z;
+      return pathDist(x, z) < 2.6 || (along > 0 && Math.abs(dx * exitDir.z - dz * exitDir.x) < 2.6);
+    };
+    const deco = (name: string, side: number, fwd: number, scale: number, rot: number, collide: number | 'auto' = 'auto') => {
+      const p = local(fx, fz, aIn, side, fwd);
+      if (!inTrail(p.x, p.z)) this.place(name, p.x, p.z, scale, aIn + rot, collide);
+    };
     if (H) {
-      this.place('orc_tower_Lv2', -8.5, fz - 7, 0.38, 0.4);
-      this.place('orc_tower_Lv2', 8.5, fz - 7, 0.38, -0.4);
-      this.place('orc_throne', -6, fz - 8.5, 0.9, 0.5, 1);
-      this.place('orc_drum_big', -9.8, fz + 1, 0.45, 0.5, 0.7);
-      this.place('orc_tusk_standing', -4.6, fz + 12.4, 0.9, 0.3, 0.5);
-      this.place('orc_tusk_standing', 4.6, fz + 12.4, 0.9, -0.3, 0.5);
-      this.place('orc_horned_skull', -6, fz - 10, 1.4, 0, 0);
+      deco('orc_tower_Lv2', -8.5, -7, 0.38, 0.4);
+      deco('orc_tower_Lv2', 8.5, -7, 0.38, -0.4);
+      deco('orc_throne', -6, -8.5, 0.9, 0.5, 1);
+      deco('orc_drum_big', -9.8, 1, 0.45, 0.5, 0.7);
+      deco('orc_tusk_standing', -4.6, 12.4, 0.9, 0.3, 0.5);
+      deco('orc_tusk_standing', 4.6, 12.4, 0.9, -0.3, 0.5);
+      deco('orc_horned_skull', -6, -10, 1.4, 0, 0);
     } else {
-      this.place('tower_Lv2', -8.5, fz - 7, 0.38, 0.4);
-      this.place('tower_Lv2', 8.5, fz - 7, 0.38, -0.4);
-      this.place('throne_Lv1', -6, fz - 9, 0.3, 0.5, 1.4);
-      this.place('banner', -4.6, fz + 12.4, 0.45, 0, 0.4);
-      this.place('banner', 4.6, fz + 12.4, 0.45, 0, 0.4);
+      deco('tower_Lv2', -8.5, -7, 0.38, 0.4);
+      deco('tower_Lv2', 8.5, -7, 0.38, -0.4);
+      deco('throne_Lv1', -6, -9, 0.3, 0.5, 1.4);
+      deco('banner', -4.6, 12.4, 0.45, 0, 0.4);
+      deco('banner', 4.6, 12.4, 0.45, 0, 0.4);
     }
-    // camp clutter along the inner wall
-    this.place(H ? 'orc_beam_pile' : 'wood_pile_big', -9.5, fz + 4.5, 0.5, 0.6);
-    this.place(H ? 'orc_wood_pile_small' : 'wood_pile_small', 9.8, fz - 2, 0.65, 1.1);
-    this.place(H ? 'orc_box_large_2' : 'box_large_2', 9.2, fz + 4, 0.8, 0.3, 0.6);
-    this.place(H ? 'orc_barrel' : 'barrel', 10.2, fz + 5.3, 0.8, 0.3, 0.5);
-    this.place(H ? 'orc_head_lantern' : 'lantern_street', -4, fz - 9, 0.45, 0, 0.3);
-    this.place(H ? 'orc_head_lantern' : 'lantern_street', 4, fz - 9, 0.45, 0, 0.3);
+    deco(H ? 'orc_beam_pile' : 'wood_pile_big', -9.5, 4.5, 0.5, 0.6);
+    deco(H ? 'orc_wood_pile_small' : 'wood_pile_small', 9.8, -2, 0.65, 1.1);
+    deco(H ? 'orc_box_large_2' : 'box_large_2', 9.2, 4, 0.8, 0.3, 0.6);
+    deco(H ? 'orc_barrel' : 'barrel', 10.2, 5.3, 0.8, 0.3, 0.5);
+    deco(H ? 'orc_head_lantern' : 'lantern_street', -4, -9, 0.45, 0, 0.3);
+    deco(H ? 'orc_head_lantern' : 'lantern_street', 4, -9, 0.45, 0, 0.3);
     this.bosses.push({ mob: 'bandit_chief', x: fx, z: fz });
     this.packCenters.push([fx, fz]);
 
-    this.addCampfire('forest', 'Опушка', pathX(-68) + 3, -68, 'forest');
-
-    // Stepping stones on the path
+    // Stepping stones on the trail
     const stones: Inst[] = [];
-    for (let z = -24; z > -116; z -= 2.6 + r() * 1.5) stones.push({ x: pathX(z) + (r() - 0.5) * 1.6, z, s: 0.35 + r() * 0.2, r: r() * 6, y: 0.01 });
+    for (let s = 2; s < GATE.s - 3; s += 2.6 + r() * 1.5) {
+      const p = pathAt(s);
+      if (Math.hypot(p.x - fx, p.z - fz) < FORT.r + 1) continue;
+      const off = (r() - 0.5) * PATH_W * 0.5;
+      stones.push({ x: p.x + p.tz * off, z: p.z - p.tx * off, s: 0.2 + r() * 0.1, r: r() * 6, y: 0.01 });
+    }
     this.scatter('elf_rock_small', stones, false);
 
-    // Trees, bushes and boulders inside the forest (kept off the path, packs and clearings)
+    // Trees, bushes and boulders one by one, evenly spread (no clumps), off the trail, mobs and the fort.
     const trees: Inst[] = [];
     const tall: Inst[] = [];
     const bushes: Inst[] = [];
     const rocks: Inst[] = [];
-    // Groves: clusters of trees with bushes and boulders around them; the clearings between
-    // groves are where packs live, so fights stay visible from the top-down camera.
-    const blocked = (x: number, z: number, pad: number) =>
-      !this.free(x, z, pad, true) || this.nearPack(x, z, 5.5) || (Math.abs(z + 105) < 16 && Math.abs(x) < 16);
-    let groves = 0;
-    for (let i = 0; i < 400 && groves < 30; i++) {
-      const gz = -27 - r() * 84;
-      const gx = (r() * 2 - 1) * (WORLD.halfWidth - 2);
-      if (blocked(gx, gz, 2)) continue;
-      groves++;
-      const n = 5 + Math.floor(r() * 5);
-      for (let k = 0, tries = 0; k < n && tries < n * 4; tries++) {
-        const a = r() * Math.PI * 2;
-        const d = 0.8 + r() * 3.8;
-        const x = gx + Math.cos(a) * d;
-        const z = gz + Math.sin(a) * d;
-        if (blocked(x, z, 0.35)) continue;
-        k++;
-        const t = r();
-        if (t < 0.45) {
-          trees.push({ x, z, s: 0.55 + r() * 0.35, r: r() * 6, tint: leaf(r) });
-          this.obstacles.push({ x, z, r: 0.5 });
-        } else if (t < 0.7) {
-          tall.push({ x, z, s: 0.5 + r() * 0.3, r: r() * 6, tint: leaf(r) });
-          this.obstacles.push({ x, z, r: 0.55 });
-        } else if (t < 0.9) {
-          const s = 0.18 + r() * 0.14;
-          bushes.push({ x, z, s, r: r() * 6, y: 1.0 * s });
-          this.obstacles.push({ x, z, r: 2.4 * s });
-        } else {
-          const s = 0.3 + r() * 0.35;
-          rocks.push({ x, z, s, r: r() * 6 });
-          this.obstacles.push({ x, z, r: 1.1 * s });
-        }
-      }
-    }
-    // a few lone bushes and rocks in the open
-    for (let i = 0; i < 40; i++) {
-      const z = -26 - r() * 88;
-      const x = (r() * 2 - 1) * (WORLD.halfWidth - 1.5);
-      if (blocked(x, z, 2)) continue;
-      if (r() < 0.6) {
-        const s = 0.14 + r() * 0.1;
+    const inForest = (x: number, z: number) => zoneIdAt(x, z) === 'forest';
+    const open = (x: number, z: number) =>
+      inForest(x, z) && !inCamp(x, z, 3) && this.free(x, z, 1, true) && !this.nearPack(x, z, 5) && Math.hypot(x - fx, z - fz) > FORT.r + 4;
+    const randomSpot = () => {
+      const a = r() * Math.PI * 2;
+      const d = Math.sqrt(r()) * 56;
+      return { x: ISLAND.cx + Math.sin(a) * d, z: ISLAND.cz + Math.cos(a) * d };
+    };
+    for (const { x, z } of this.spread(85, 7, randomSpot, open)) {
+      const t = r();
+      if (t < 0.5) {
+        trees.push({ x, z, s: 0.55 + r() * 0.35, r: r() * 6, tint: leaf(r) });
+        this.obstacles.push({ x, z, r: 0.5 });
+      } else if (t < 0.7) {
+        tall.push({ x, z, s: 0.5 + r() * 0.3, r: r() * 6, tint: leaf(r) });
+        this.obstacles.push({ x, z, r: 0.55 });
+      } else if (t < 0.88) {
+        const s = 0.16 + r() * 0.12;
         bushes.push({ x, z, s, r: r() * 6, y: 1.0 * s });
         this.obstacles.push({ x, z, r: 2.4 * s });
       } else {
-        const s = 0.25 + r() * 0.25;
+        const s = 0.3 + r() * 0.3;
         rocks.push({ x, z, s, r: r() * 6 });
         this.obstacles.push({ x, z, r: 1.1 * s });
       }
@@ -548,39 +607,23 @@ export class World {
     this.scatter('elf_foliage_mid', bushes);
     this.scatter('orc_stone_big', rocks.map((k) => ({ ...k, s: k.s * 2.6 })));
     // roots and stumps (decor, no collision)
-    const roots: Inst[] = [];
-    for (let i = 0; i < 30; i++) {
-      const z = -26 - r() * 88;
-      const x = (r() * 2 - 1) * (WORLD.halfWidth - 1);
-      if (this.free(x, z, 1.2, true)) roots.push({ x, z, s: 0.3 + r() * 0.2, r: r() * 6 });
-    }
-    this.scatter('elf_tree_root_1', roots, false);
+    this.scatter('elf_tree_root_1', this.spread(20, 6, randomSpot, open).map(({ x, z }) => ({ x, z, s: 0.3 + r() * 0.2, r: r() * 6 })), false);
 
-    // Breakables: clusters of barrels/boxes/bushes
-    const kinds = ['barrel', 'box', 'box_large', 'orc_barrel', 'orc_box', 'bush', 'bush'];
-    for (let i = 0; i < 40; i++) {
-      const z = -26 - r() * 86;
-      const x = pathX(z) + (r() * 2 - 1) * 22;
-      if (Math.hypot(x, z + 105) < 10 || !this.free(x, z, 1.2)) continue;
-      const n = 1 + Math.floor(r() * 3);
-      for (let k = 0; k < n; k++) {
-        const bx = x + (r() - 0.5) * 2.4;
-        const bz = z + (r() - 0.5) * 2.4;
-        if (this.free(bx, bz, 0.6)) this.breakables.push({ x: bx, z: bz, kind: kinds[Math.floor(r() * kinds.length)], zone: 'forest', rot: r() * 6 });
-      }
-      if (this.breakables.length > 60) break;
-    }
+    // Breakables: single barrels/boxes/bushes beside the trail, well apart
+    const nearTrail = () => {
+      const p = pathAt(s0 - 6 + r() * (GATE.s - s0));
+      const off = (r() < 0.5 ? -1 : 1) * (2 + r() * 9);
+      return { x: p.x + p.tz * off, z: p.z - p.tx * off };
+    };
+    const okProp = (x: number, z: number) =>
+      inForest(x, z) && !inCamp(x, z, 2) && Math.hypot(x - fx, z - fz) > FORT.r + 2 && this.free(x, z, 1) && pathDist(x, z) > PATH_W + 0.5;
+    const list = PROP_SPAWNERS.forest;
+    this.spread(list.length, 6, nearTrail, okProp, true).forEach(({ x, z }, i) => this.addProp('forest', i, list[i], x, z, 'forest', r() * 6));
   }
 
-  // ---------- barrier between the forest and the cemetery ----------
+  // ---------- rocky ridges round every location, a barrier in every passage ----------
   private buildBarrier() {
-    const g = new THREE.Group();
-    const x0 = pathX(WORLD.barrierZ);
-    this.barrierMat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      uniforms: { t: { value: 0 }, a: { value: 1 } },
+    const shader = {
       vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
       fragmentShader: `varying vec2 vUv; uniform float t; uniform float a;
         void main(){
@@ -590,121 +633,202 @@ export class World {
           vec3 c = mix(vec3(0.55,0.25,1.0), vec3(0.9,0.7,1.0), s*r);
           gl_FragColor = vec4(c, (0.35+0.45*s*r)*edge*a);
         }`,
-    });
-    const wall = new THREE.Mesh(new THREE.PlaneGeometry(9, 4.5), this.barrierMat);
-    wall.position.set(x0, 2.2, WORLD.barrierZ);
-    g.add(wall);
-    this.group.add(g);
-    this.barrier = g;
-    // Bone gate of the cemetery right behind the barrier
-    this.place('undead_tusk_gate', x0, WORLD.barrierZ - 1.2, 1.15, 0, 0);
-    this.obstacles.push({ x: x0 - 3.7, z: WORLD.barrierZ - 1.2, r: 0.9 }, { x: x0 + 3.7, z: WORLD.barrierZ - 1.2, r: 0.9 });
-    // Wall of trees and boulders across the map except the gate
+    };
+    for (const G of GATES) {
+      const N = { x: G.tz, z: -G.tx }; // across the passage
+      const rot = Math.atan2(G.tx, G.tz);
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, side: THREE.DoubleSide,
+        uniforms: { t: this.time, a: { value: 1 } }, ...shader,
+      });
+      const wall = new THREE.Mesh(new THREE.PlaneGeometry(6.6, 4.2), mat);
+      wall.position.set(G.x + G.tx * 1.2, 2.1, G.z + G.tz * 1.2);
+      wall.rotation.y = rot;
+      this.group.add(wall);
+      const obstacles: Obstacle[] = [];
+      for (let k = -2.8; k <= 2.81; k += 0.8) obstacles.push({ x: G.x + G.tx * 1.2 + N.x * k, z: G.z + G.tz * 1.2 + N.z * k, r: 0.7 });
+      this.gates.push({ def: G, mesh: wall, mat, obstacles, open: false });
+      // The bone gate (the project's gate model), its posts collide; the barrier fills its opening.
+      const gx = G.x + G.tx * 1.2;
+      const gz = G.z + G.tz * 1.2;
+      this.place('undead_tusk_gate', gx, gz, 1.15, rot + Math.PI, 0);
+      this.obstacles.push({ x: gx - N.x * 3.7, z: gz - N.z * 3.7, r: 0.9 }, { x: gx + N.x * 3.7, z: gz + N.z * 3.7, r: 0.9 });
+      // Lamp posts on both sides of the gate, offset so each side shows a pair
+      for (const k of [-1, 1]) {
+        for (const f of [-2.4, 4.6]) {
+          const x = G.x + G.tx * f + N.x * k * 4.6;
+          const z = G.z + G.tz * f + N.z * k * 4.6;
+          if (walkable(x, z, 0.2) && pathDist(x, z) > 1.5) this.place('undead_lamp_post', x, z, 0.6, rot, 0.3);
+        }
+      }
+      // Stepping stones through the opening (the cemetery trail already has its own)
+      if (G.id !== 'forest-cemetery') {
+        const stones: Inst[] = [];
+        for (let f = -6; f <= 7; f += 1.7) {
+          const off = (((f * 7.13) % 1) - 0.5) * 0.5;
+          stones.push({ x: G.x + G.tx * f + N.x * off, z: G.z + G.tz * f + N.z * off, s: 0.24, r: f * 2.1, y: 0.01 });
+        }
+        this.gateStones.push(...stones);
+      }
+    }
+
+    // The ridges: two overlapping rows of collision circles, boulders on top, trees on either side
+    // (dead ones on the cemetery side). Gaps are left at the passages.
     const r = rng(5);
     const trees: Inst[] = [];
     const dead: Inst[] = [];
     const boulders: Inst[] = [];
-    for (let x = -WORLD.halfWidth - 2; x <= WORLD.halfWidth + 2; x += 1.7) {
-      if (Math.abs(x - x0) < 5.5) continue;
-      trees.push({ x: x + r() * 0.6, z: WORLD.barrierZ + 0.6 + r(), s: 0.6 + r() * 0.25, r: r() * 6 });
-      dead.push({ x: x + 0.8, z: WORLD.barrierZ - 1.8 - r(), s: 1 + r() * 0.4, r: r() * 6 });
-      if (r() < 0.5) boulders.push({ x: x + r(), z: WORLD.barrierZ - 0.4, s: 0.45 + r() * 0.3, r: r() * 6 });
-      this.obstacles.push({ x, z: WORLD.barrierZ, r: 1.0 });
+    for (const line of RIDGES) {
+      let carry = 0;
+      for (let i = 1; i < line.length - 1; i++) {
+        const [x, z] = line[i];
+        carry += Math.hypot(x - line[i - 1][0], z - line[i - 1][1]);
+        if (carry < 1.7) continue;
+        carry = 0;
+        if (Math.hypot(x - ISLAND.cx, z - ISLAND.cz) > shoreR(angleOf(x, z)) + 2) continue;
+        if (gateDist(x, z) < 5.5) continue;
+        // unit normal of the line
+        let nx = line[i + 1][1] - line[i - 1][1];
+        let nz = -(line[i + 1][0] - line[i - 1][0]);
+        const nl = Math.hypot(nx, nz) || 1;
+        nx /= nl;
+        nz /= nl;
+        for (const k of [-1, 1]) this.obstacles.push({ x: x + nx * k, z: z + nz * k, r: 1.4 });
+        boulders.push({ x: x + (r() - 0.5) * 1.6, z: z + (r() - 0.5) * 1.6, s: 0.5 + r() * 0.35, r: r() * 6 });
+        for (const side of [-1, 1]) {
+          if (r() > 0.3) continue;
+          const d = 3.6 + r() * 1.5;
+          const tx = x + nx * side * d;
+          const tz = z + nz * side * d;
+          if (!walkable(tx, tz, 0.3) || inCamp(tx, tz, 2) || pathDist(tx, tz) < 2) continue;
+          if (zoneIdAt(tx, tz) === 'cemetery') {
+            dead.push({ x: tx, z: tz, s: 0.9 + r() * 0.4, r: r() * 6 });
+            this.obstacles.push({ x: tx, z: tz, r: 0.45 });
+          } else {
+            trees.push({ x: tx, z: tz, s: 0.55 + r() * 0.25, r: r() * 6, tint: leaf(r) });
+            this.obstacles.push({ x: tx, z: tz, r: 0.5 });
+          }
+        }
+      }
     }
     this.scatter('elf_tree', trees);
     this.deadTrees(dead);
     this.scatter('orc_stone_big', boulders.map((k) => ({ ...k, s: k.s * 2.4 })));
+    this.scatter('elf_rock_small', this.gateStones, false);
   }
 
-  // ---------- cemetery ----------
+  // ---------- cemetery: the eastern sector of the ring, behind the ridge ----------
   private buildCemetery() {
     const r = rng(41);
-    const packs: [number, number, string[]][] = [
-      [-8, -140, ['skeleton_worker', 'skeleton_worker']],
-      [12, -146, ['skeleton_worker', 'skeleton_worker', 'ghost']],
-      [-14, -156, ['skeleton_warrior', 'skeleton_worker']],
-      [6, -162, ['skeleton_worker', 'skeleton_warrior', 'skeleton_worker']],
-      [-6, -172, ['ghost', 'ghost']],
-      [15, -178, ['skeleton_warrior', 'skeleton_worker', 'skeleton_worker']],
-      [-16, -186, ['skeleton_warrior', 'ghost', 'skeleton_worker']],
-      [5, -190, ['skeleton_warrior', 'skeleton_warrior']],
-    ];
-    for (const [x, z, mobs] of packs) {
-      this.packCenters.push([x, z]);
-      mobs.forEach((mob, i) => this.spawns.push({ x: x + Math.cos(i * 2.2) * 1.8, z: z + Math.sin(i * 2.2) * 1.8, mob, zone: 'cemetery' }));
-    }
-    this.addCampfire('cemetery', 'Ворота кладбища', pathX(-128) + 4, -128, 'cemetery');
+    const sArena = progressAt(ARENA.x, ARENA.z);
+    const s0 = GATE.s + 12;
+    const s1 = sArena - ARENA.r - 3;
+    this.mobsAlong([[s0, s1]], SPAWNERS.cemetery ?? [], 'cemetery', r);
 
-    // Mausoleums and crypts along the edges
-    this.place('undead_house_tower', -26, -141, 0.5, Math.PI / 2);
-    this.place('undead_tower_small', 26.5, -137, 0.55, -Math.PI / 2);
-    this.place('undead_smithy_house', -27, -168, 0.5, Math.PI / 2);
-    this.place('undead_building', 27, -160, 0.5, -Math.PI / 2);
-    this.place('undead_tower', -27, -197, 0.55, 0.4);
-    this.place('undead_wheel_of_pain', 25, -191, 0.45, -0.5);
-    this.place('undead_cauldron', 22, -153, 0.55, 0, 0.8);
-    this.place('undead_flag', -21, -149, 0.6, 0, 0.3);
-    // Windmill silhouette on the western hill
-    this.place('undead_windmill', -44, -163, 0.8, 0.6, 0);
-    this.place('undead_tower_Lv2', 46, -150, 0.6, -0.8, 0);
+    // Mausoleums, crypts and ruins, by angle (deg) and radius in the cemetery sector (slid inside the shore if needed)
+    const pol = (deg: number, d: number) => ({ x: ISLAND.cx + Math.sin((deg * Math.PI) / 180) * d, z: ISLAND.cz + Math.cos((deg * Math.PI) / 180) * d });
+    const ins = (name: string, deg: number, d: number, scale: number, rot: number, pad = 3, collide: number | 'auto' = 'auto') => {
+      const p = pol(deg, d);
+      this.placeInside(name, p.x, p.z, scale, rot, pad, collide);
+    };
+    ins('undead_house_tower', 65, 85, 0.5, 0.4);
+    ins('undead_tower_small', 100, 64, 0.55, -Math.PI / 2);
+    ins('undead_smithy_house', 68, 62, 0.5, Math.PI / 2);
+    ins('undead_building', 116, 68, 0.5, -Math.PI / 2);
+    ins('undead_tower', 80, 96, 0.55, 0.4);
+    ins('undead_wheel_of_pain', 96, 64, 0.45, -0.5);
+    ins('undead_cauldron', 62, 74, 0.55, 0, 2, 0.8);
+    ins('undead_flag', 87, 76, 0.6, 0, 2, 0.3);
+    ins('undead_ruins_01', 110, 64, 0.45, r() * 6);
+    ins('undead_ruins_02', 70, 100, 0.45, r() * 6);
+    ins('undead_column_1', 78, 66, 0.5, r() * 6);
+    ins('undead_column_1', 118, 92, 0.5, r() * 6);
+    // Windmill and a tower on the eastern cliffs
+    let best = -1;
+    let hillA = 1.6;
+    for (let a = 1.05; a < 2.1; a += 0.02) if (rimCliff(a) > best) { best = rimCliff(a); hillA = a; }
+    const hill = edgePoint(hillA, -3.5);
+    this.place('undead_windmill', hill.x, hill.z, 0.8, hillA + Math.PI, 0);
+    const hill2 = edgePoint(hillA > 1.6 ? 1.15 : 2.0, -3);
+    this.place('undead_tower_Lv2', hill2.x, hill2.z, 0.6, -0.8, 0);
 
-    // Fences along graves, lamp posts along the path
-    for (let i = 0; i < 16; i++) {
-      const z = -136 - i * 4.4;
+    // Fences beside the trail, lamp posts along it
+    for (let s = s0 - 6, i = 0; s < s1; s += 4.4, i++) {
+      const p = pathAt(s);
+      const rot = Math.atan2(p.tx, p.tz) + Math.PI / 2;
       for (const side of [-1, 1]) {
-        if (r() < 0.35) continue;
-        this.place('undead_fence', pathX(z) + side * 6.5, z, 0.55, Math.PI / 2, 0);
+        if (r() < 0.6) continue;
+        const x = p.x + p.tz * side * 4;
+        const z = p.z - p.tx * side * 4;
+        if (walkable(x, z, 0.5) && pathDist(x, z) > 3) this.place('undead_fence', x, z, 0.55, rot, 0);
       }
     }
-    for (let i = 0; i < 10; i++) {
-      const z = -132 - i * 8;
-      this.place('undead_lamp_post', pathX(z) + (i % 2 ? 3.4 : -3.4), z, 0.6, 0, 0.3);
+    for (let s = GATE.s + 4, i = 0; s < sArena - ARENA.r; s += 12, i++) {
+      const p = pathAt(s);
+      const side = i % 2 ? 1 : -1;
+      const x = p.x + p.tz * side * 2.2;
+      const z = p.z - p.tx * side * 2.2;
+      if (this.free(x, z, 0.4)) this.place('undead_lamp_post', x, z, 0.6, 0, 0.3);
     }
-    const deco: [string, number, number, number][] = [
-      ['undead_ruins_01', -19, -153, 0.45], ['undead_ruins_02', 20, -171, 0.45], ['undead_obelisk', -12, -196, 0.8],
-      ['undead_obelisk', 12, -196, 0.8], ['undead_column_1', -21, -180, 0.5], ['undead_column_1', 21, -142, 0.5],
-    ];
-    for (const [n, x, z, s] of deco) this.place(n, x, z, s, r() * 6);
 
-    // Boss arena: throne, floating stones and a ring of columns
-    this.place('undead_throne_Lv1', 0, -221, 0.55, 0);
-    this.place('undead_throne', 0, -214.5, 1.1, 0, 0.9);
+    // Boss arena: throne, floating stones and a ring of columns; the opening faces the incoming trail
+    const ax = ARENA.x;
+    const az = ARENA.z;
+    const aIn = trailExit(ax, az, ARENA.r, false);
+    const at = (side: number, fwd: number) => local(ax, az, aIn, side, fwd);
+    let p = at(0, -13);
+    this.place('undead_throne_Lv1', p.x, p.z, 0.55, aIn);
+    p = at(0, -6.5);
+    this.place('undead_throne', p.x, p.z, 1.1, aIn, 0.9);
     for (const sx of [-1, 1]) {
-      this.place('undead_floating_stone', sx * 12, -203, 0.6, sx, 1);
-      this.place('undead_floating_coffin', sx * 12.5, -214, 0.5, sx * 0.5, 1);
+      p = at(sx * 12, 5);
+      this.place('undead_floating_stone', p.x, p.z, 0.6, aIn + sx, 1);
+      p = at(sx * 12.5, -6);
+      this.place('undead_floating_coffin', p.x, p.z, 0.5, aIn + sx * 0.5, 1);
     }
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
-      if (Math.abs(Math.atan2(Math.sin(a), Math.cos(a))) < 0.5) continue; // opening toward the path
-      this.place('undead_column_2', Math.sin(a) * 15, -208 + Math.cos(a) * 15, 0.5, a, 'auto');
+      if (Math.abs(Math.atan2(Math.sin(a), Math.cos(a))) < 0.5) continue; // opening toward the trail
+      p = at(Math.sin(a) * ARENA.r, Math.cos(a) * ARENA.r);
+      this.place('undead_column_2', p.x, p.z, 0.5, aIn + a, 'auto');
     }
-    this.bosses.push({ mob: 'death', x: 0, z: -208 });
-    this.packCenters.push([0, -208]);
+    for (const sx of [-1, 1]) {
+      p = at(sx * 4, ARENA.r + 3);
+      if (this.free(p.x, p.z, 0.5)) this.place('undead_obelisk', p.x, p.z, 0.8, r() * 6);
+    }
+    this.bosses.push({ mob: 'death', x: ax, z: az });
+    this.packCenters.push([ax, az]);
+    const nearArena = (x: number, z: number) => Math.hypot(x - ax, z - az) < ARENA.r + 1.5;
 
-    // Graves: rows of breakable tombstones and coffins
-    const tombs = ['tomb1', 'tomb2', 'tomb3', 'tomb4', 'tomb1', 'tomb2', 'coffin'];
-    for (let row = 0; row < 14; row++) {
-      const z = -134 - row * 4.8;
-      for (let k = 0; k < 6; k++) {
-        if (r() < 0.45) continue;
-        const side = k < 3 ? -1 : 1;
-        const x = pathX(z) + side * (9 + (k % 3) * 3.2 + r());
-        if (Math.hypot(x, z + 208) < 16 || !this.free(x, z, 0.8)) continue;
-        this.breakables.push({ x, z: z + r() * 0.6, kind: tombs[Math.floor(r() * tombs.length)], zone: 'cemetery', rot: Math.PI + (r() - 0.5) * 0.4 });
-      }
-    }
-    // Decorative old graves, bones and dead trees
+    // Graves: single breakable tombstones and coffins beside the trail, and a few in the southern dead end
+    const inCem = (x: number, z: number) => zoneIdAt(x, z) === 'cemetery';
+    const okGrave = (x: number, z: number) => inCem(x, z) && !nearArena(x, z) && this.free(x, z, 1) && pathDist(x, z) > 3;
+    const besideTrail = () => {
+      const q = pathAt(GATE.s + 6 + r() * (sArena - ARENA.r - GATE.s - 6));
+      const off = (r() < 0.5 ? -1 : 1) * (5 + r() * 9);
+      return { x: q.x + q.tz * off, z: q.z - q.tx * off };
+    };
+    const graves = (group: 'cemetery' | 'cemeteryField', at: () => { x: number; z: number }) => {
+      const list = PROP_SPAWNERS[group];
+      this.spread(list.length, 6, at, okGrave, true).forEach(({ x, z }, i) => this.addProp(group, i, list[i], x, z, 'cemetery', Math.PI + (r() - 0.5) * 0.4));
+    };
+    graves('cemetery', besideTrail);
+    graves('cemeteryField', () => pol(100 + r() * 20, 64 + r() * 22));
+    // Decorative old graves, bones and dead trees, evenly spread
     const old: Inst[] = [];
     const bones: Inst[] = [];
     const deadTrees: Inst[] = [];
-    for (let i = 0; i < 160; i++) {
-      const z = -124 - r() * 92;
-      const x = (r() * 2 - 1) * (WORLD.halfWidth - 1);
-      if (!this.free(x, z, 1.4, true) || this.nearPack(x, z, 4) || Math.hypot(x, z + 208) < 16) continue;
+    const anywhere = () => {
+      const a = r() * Math.PI * 2;
+      const d = Math.sqrt(r()) * 110;
+      return { x: ISLAND.cx + Math.sin(a) * d, z: ISLAND.cz + Math.cos(a) * d };
+    };
+    const okDecor = (x: number, z: number) => inCem(x, z) && this.free(x, z, 1.4, true) && !this.nearPack(x, z, 4) && !nearArena(x, z);
+    for (const { x, z } of this.spread(55, 6, anywhere, okDecor)) {
       const k = r();
-      if (k < 0.35) old.push({ x, z, s: 0.55 + r() * 0.2, r: Math.PI + (r() - 0.5) * 0.6 });
-      else if (k < 0.6) bones.push({ x, z, s: 0.3 + r() * 0.2, r: r() * 6 });
-      else if (deadTrees.length < 26) {
+      if (k < 0.4) old.push({ x, z, s: 0.55 + r() * 0.2, r: Math.PI + (r() - 0.5) * 0.6 });
+      else if (k < 0.7) bones.push({ x, z, s: 0.3 + r() * 0.2, r: r() * 6 });
+      else {
         deadTrees.push({ x, z, s: 0.8 + r() * 0.4, r: r() * 6 });
         this.obstacles.push({ x, z, r: 0.45 });
       }
@@ -717,8 +841,8 @@ export class World {
     this.deadTrees(deadTrees);
   }
 
-  // ---------- hills outside the playable strip ----------
-  private buildWilderness() {
+  // ---------- island rim: sandy beaches, tree banks and cliffs down to the sea ----------
+  private buildRim() {
     const r = rng(77);
     const trees: Inst[] = [];
     const tall: Inst[] = [];
@@ -726,43 +850,51 @@ export class World {
     const rocks: Inst[] = [];
     const bushes: Inst[] = [];
     const pines: Inst[] = [];
-    let far = false;
-    const tryAdd = (x: number, z: number) => {
-      const zone = zoneAt(z);
-      const n = fbm(x * 0.1, z * 0.1);
-      const s = 0.55 + r() * 0.45;
-      if (zone.id === 'cemetery') {
-        if (r() < 0.7) cemTrees.push({ x, z, s: s * 1.4, r: r() * 6 });
-        else rocks.push({ x, z, s: s * 0.7, r: r() * 6, tint: 0x9a92b0 });
-      } else if (n > 0.55 && r() < 0.5) rocks.push({ x, z, s: s * 0.8, r: r() * 6 });
-      else if (far) pines.push({ x, z, s: s * 1.3, r: r() * 6, tint: [0x3f7a32, 0x4f8a3c, 0x5c9a40, 0x37702e][Math.floor(r() * 4)] });
-      else if (r() < 0.25) bushes.push({ x, z, s: s * 0.4, r: r() * 6 });
-      else if (r() < 0.5) tall.push({ x, z, s: s * 0.9, r: r() * 6, tint: leaf(r) });
-      else trees.push({ x, z, s, r: r() * 6, tint: leaf(r) });
-    };
-    for (let z = WORLD.zMax + 30; z > WORLD.zMin - 30; z -= 2.3) {
-      for (const side of [-1, 1]) {
-        for (let k = 0; k < 6; k++) {
-          far = k >= 2;
-          const x = side * (WORLD.halfWidth + 1.6 + k * 3.8 + r() * 2.5);
-          tryAdd(x, z + r() * 2);
+    const logs: Inst[] = [];
+    const PINE = [0x3f7a32, 0x4f8a3c, 0x5c9a40, 0x37702e];
+    for (let a = -Math.PI; a < Math.PI; a += 0.034) {
+      const rw = walkR(a);
+      const rs = shoreR(a);
+      const cliff = rimCliff(a);
+      const treeBank = rimTrees(a);
+      for (let k = 0; k < 4; k++) {
+        const aa = a + (r() - 0.5) * 0.03;
+        const d = rw + 1 + k * 3.2 + r() * 1.8;
+        const x = ISLAND.cx + Math.sin(aa) * d;
+        const z = ISLAND.cz + Math.cos(aa) * d;
+        const h = heightAt(x, z);
+        const s = 0.55 + r() * 0.45;
+        if (h < ISLAND.water + 0.15) {
+          // the odd sea stack just off cliffs
+          if (cliff > 0.5 && d < rs + 6 && r() < 0.08) rocks.push({ x, z, s: s * 1.1, r: r() * 6, y: ISLAND.water - 0.6 });
+          continue;
+        }
+        const cem = zoneIdAt(x, z) === 'cemetery';
+        if (cliff > 0.5) {
+          if (r() < 0.55) rocks.push({ x, z, s: s * (0.9 + 0.5 * r()), r: r() * 6, tint: cem ? 0x9a92b0 : undefined });
+          else if (cem) cemTrees.push({ x, z, s: s * 1.4, r: r() * 6 });
+          else pines.push({ x, z, s: s * 1.2, r: r() * 6, tint: PINE[Math.floor(r() * 4)] });
+        } else if (treeBank > 0.5) {
+          if (cem) { if (r() < 0.7) cemTrees.push({ x, z, s: s * 1.4, r: r() * 6 }); else rocks.push({ x, z, s: s * 0.6, r: r() * 6, tint: 0x9a92b0 }); }
+          else if (k >= 2) pines.push({ x, z, s: s * 1.2, r: r() * 6, tint: PINE[Math.floor(r() * 4)] });
+          else if (r() < 0.25) bushes.push({ x, z, s: s * 0.4, r: r() * 6 });
+          else if (r() < 0.5) tall.push({ x, z, s: s * 0.9, r: r() * 6, tint: leaf(r) });
+          else trees.push({ x, z, s, r: r() * 6, tint: leaf(r) });
+        } else if (r() < 0.06) {
+          // open beach: driftwood and the odd rock
+          if (r() < 0.5) logs.push({ x, z, s: 0.5 + r() * 0.3, r: r() * 6 });
+          else rocks.push({ x, z, s: s * 0.4, r: r() * 6, tint: cem ? 0x9a92b0 : undefined });
         }
       }
     }
-    for (let x = -WORLD.halfWidth; x <= WORLD.halfWidth; x += 2.3) {
-      for (let k = 0; k < 5; k++) {
-        far = k >= 1;
-        tryAdd(x + r(), WORLD.zMax + 1.8 + k * 3.2 + r() * 2);
-        tryAdd(x + r(), WORLD.zMin - 1.8 - k * 3.2 - r() * 2);
-      }
-    }
-    // Hills are mostly out of the shadow box anyway: skip shadow casting there.
+    // The rim is mostly out of the shadow box: only the big rocks and pines cast shadows.
     this.scatter('elf_tree', trees, false);
     this.scatter('elf_foliage_small', tall, false);
     this.deadTrees(cemTrees);
     this.pines(pines);
     this.scatter('orc_stone_big', rocks.map((k) => ({ ...k, s: k.s * 2.4 })));
     this.scatter('elf_foliage_mid', bushes.map((b) => ({ ...b, y: heightAt(b.x, b.z) + 1.0 * b.s })));
+    this.scatter('orc_log', logs, false);
   }
 
   /** Low graphics: no ground mist, grass or flowers. */
@@ -771,24 +903,30 @@ export class World {
     for (const g of this.grass) g.visible = !low;
   }
 
-  openBarrier(instant = false) {
-    this.barrierOpen = true;
-    if (instant) this.barrier.visible = false;
+  /** The forest -> cemetery barrier is down (opened by the first boss). */
+  get barrierOpen() { return this.gates.find((g) => g.def.id === 'forest-cemetery')!.open; }
+
+  openGate(id: string, instant = false) {
+    const g = this.gates.find((q) => q.def.id === id);
+    if (!g || g.open) return;
+    g.open = true;
+    if (instant) g.mesh.visible = false;
   }
 
-  /** True if the barrier blocks this position. */
-  barrierBlocks(z: number) {
-    return !this.barrierOpen && z < WORLD.barrierZ + 0.6;
-  }
+  openBarrier(instant = false) { this.openGate('forest-cemetery', instant); }
+  /** Name of the location a passage leads into (from the forest: the outer one). */
+  gateTarget(id: string) { const g = this.gates.find((x) => x.def.id === id)!.def; return ZONES.find((z) => z.id === g.to)!.name; }
+
+  openAllGates(instant = false) { for (const g of this.gates) this.openGate(g.def.id, instant); }
 
   update(dt: number, time: number, camTarget: THREE.Vector3) {
     this.time.value = time;
     windTime.value = time;
     this.mist.setCamera(camTarget);
-    this.barrierMat.uniforms.t.value = time;
-    if (this.barrierOpen && this.barrier.visible) {
-      const a = (this.barrierMat.uniforms.a.value -= dt * 0.8);
-      if (a <= 0) this.barrier.visible = false;
+    for (const g of this.gates) {
+      if (!g.open || !g.mesh.visible) continue;
+      const a = (g.mat.uniforms.a.value -= dt * 0.8);
+      if (a <= 0) g.mesh.visible = false;
     }
     for (const [i, f] of this.flames.entries()) {
       const s = 1 + Math.sin(time * 13 + i) * 0.12 + Math.sin(time * 7.3 + i * 2) * 0.08;
@@ -796,9 +934,30 @@ export class World {
     }
   }
 
-  /** Push a circle out of static obstacles and keep it inside the playable area. */
+  /**
+   * Draws the baked island (ground + ocean) and the closed barrier onto a map canvas.
+   * X / Y map world x / z to canvas pixels, `ppm` is pixels per metre.
+   */
+  drawMap(g: CanvasRenderingContext2D, X: (x: number) => number, Y: (z: number) => number, ppm: number) {
+    g.fillStyle = '#2a86d0'; // open sea beyond the baked square (same colour as its deep-water edge)
+    g.fillRect(-1e4, -1e4, 2e4, 2e4);
+    g.imageSmoothingEnabled = true;
+    g.drawImage(this.mapCanvas, X(MAP_BOX.x), Y(MAP_BOX.z), MAP_BOX.size * ppm, MAP_BOX.size * ppm);
+    g.strokeStyle = '#b06bff';
+    g.lineWidth = Math.max(4, 1.2 * ppm);
+    g.lineCap = 'round';
+    for (const { def: G, open } of this.gates) {
+      if (open) continue;
+      g.beginPath();
+      g.moveTo(X(G.x - G.tz * 4), Y(G.z + G.tx * 4));
+      g.lineTo(X(G.x + G.tz * 4), Y(G.z - G.tx * 4));
+      g.stroke();
+    }
+  }
+
+  /** Push a circle out of static obstacles (and closed barriers) and keep it on the walkable island. */
   collide(p: THREE.Vector3, radius: number) {
-    for (const o of this.obstacles) {
+    const push = (o: Obstacle) => {
       const dx = p.x - o.x;
       const dz = p.z - o.z;
       const rr = o.r + radius;
@@ -808,9 +967,16 @@ export class World {
         p.x = o.x + (dx / d) * rr;
         p.z = o.z + (dz / d) * rr;
       }
+    };
+    for (const o of this.obstacles) push(o);
+    for (const gt of this.gates) if (!gt.open) for (const o of gt.obstacles) push(o);
+    const dx = p.x - ISLAND.cx;
+    const dz = p.z - ISLAND.cz;
+    const d = Math.hypot(dx, dz);
+    const max = walkR(Math.atan2(dx, dz)) - radius * 0.5;
+    if (d > max) {
+      p.x = ISLAND.cx + (dx / d) * max;
+      p.z = ISLAND.cz + (dz / d) * max;
     }
-    p.x = THREE.MathUtils.clamp(p.x, -WORLD.halfWidth, WORLD.halfWidth);
-    p.z = THREE.MathUtils.clamp(p.z, WORLD.zMin, WORLD.zMax);
-    if (this.barrierBlocks(p.z)) p.z = WORLD.barrierZ + 0.6;
   }
 }

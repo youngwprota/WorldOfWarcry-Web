@@ -57,7 +57,7 @@ for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
   'undead_bones_remains', 'undead_lamp_post', 'campfire',
   // level design kit
   'palisade_pole', 'tower_human_small_1', 'orc_high_stand', 'human_house_large', 'human_house_mid', 'human_house_small',
-  'smithy_building', 'barrack_Lv2', 'tower_big', 'orc_cabin', 'orc_barrack_Lv2', 'orc_tower_Lv2', 'anvil_big', 'orc_anvil',
+  'barrack_Lv2', 'tower_big', 'orc_cabin', 'orc_barrack_Lv2', 'orc_tower_Lv2',
   'practice_dummy', 'orc_practice_dummy', 'target', 'orc_practice_aim', 'elf_well', 'wood_pile_big', 'orc_wood_pile_big',
   'orc_head_lantern', 'orc_flag_red', 'orc_drum_big', 'orc_altar', 'orc_horned_skull', 'cauldron', 'box_large_2',
   'woodcutter_building', 'elf_log_pile', 'saw', 'wood_pile_small', 'bucket', 'elf_stone_big', 'mine_enterance', 'minecart',

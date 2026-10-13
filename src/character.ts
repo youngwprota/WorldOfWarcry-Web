@@ -181,6 +181,20 @@ export class Character {
    * Shows armour on the body: replaces a body part with the same part of another character.
    * All Bitgem characters share one skeleton, so the borrowed skinned mesh is simply rebound to our bones.
    */
+  /**
+   * Our bone with the same name. A part may use bones our model lacks (the paladin's plume, the chieftain's
+   * topknot): such a bone is grafted onto our skeleton under its own parent, so it follows the body
+   * instead of staying behind in the borrowed model (whose vertices would then fly off).
+   */
+  private ownBone(b: THREE.Object3D): THREE.Object3D {
+    const own = this.model.getObjectByName(b.name);
+    if (own) return own;
+    const parent = b.parent ? this.ownBone(b.parent) : this.model;
+    const graft = b.clone(false);
+    parent.add(graft);
+    return graft;
+  }
+
   setOutfit(outfit: Partial<Record<VisualPart, string>>) {
     for (const part of Object.keys(PART_PREFIXES) as VisualPart[]) {
       const want = outfit[part] ?? null;
@@ -206,7 +220,7 @@ export class Character {
       const mat = (meshes[0]?.material as THREE.MeshLambertMaterial | undefined)?.clone();
       if (mat) { mat.color.copy(this.baseColor); this.materials.push(mat); }
       for (const sm of meshes) {
-        const bones = sm.skeleton.bones.map((b) => (this.model.getObjectByName(b.name) as THREE.Bone) ?? b);
+        const bones = sm.skeleton.bones.map((b) => this.ownBone(b) as THREE.Bone);
         const skel = new THREE.Skeleton(bones, sm.skeleton.boneInverses);
         const bind = sm.bindMatrix.clone();
         sm.removeFromParent();

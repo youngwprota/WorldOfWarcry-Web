@@ -20,7 +20,7 @@ export const resetCost = (level: number, resets: number) => (resets === 0 ? 0 : 
 // ---------- passive stats ----------
 export type TalentStat =
   | 'powerPct' | 'hpPct' | 'healPct' | 'speedPct' | 'atkSpeed' | 'defense'
-  | 'resSlash' | 'resCrush' | 'resPierce' | 'resAll'
+  | 'resSlash' | 'resCrush' | 'resChop' | 'resAll'
   | 'crit' | 'bossDmg' | 'thorns' | 'comboPct' | 'xpPct' | 'goldPct'
   | 'lifesteal' | 'shieldPct' | 'bloodlust' | 'killHeal';
 
@@ -34,7 +34,7 @@ export const STAT_TEXT: Record<TalentStat, { name: string; flat?: boolean }> = {
   defense: { name: 'защиты', flat: true },
   resSlash: { name: 'защиты от режущего урона' },
   resCrush: { name: 'защиты от дробящего урона' },
-  resPierce: { name: 'защиты от колющего урона' },
+  resChop: { name: 'защиты от рубящего урона' },
   resAll: { name: 'защиты от любого урона' },
   crit: { name: 'шанс крит. удара (×2)' },
   bossDmg: { name: 'урона по боссам' },

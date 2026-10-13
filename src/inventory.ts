@@ -137,12 +137,12 @@ export class Inventory {
     const hit = g.itemDamage(g.weaponItem) * g.powerMult();
     const big = (ic: string, v: string, label: string) => `<div>${art(ic, 46)}<b>${v}</b><span>${label}</span></div>`;
     q('#i-big').innerHTML = big('sword', fmtK(hit * g.weapon.aps), 'DPS') + big('heart', fmtK(g.maxHp), 'HP') +
-      big('regen', fmtK((g.regen / 100) * g.maxHp), 'Реген');
+      big('regen', fmtK(g.regen), 'Реген');
     const combo = COMBOS[g.weaponItem.def];
     const chip = (ic: string, v: string, title: string) => `<div class="chip" title="${title}">${art(ic, 28)}<b>${v}</b></div>`;
     q('#i-stats').innerHTML = chip('hammer', fmtK(Math.round(hit)), 'Урон за удар') + chip('sword', fmtK(g.power), 'Сила (сферы и броня)') +
       chip('shield', `${g.defense} <small>−${Math.round((g.defense / (g.defense + 100)) * 100)}%</small>`, 'Защита') +
-      chip('boot', `${Math.round(g.speed * 10) / 10}`, 'Бег, м/с') + chip('axe', `×${combo.mult}`, `Комбо: ${combo.name}`) +
+      chip('boot', `${g.speedStat}`, 'Скорость') + chip('axe', `×${combo.mult}`, `Комбо: ${combo.name}`) +
       chip('gear', `${g.weapon.aps}/с`, 'Атак в секунду');
   }
 
@@ -322,7 +322,7 @@ export class Inventory {
       const c = COMBOS[it.def];
       ability = `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
     } else {
-      ability = `<div class="ab-title">Комплект</div><p>${it.rarity > 0 || rest.length ? 'Бонус к стату действует, пока предмет надет.' : 'У обычных предметов нет бонуса. Ищи <b>редкие</b> и выше.'}</p>`;
+      ability = `<div class="ab-title">Комплект</div><p>${it.rarity > 0 || rest.length ? 'Бонус к стату действует, пока предмет надет.' : 'У обычных предметов нет бонуса. Ищи <b>необычные</b> и выше.'}</p>`;
     }
     const btn = (act: string, label: string, cls = '') => `<button class="btn ${cls}" data-act="${act}">${label}</button>`;
     let actions = '';
