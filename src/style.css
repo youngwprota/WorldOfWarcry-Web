@@ -757,6 +757,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .tl-info { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 #btn-bag { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); }
 .round-btn.bag { background: linear-gradient(#ffb24a 0 50%, #d8701c 50%); }
+#btn-gacha { position: absolute; right: 14px; top: calc(50% - 110px); }
+.round-btn.forge { background: linear-gradient(#ff8a4a 0 50%, #b8321c 50%); }
 .round-btn.nav { position: relative; }
 .round-btn.nav span { position: absolute; bottom: -11px; right: 0; font-size: 13px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); text-transform: uppercase; }
 .bw-name { font-size: 16px; }
@@ -790,5 +792,45 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #rotate small { font-size: 15px; color: var(--muted); text-shadow: none; }
 @keyframes rotate-hint { 0%, 30% { transform: rotate(-90deg); } 60%, 100% { transform: rotate(0); } }
 @media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) { #rotate { display: flex; } }
+
+/* ---------- Горнило судьбы (gacha, src/gachaview.ts) ---------- */
+#modal:has(.gacha) { padding: 0; }
+.gacha { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; background: radial-gradient(ellipse at 50% 70%, #6b2412 0%, #2a0f0a 55%, #120806 100%); animation: pop-in 0.18s ease-out; }
+.g-head { position: relative; z-index: 2; display: flex; align-items: center; justify-content: center; padding: calc(14px + env(safe-area-inset-top)) 14px 6px; }
+.g-title { font-size: 28px; font-weight: 900; color: #ffe2a8; text-transform: uppercase; text-shadow: var(--stroke), 0 0 18px #ff8a2a; letter-spacing: 0.5px; }
+.g-head .xbtn { position: absolute; right: 14px; top: calc(10px + env(safe-area-inset-top)); }
+.g-body { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 8px 16px calc(18px + env(safe-area-inset-bottom)); }
+.g-banner { position: relative; width: 100%; max-width: 400px; overflow: hidden; border-radius: 24px; border: 3px solid var(--ink); padding: 18px 16px 14px; text-align: center; background: linear-gradient(160deg, #3a1d52 0%, #1f1030 55%, #4a2410 100%); box-shadow: inset 0 0 0 3px #ffb21a, inset 0 3px 0 6px #ffffff18, 0 6px 0 #0008, 0 0 40px #ff8a2a55; }
+.g-rays { position: absolute; left: 50%; top: 34%; width: 520px; height: 520px; margin: -260px 0 0 -260px; background: repeating-conic-gradient(#ffb21a33 0 8deg, transparent 8deg 22deg); border-radius: 50%; mask-image: radial-gradient(circle, #000 20%, transparent 65%); -webkit-mask-image: radial-gradient(circle, #000 20%, transparent 65%); animation: spin 24s linear infinite; pointer-events: none; }
+.g-tag { position: relative; display: inline-block; padding: 3px 14px; border-radius: 10px; border: 2px solid var(--ink); background: linear-gradient(#ffd04d, #ff8418); font-size: 13px; font-weight: 900; color: #fff; text-transform: uppercase; text-shadow: var(--stroke-s); }
+.g-weapon { position: relative; height: 180px; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 0 22px #ffb21a) drop-shadow(0 4px 0 #0008); animation: g-float 2.4s ease-in-out infinite alternate; }
+@keyframes g-float { from { transform: translateY(4px) rotate(-3deg); } to { transform: translateY(-6px) rotate(3deg); } }
+.g-name { position: relative; font-size: 26px; font-weight: 900; color: #ffc93a; text-shadow: var(--stroke); }
+.g-sub { position: relative; margin: 4px 0 10px; font-size: 13px; font-weight: 600; color: #f0dcc0; }
+.g-lines { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.g-lines div { display: flex; justify-content: space-between; gap: 6px; padding: 5px 9px; border-radius: 10px; background: #0006; font-size: 13px; color: #e8d0b0; }
+.g-lines b { color: #fff; }
+.g-rates { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 12px; font-size: 12px; font-weight: 800; text-shadow: var(--stroke-s); }
+.g-pity { font-size: 14px; font-weight: 700; color: #f0dcc0; text-shadow: 0 1px 0 #0008; }
+.g-pity b { color: #ffc93a; }
+.g-pull { flex: none; width: 100%; max-width: 300px; min-height: 60px; font-size: 22px; }
+.g-hint { position: absolute; bottom: calc(22px + env(safe-area-inset-bottom)); font-size: 13px; font-weight: 700; color: #f0dcc0aa; animation: pulse 1s ease-in-out infinite alternate; }
+.g-result .g-tag { background: var(--rc); }
+.g-result .g-name { color: var(--rc); font-size: 28px; }
+.g-result.r3 .g-name { font-size: 32px; animation: g-pop 0.5s 0.3s both; }
+@keyframes g-pop { from { transform: scale(2); opacity: 0; } to { transform: none; opacity: 1; } }
+.g-got { position: relative; display: flex; align-items: center; gap: 10px; margin-top: 10px; text-align: left; }
+.g-got .cell { flex: none; }
+.g-got .g-lines { flex: 1; }
+.g-where { position: relative; margin-top: 10px; font-size: 14px; font-weight: 700; color: #f0dcc0; text-shadow: 0 1px 0 #0008; }
+.g-btns { display: flex; gap: 10px; width: 100%; max-width: 360px; }
+.g-3d { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.g-3d.hidden { display: none; }
+.gacha .g-head, .gacha .g-body { z-index: 1; }
+.g-body.g-over { justify-content: flex-end; pointer-events: none; }
+.g-body.g-over > * { pointer-events: auto; }
+.g-body.g-over .g-hint { pointer-events: none; }
+.g-result { position: relative; width: 100%; max-width: 400px; text-align: center; padding: 14px 14px 12px; border-radius: 22px; background: linear-gradient(#1a0d0add, #0d0605ee); border: 3px solid var(--ink); box-shadow: inset 0 0 0 2px var(--rc), 0 0 30px color-mix(in srgb, var(--rc) 45%, transparent); animation: sheet-up 0.3s ease-out; }
+.g-result .g-btns { margin-top: 12px; }
 /* prop hit labels stay small over the bigger weak/resist numbers of later layouts */
 .ftext.dmg.weak.small, .ftext.dmg.resist.small { font-size: 16px; }

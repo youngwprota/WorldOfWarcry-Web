@@ -288,6 +288,7 @@ export class Game {
   onOpenCharacter: () => void = () => {};
   onOpenBag: () => void = () => {};
   onOpenMap: () => void = () => {};
+  onOpenGacha: () => void = () => {};
   private time = 0;
   private hp: number;
   private shield = 0;
@@ -303,6 +304,8 @@ export class Game {
   private saveT = 0;
   private hudT = 0;
   paused = false;
+  /** A full-screen window covers the world: main.ts skips rendering it. */
+  offscreen = false;
   private moveDir = new THREE.Vector3();
   /** Player HP (+ human shield) floating above the hero's head. */
   private heroBar!: { el: HTMLDivElement; fill: HTMLDivElement; shield: HTMLDivElement; text: HTMLSpanElement };
@@ -478,6 +481,7 @@ export class Game {
     if (this.input.pressed('KeyI') || this.input.pressed('KeyC')) { this.onOpenCharacter(); return; }
     if (this.input.pressed('KeyB')) { this.onOpenBag(); return; }
     if (this.input.pressed('KeyM')) { this.onOpenMap(); return; }
+    if (this.input.pressed('KeyG')) { this.onOpenGacha(); return; }
     this.updateHero(dt);
     this.updateMobs(dt);
     this.updateProps(dt);
@@ -1236,11 +1240,13 @@ export class Game {
   }
 
   // ---------- items / inventory ----------
-  private lootItem(item: Item) {
+  /** Gives an item to the hero; returns where it went (text for the gacha result). */
+  lootItem(item: Item) {
     const color = RARITY[item.rarity].color;
     const name = itemName(item, this.faction);
     const head = v1.copy(this.hero.position).setY(2.4);
     sfx.levelUp();
+    let where = '';
     // A copy of an item the hero already has levels that item up instead.
     const own = [...this.save.weapons, ...Object.values(this.save.equip), ...this.save.bag].find((x) => x && sameItem(x, item));
     if (own) {
@@ -1251,7 +1257,7 @@ export class Game {
       this.ui.toast(`Копия! ${text}`);
       this.afterGearChange();
       this.persist();
-      return;
+      return `Копия: ${text}`;
     }
     // A weapon goes straight into a free weapon slot.
     const free = this.save.weapons.findIndex((x) => !x);
@@ -1259,16 +1265,20 @@ export class Game {
       this.save.weapons[free] = item;
       this.fx.spawn(head, `${name} → слот ${free + 1}`, 'loot', 1.4, { color });
       this.ui.toast(`${name}: второй слот оружия. Переключай кнопкой ⇄`);
+      where = 'Во второй слот оружия';
     } else if (this.save.bag.length < BAG_SIZE) {
       this.save.bag.push(item);
       this.newItems++;
       this.fx.spawn(head, `+ ${name}`, 'loot', 1.4, { color });
+      where = 'Положено в сумку';
     } else {
       this.fx.spawn(head, `Сумка полна: ${name} потерян`, 'loot', 1.6, { color });
       this.ui.toast(`Сумка полна — ${name} не поместился`);
+      where = 'Сумка полна: предмет потерян';
     }
     this.refreshHud(true);
     this.persist();
+    return where;
   }
 
   /** Equip an item from the bag; whatever was in that slot goes back into the bag. */

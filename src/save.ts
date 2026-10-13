@@ -27,6 +27,8 @@ export interface SaveData {
   kills: number;
   /** Seconds of actual play (balance log). */
   playTime?: number;
+  /** Gacha pulls since the last legendary (src/gacha.ts). */
+  gachaPity: number;
   muted: boolean;
   lowGfx?: boolean;
   /** Fog of war: explored location ids, comma-separated (src/fog.ts). */
@@ -48,6 +50,7 @@ export function newSave(faction: FactionId): SaveData {
     scale: SCALE,
     bosses: {},
     kills: 0,
+    gachaPity: 0,
     muted: false,
   };
 }
@@ -63,6 +66,7 @@ export function loadSave(): SaveData | null {
     d.equip ??= {};
     for (const k of Object.keys(d.equip) as ArmorSlot[]) { const it = d.equip[k]; if (it) d.equip[k] = normalizeItem(it); }
     d.bag = (d.bag ?? []).map(normalizeItem);
+    d.gachaPity ??= 0;
     // gold, hero level, XP and talents are gone from the game
     for (const k of ['gold', 'level', 'xp', 'talents', 'skills', 'resets']) delete (d as unknown as Record<string, unknown>)[k];
     if (d.barrierOpen) { d.gates = [...new Set([...(d.gates ?? []), 'forest-cemetery'])]; delete d.barrierOpen; }

@@ -6,13 +6,14 @@ import './grade';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { FACTIONS, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
+import { FACTIONS, FORGE3D, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
 import { DebugPanel } from './debug';
 import { Prologue, clearPrologue, prologueDone, type Gains } from './prologue';
 import { MapView } from './mapview';
+import { GachaView } from './gachaview';
 import { loadSave, newSave, wipeAll, writeSave } from './save';
 import { clearLog, report } from './balancelog';
 import { UI } from './ui';
@@ -54,6 +55,9 @@ for (const w of Object.values(WEAPONS)) Object.values(w.model).forEach((m) => mo
 const creatures = new Set<string>();
 for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { (m.creature ? creatures : models).add(c); if (w) models.add(w); }
 for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
+// gacha forge scene (src/forge3d.ts): anvil and decor are cloned from here
+models.add('anvil_big');
+for (const [m] of FORGE3D.decor) models.add(m);
 ['orc_stone_big', 'orc_stone_mid', 'orc_stone_small', 'orc_log', 'orc_wood_pile_big', 'orc_tusk_standing', 'orc_skull',
   'undead_fence', 'undead_ruins_01', 'undead_ruins_02', 'undead_obelisk', 'undead_column_1', 'undead_big_bone',
   'undead_bones_remains', 'undead_lamp_post', 'campfire',
@@ -107,8 +111,15 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   ui.onDebug = () => debug.toggle(true);
   const map = new MapView(game);
   ui.onMap = game.onOpenMap = () => { if (inv.isOpen || ui.modalOpen) return; map.toggle(); };
+  const gacha = new GachaView(ui, game);
+  ui.onGacha = game.onOpenGacha = () => {
+    if (inv.isOpen || ui.modalOpen || map.isOpen) return;
+    input.reset();
+    gacha.open();
+  };
   addEventListener('keydown', (e) => {
-    if (inv.isOpen && (e.code === 'Escape' || e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyB')) inv.close();
+    if (gacha.isOpen && (e.code === 'Escape' || e.code === 'KeyG')) gacha.close();
+    else if (inv.isOpen && (e.code === 'Escape' || e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyB')) inv.close();
   });
   ui.onSettings = function open() {
     if (!game) return;
@@ -237,7 +248,7 @@ function run() {
     const { w, h } = { w: app.clientWidth, h: app.clientHeight };
     if (game.camera.aspect !== w / h) { game.camera.aspect = w / h; game.camera.updateProjectionMatrix(); resize(); }
     game.update(dt);
-    renderer.render(game.scene, game.camera);
+    if (!game.offscreen) renderer.render(game.scene, game.camera);
   });
 }
 

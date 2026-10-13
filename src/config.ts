@@ -455,5 +455,50 @@ export const PROP_SPAWNERS: Record<'camp' | 'forest' | 'cemetery' | 'cemeteryFie
 };
 export const LEASH = 15;
 
+/**
+ * "Горнило судьбы" — gacha forge (docs/features/ludka). `rates` are the per-pull chances of gacha tiers 0..3;
+ * a legendary always drops on pull number `pity` without one. Every legendary is the banner weapon.
+ */
+export const GACHA = {
+  /** Gacha tier 0..3 → RARITY index: common, rare, epic, legendary. */
+  tiers: [0, 2, 3, 4],
+  rates: [0.7, 0.22, 0.074, 0.006],
+  pity: 60,
+  banner: { def: 'hammer', name: 'Молот Короля-лича', subtitle: 'Выкован из костей павших королей. Шанс повышен!' },
+  /** Hammer blows per pull; the rarity colour can climb after each, legendary only on the last one. */
+  strikes: 5,
+  /** Reveal timing, seconds: delay between hammer blows, then the final flash. */
+  strikeGap: 0.6,
+  revealHold: 0.9,
+};
+
+/** 3D forge scene of the gacha (src/forge3d.ts). Positions in metres; `top` = anvil top, y offsets are added to it. */
+export const FORGE3D = {
+  bg: 0x140a08,
+  fov: 44,
+  /** Narrower screens widen the vertical FOV so this aspect's width always fits. */
+  minAspect: 0.5,
+  camera: [0.55, 1.95, 4.3] as [number, number, number],
+  lookAt: [0, 0.25, -0.5] as [number, number, number],
+  /** Camera push-in (m) over the three blows. */
+  push: 0.45,
+  anvilScale: 0.4,
+  anvilYaw: 0,
+  ingot: [0, 0.04, 0] as [number, number, number],
+  ingotYaw: 0,
+  hammerScale: 0.68,
+  /** Hammer shoulder pivot relative to the ingot top; angles (rad) around Z: raised and on the ingot. */
+  pivot: [-0.45, 0.2, 0] as [number, number, number],
+  hammerUp: 1.25,
+  hammerDown: -0.04,
+  hearth: [0, 0, -1.6] as [number, number, number],
+  hearthScale: [1.1, 1.35, 1.1] as [number, number, number],
+  coalLight: 13,
+  /** [model, x, z, scale, yaw] */
+  decor: [['bucket', 0.95, -0.55, 0.3, 0.4], ['wood_pile_small', -1.35, -1.2, 0.4, 0.8], ['barrel', 1.35, -1.1, 0.6, 0.3]] as [string, number, number, number, number][],
+  itemSize: 1.0,
+  itemRise: 0.85,
+  bloom: { strength: 0.8, radius: 0.5, threshold: 0.85 },
+};
 /** Kill feel: the death clip starts on the lethal hit, holds `holdAt` s into the fall for `freeze` s (hit-stop), then the corpse is thrown back harder than a normal hit. */
 export const KILL_FX = { holdAt: 0.1, freeze: 0.1, knockMul: 2, shake: 0.31, blood: 14 };

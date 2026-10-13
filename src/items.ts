@@ -12,6 +12,8 @@ export interface Item {
   sharpen: number;
   /** 1 + number of extra copies merged into it (each raises the stats, see RARITY). */
   lvl: number;
+  /** Unique name (gacha banner weapons); replaces the generic def name. */
+  name?: string;
 }
 
 export type ArmorSlot = 'head' | 'chest' | 'arms' | 'legs' | 'ring' | 'amulet';
@@ -113,7 +115,7 @@ export function slotOf(it: Item): ArmorSlot | 'weapon' {
 }
 
 export function itemName(it: Item, f: FactionId) {
-  return it.kind === 'weapon' ? WEAPONS[it.def].name : ARMOR[it.def].name[f];
+  return it.name ?? (it.kind === 'weapon' ? WEAPONS[it.def].name : ARMOR[it.def].name[f]);
 }
 
 /** Icon id for icon(): weapon id or armour slot. */
@@ -170,5 +172,5 @@ export const dropIconId = (d: ItemDrop) => (d.kind === 'weapon' ? d.def : ARMOR[
 export function normalizeItem(it: Partial<Item> & { def: string }): Item {
   // the old peasant set is gone (the hero looks like a peasant already): its pieces become guard pieces
   const def = it.def.startsWith('peasant_') ? it.def.replace('peasant_', 'guard_') : it.def;
-  return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1 };
+  return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
 }

@@ -110,6 +110,7 @@ export class UI {
   private lastHud = '';
   onSettings: () => void = () => {};
   onBag: () => void = () => {};
+  onGacha: () => void = () => {};
   onMap: () => void = () => {};
   onArmor: () => void = () => {};
   onDebug: () => void = () => {};
@@ -120,10 +121,12 @@ export class UI {
   constructor() {
     $('btn-settings').addEventListener('click', () => { sfx.click(); this.onSettings(); });
     $('btn-bag').addEventListener('click', () => { sfx.click(); this.onBag(); });
+    $('btn-gacha').addEventListener('click', () => { sfx.click(); this.onGacha(); });
     $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('bosses').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('btn-settings').innerHTML = art('gear', 40);
     $('btn-bag').insertAdjacentHTML('afterbegin', art('bag', 48));
+    $('btn-gacha').insertAdjacentHTML('afterbegin', art('anvil', 44));
     $('equipbar').addEventListener('click', (e) => {
       if (!(e.target as HTMLElement).closest('[data-armor]')) return;
       sfx.click();
