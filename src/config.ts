@@ -76,6 +76,19 @@ export interface WeaponDef {
   pull?: { radius: number; ahead: number; force: number; perEnemy: number; max: number };
   /** Procedural swings (src/swing.ts) cycled along the combo chain, instead of the `anim` clip. */
   swing?: SwingKind[];
+  /** Nagamaki: the chain never breaks (a pause or a whiff does not reset it), the finisher is a narrow thrust. */
+  cycle?: boolean;
+  /** Pan: the 'circle' is centred `ahead` m in front of the hero (radius = range). */
+  ahead?: number;
+  /** Pan: `chance` of a ringing blow for × `mult`. */
+  ring?: { chance: number; mult: number };
+  /** Hidden blade: always stuns for `stun` s; plain mobs left under `execute` of their HP die; lunge `dash` m. */
+  assassin?: { stun: number; execute: number; dash: number };
+  /**
+   * Throwing scythe: the blow throws it to circle the hero for `time` s at `radius` m (`turns` laps), cutting every
+   * mob it passes (once per `rehit` s each); the hand waits for it to come back.
+   */
+  orbit?: { time: number; radius: number; turns: number; rehit: number };
 }
 
 export const WEAPONS: Record<string, WeaponDef> = {
@@ -103,22 +116,24 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   nagamaki: {
     id: 'nagamaki', name: 'Нагамаки', type: 'slash', dmgMul: 0.75, aps: 1.3, shape: 'arc', arc: 200, range: 2.6,
-    anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️',
+    anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️', cycle: true,
     swing: ['slashRL', 'slashLR', 'thrust'],
   },
   scythe: {
-    id: 'scythe', name: 'Коса', type: 'slash', dmgMul: 0.9, aps: 0.55, shape: 'circle', arc: 360, range: 3,
+    id: 'scythe', name: 'Коса', type: 'slash', dmgMul: 0.9, aps: 0.4, shape: 'circle', arc: 360, range: 3,
     anim: 'AxeAttack', model: { human: 'scythe', orc: 'scythe' }, icon: '🌀',
+    orbit: { time: 2.4, radius: 2.8, turns: 2, rehit: 0.45 },
     swing: ['throw'],
   },
   pan: {
-    id: 'pan', name: 'Сковорода', type: 'crush', dmgMul: 1.1, aps: 0.9, shape: 'circle', arc: 360, range: 2.2,
-    anim: 'AxeAttack', model: { human: 'pan', orc: 'pan' }, icon: '🍳', stun: 0.6,
+    id: 'pan', name: 'Сковорода', type: 'crush', dmgMul: 1.1, aps: 0.9, shape: 'circle', arc: 360, range: 1.6, ahead: 1.3,
+    anim: 'AxeAttack', model: { human: 'pan', orc: 'pan' }, icon: '🍳', stun: 0.6, ring: { chance: 0.3, mult: 2 },
     swing: ['overhead'],
   },
   hidden_blade: {
     id: 'hidden_blade', name: 'Скрытый клинок', type: 'slash', dmgMul: 3.2, aps: 0.45, shape: 'arc', arc: 120, range: 2.0,
     anim: 'SwordAttack', model: { human: 'hidden_blade', orc: 'hidden_blade' }, icon: '🗡', single: true,
+    assassin: { stun: 1.2, execute: 0.25, dash: 1.2 },
     swing: ['assassin'],
   },
   shield: {
