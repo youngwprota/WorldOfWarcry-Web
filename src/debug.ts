@@ -12,7 +12,7 @@ const SECTIONS: [string, Action[]][] = [
     ['+10', (g) => g.debugSetLevel(g.save.level + 10)],
     ['1', (g) => g.debugSetLevel(1)],
     ['100', (g) => g.debugSetLevel(100)],
-    ['+500 XP', (g) => g.addXp(500, g.hero.position)],
+    ['+500 XP', (g) => g.addXp(500)],
   ]],
   ['Таланты', [
     ['Окно', (g) => g.onOpenTalents()],

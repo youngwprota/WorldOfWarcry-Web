@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { HIT_FLASH, applyHitFlash } from './hitflash';
 import { assets } from './assets';
 import { attachWeapon } from './rig';
 import { PART_PREFIXES, type VisualPart } from './items';
@@ -245,7 +246,7 @@ export class Character {
   }
 
   hit() {
-    this.flashT = 0.12;
+    this.flashT = HIT_FLASH;
     if (this.atkTimer <= 0 && !this.dead) {
       this.hitU.reset();
       this.hitU.timeScale = 1.6;
@@ -253,6 +254,9 @@ export class Character {
       this.hitW = 1;
     }
   }
+
+  /** The death clip has played to its end (it clamps on the last frame). */
+  get deathDone() { return this.dead && !this.death.isRunning(); }
 
   die() {
     this.dead = true;
@@ -281,8 +285,7 @@ export class Character {
     }
     if (this.flashT > 0) {
       this.flashT -= dt;
-      const k = this.flashT > 0 ? 2.6 : 1;
-      for (const m of this.materials) m.color.copy(this.baseColor).multiplyScalar(k);
+      applyHitFlash(this.materials, this.flashT);
     }
     if (!animate) return;
     if (!this.dead) {

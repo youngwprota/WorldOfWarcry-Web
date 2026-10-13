@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { HIT_FLASH, applyHitFlash } from './hitflash';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { ATTACK_HIT, type AttackAnim } from './config';
@@ -152,8 +153,11 @@ export class Creature {
   }
 
   hit() {
-    this.flashT = 0.12;
+    this.flashT = HIT_FLASH;
   }
+
+  /** The death clip has played to its end (it clamps on the last frame). */
+  get deathDone() { return this.dead && !this.death.isRunning(); }
 
   die() {
     this.dead = true;
@@ -177,8 +181,7 @@ export class Creature {
     this.root.rotation.y = this.facing;
     if (this.flashT > 0) {
       this.flashT -= dt;
-      const k = this.flashT > 0 ? 2.6 : 1;
-      for (const m of this.materials) m.color.setScalar(k);
+      applyHitFlash(this.materials, this.flashT);
     }
     if (!animate) return;
     if (!this.dead) {

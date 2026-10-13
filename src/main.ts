@@ -17,6 +17,7 @@ import { MapView } from './mapview';
 import { loadSave, newSave, wipeAll, writeSave } from './save';
 import { clearLog, report } from './balancelog';
 import { UI } from './ui';
+import { DragScroll } from './dragscroll';
 import { BREAKABLES } from './world';
 
 const ui = new UI();
@@ -39,6 +40,7 @@ function resize() {
   return { w, h };
 }
 addEventListener('resize', resize);
+new DragScroll(app);
 resize();
 
 // Everything the prototype can show; loaded up-front (≈20 MB of FBX).
@@ -101,9 +103,7 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   ui.showHud(true);
   applyGfx(!!save.lowGfx);
   const inv = new Inventory(ui, game);
-  ui.onCharacter = game.onOpenCharacter = () => { input.reset(); inv.openCharacter(); };
-  ui.onBag = game.onOpenBag = () => { input.reset(); inv.openBag(); };
-  ui.onArmor = ui.onCharacter;
+  ui.onBag = ui.onArmor = game.onOpenCharacter = game.onOpenBag = () => { input.reset(); inv.open(); };
   const talents = new TalentsView(ui, game);
   ui.onTalents = inv.onTalents = game.onOpenTalents = () => {
     if (inv.isOpen) inv.close();
