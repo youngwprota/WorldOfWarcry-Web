@@ -228,6 +228,11 @@ export class UI {
     for (const [k, g] of this.gains) if (now > g.until) { g.el.remove(); this.gains.delete(k); }
   }
 
+  /** Pulls the hero can spend in the forge. */
+  gachaBadge(n: number) {
+    $('btn-gacha').dataset.badge = n > 0 ? String(n) : '';
+  }
+
   bagBadge(n: number, full: boolean) {
     const b = $('btn-bag');
     b.dataset.badge = full ? '!' : n > 0 ? String(n) : '';

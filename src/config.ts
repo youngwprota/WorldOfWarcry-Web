@@ -320,7 +320,7 @@ export const MOB_REGEN_DELAY = 5;
  */
 export interface ZoneFoes { attack: DamageType; weak: DamageType[]; resist?: DamageType[] }
 export const ZONE_FOES: Partial<Record<ZoneId, ZoneFoes>> = {
-  forest: { attack: 'chop', weak: ['slash'] },
+  forest: { attack: 'chop', weak: ['slash', 'chop'] },
   cemetery: { attack: 'slash', weak: ['crush'], resist: ['slash', 'chop'] },
 };
 function foes(zone: ZoneId): Pick<MobDef, 'attack' | 'resist'> {
@@ -342,48 +342,48 @@ export const MOBS: Record<string, MobDef> = {
   bandit_thug: {
     id: 'bandit_thug', name: 'Разбойник',
     model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['peasant', 'axe'] },
-    anim: 'AxeAttack', hp: 110, dmg: 9, aps: 0.7, range: 1.5, speed: 3.0, aggro: 4.5, regen: 0.04, scale: 1,
+    anim: 'AxeAttack', hp: 220, dmg: 5, aps: 0.7, range: 1.5, speed: 3.0, aggro: 4.5, regen: 0.04, scale: 1,
     ...foes('forest'), reward: { hp: 2 }, respawn: 45,
   },
   bandit_fighter: {
     id: 'bandit_fighter', name: 'Головорез',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 220, dmg: 16, aps: 0.8, range: 1.6, speed: 3.4, aggro: 5, regen: 0.03, scale: 1.08,
+    anim: 'SwordAttack', hp: 360, dmg: 10, aps: 0.8, range: 1.6, speed: 3.4, aggro: 5, regen: 0.03, scale: 1.08,
     ...foes('forest'), reward: { power: 3 }, respawn: 60,
   },
   bandit_veteran: {
     id: 'bandit_veteran', name: 'Ветеран', rank: 'elite',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 700, dmg: 19, aps: 0.9, range: 1.8, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.3,
+    anim: 'SwordAttack', hp: 1400, dmg: 11, aps: 0.9, range: 1.8, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.3,
     ...foes('forest'), reward: { power: 5 }, respawn: 300,
     drop: { kind: 'weapon', def: 'sword', rarity: 1 },
   },
   bandit_brute: {
     id: 'bandit_brute', name: 'Громила', rank: 'elite',
     model: { human: ['orc_grunt', 'axe_orc_grunt'], orc: ['human_knight', 'sword_human_knight'] },
-    anim: 'AxeAttack', hp: 800, dmg: 20, aps: 0.7, range: 1.8, speed: 3.2, aggro: 5.2, regen: 0.03, scale: 1.35,
+    anim: 'AxeAttack', hp: 1600, dmg: 12, aps: 0.7, range: 1.8, speed: 3.2, aggro: 5.2, regen: 0.03, scale: 1.35,
     ...foes('forest'), reward: { hp: 5 }, respawn: 300,
     drop: { kind: 'weapon', def: 'hammer', rarity: 1 },
   },
   bandit_lumberjack: {
     id: 'bandit_lumberjack', name: 'Лесоруб', rank: 'elite',
     model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['peasant', 'axe'] },
-    anim: 'AxeAttack', hp: 900, dmg: 24, aps: 0.6, range: 1.8, speed: 3.0, aggro: 5.2, regen: 0.03, scale: 1.45,
+    anim: 'AxeAttack', hp: 1800, dmg: 14, aps: 0.6, range: 1.8, speed: 3.0, aggro: 5.2, regen: 0.03, scale: 1.45,
     ...foes('forest'), reward: { regen: 1 }, respawn: 300,
     drop: { kind: 'armor', def: 'guard_chest', rarity: 1 },
   },
   bandit_warlord: {
     id: 'bandit_warlord', name: 'Свирепый вожак', rank: 'mini',
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
-    anim: 'AxeAttack', hp: 2250, dmg: 26, aps: 0.65, range: 2.1, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.55,
+    anim: 'AxeAttack', hp: 4500, dmg: 16, aps: 0.65, range: 2.1, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.55,
     ...foes('forest'), reward: { hp: 6 }, respawn: 900,
-    bonus: { hp: 500 },
+    bonus: { hp: 60 },
   },
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
-    anim: 'AxeAttack', hp: 5200, dmg: 30, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
-    ...foes('forest'), reward: { power: 12 }, respawn: 180,
+    anim: 'AxeAttack', hp: 4600, dmg: 12, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
+    ...foes('forest'), reward: { power: 12 }, respawn: 900,
     drop: { kind: 'weapon', def: 'hammer', rarity: 2 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest', unlocks: ['forest-cemetery'],
@@ -395,65 +395,65 @@ export const MOBS: Record<string, MobDef> = {
   boar: {
     id: 'boar', name: 'Вепрь', creature: true, push: 5,
     model: { human: ['orc_boar', null], orc: ['orc_boar', null] },
-    anim: 'AxeAttack', hp: 90, dmg: 8, aps: 0.9, range: 1.6, speed: 2.1, aggro: 4, regen: 0.04, scale: 1.5,
+    anim: 'AxeAttack', hp: 180, dmg: 5, aps: 0.9, range: 1.6, speed: 2.1, aggro: 4, regen: 0.04, scale: 1.5,
     ...foes('forest'), reward: { speed: 1 }, respawn: 40,
   },
   murloc: {
     id: 'murloc', name: 'Мурлок', creature: true,
     model: { human: ['human_murloc', null], orc: ['human_murloc', null] },
-    anim: 'SwordAttack', hp: 1000, dmg: 2, aps: 0.85, range: 1.5, speed: 3.4, aggro: 4.5, regen: 0.04, scale: 1.1,
+    anim: 'SwordAttack', hp: 1200, dmg: 1, aps: 0.85, range: 1.5, speed: 3.4, aggro: 4.5, regen: 0.04, scale: 1.1,
     ...foes('forest'), reward: { power: 1 }, respawn: 45,
   },
   undead_boar: {
     id: 'undead_boar', name: 'Нежить-вепрь', creature: true, push: 5,
     model: { human: ['undead_boar', null], orc: ['undead_boar', null] },
-    anim: 'AxeAttack', hp: 150, dmg: 9, aps: 0.85, range: 1.6, speed: 1.9, aggro: 4.5, regen: 0.03, scale: 1.5,
+    anim: 'AxeAttack', hp: 520, dmg: 10, aps: 0.85, range: 1.6, speed: 1.9, aggro: 4.5, regen: 0.03, scale: 1.5,
     ...foes('cemetery'), reward: { hp: 1 }, respawn: 50,
   },
   skeleton_worker: {
     id: 'skeleton_worker', name: 'Мертвяк',
     model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
-    anim: 'SwordAttack', hp: 140, dmg: 8, aps: 0.8, range: 1.4, speed: 2.8, aggro: 4.5, regen: 0.03, scale: 1,
-    ...foes('cemetery'), reward: { regen: 1 }, respawn: 50,
+    anim: 'SwordAttack', hp: 500, dmg: 10, aps: 0.8, range: 1.4, speed: 2.8, aggro: 4.5, regen: 0.03, scale: 1,
+    ...foes('cemetery'), reward: { hp: 2 }, respawn: 50,
   },
   skeleton_warrior: {
     id: 'skeleton_warrior', name: 'Скелет-копейщик',
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
-    anim: 'SwordAttack', hp: 260, dmg: 15, aps: 0.75, range: 2.0, speed: 3.0, aggro: 5, regen: 0.025, scale: 1.08,
+    anim: 'SwordAttack', hp: 800, dmg: 16, aps: 0.75, range: 2.0, speed: 3.0, aggro: 5, regen: 0.025, scale: 1.08,
     ...foes('cemetery'), reward: { power: 3 }, respawn: 70,
   },
   ghost: {
     id: 'ghost', name: 'Призрак',
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
-    anim: 'SwordAttack', hp: 130, dmg: 14, aps: 1.0, range: 1.4, speed: 4.3, aggro: 6, regen: 0.05, scale: 1,
+    anim: 'SwordAttack', hp: 560, dmg: 14, aps: 1.0, range: 1.4, speed: 4.3, aggro: 6, regen: 0.05, scale: 1,
     ...foes('cemetery'), reward: { speed: 3 }, respawn: 60,
   },
   bone_guard: {
     id: 'bone_guard', name: 'Костяной страж', rank: 'elite',
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
-    anim: 'SwordAttack', hp: 820, dmg: 22, aps: 0.75, range: 2.1, speed: 3.0, aggro: 5.5, regen: 0.03, scale: 1.4,
+    anim: 'SwordAttack', hp: 1640, dmg: 13, aps: 0.75, range: 2.1, speed: 3.0, aggro: 5.5, regen: 0.03, scale: 1.4,
     ...foes('cemetery'), reward: { hp: 6 }, respawn: 600,
     drop: { kind: 'armor', def: 'lord_head', rarity: 2 },
   },
   shade: {
     id: 'shade', name: 'Тень', rank: 'elite',
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
-    anim: 'SwordAttack', hp: 640, dmg: 20, aps: 1.1, range: 1.5, speed: 4.5, aggro: 6.2, regen: 0.03, scale: 1.3,
+    anim: 'SwordAttack', hp: 1280, dmg: 12, aps: 1.1, range: 1.5, speed: 4.5, aggro: 6.2, regen: 0.03, scale: 1.3,
     ...foes('cemetery'), reward: { speed: 5 }, respawn: 600,
     drop: { kind: 'weapon', def: 'dagger', rarity: 2 },
   },
   gravedigger: {
     id: 'gravedigger', name: 'Могильщик', rank: 'mini',
     model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
-    anim: 'SwordAttack', hp: 1820, dmg: 26, aps: 0.8, range: 1.9, speed: 3.0, aggro: 5.9, regen: 0.03, scale: 1.75,
+    anim: 'SwordAttack', hp: 3640, dmg: 16, aps: 0.8, range: 1.9, speed: 3.0, aggro: 5.9, regen: 0.03, scale: 1.75,
     ...foes('cemetery'), reward: { regen: 2 }, respawn: 1800,
-    bonus: { regen: 25 },
+    bonus: { regen: 5 },
   },
   death: {
     id: 'death', name: 'Смерть',
     model: { human: ['undead_king', 'reaper'], orc: ['undead_king', 'reaper'] },
-    anim: 'SwordAttack', hp: 4500, dmg: 19, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
-    ...foes('cemetery'), reward: { power: 18 }, respawn: 300,
+    anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
+    ...foes('cemetery'), reward: { power: 18 }, respawn: 1200,
     drop: { kind: 'weapon', def: 'reaper', rarity: 3 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['forest-peaks', 'cemetery-peaks'],
@@ -526,6 +526,45 @@ export function depthMul(zone: ZoneId, t: number) {
   return { hp: d ? k(d.hp) : 1, dmg: d ? k(d.dmg) : 1, reward: d ? k(d.reward) : 1, scale: d ? k(d.scale) : 1 };
 }
 
+// ---------- breakable props ----------
+/**
+ * Something that happens when a prop is destroyed (data-driven; add new types here).
+ * - spawnMob: a mob crawls out of the prop (e.g. a skeleton rising from a grave).
+ */
+export type BreakEvent = { type: 'spawnMob'; mob: string; chance: number; count?: number; bark?: string };
+
+export interface BreakableDef {
+  model: string | null;
+  hits: number; // HP in "normal hits"
+  color: number;
+  scale: number;
+  /** Fixed power orbs, shown above the HP bar like on mobs — one stat only. */
+  reward: OrbReward;
+  /** Material resistances: wood is easy to chop, stone needs a hammer. */
+  resist: Partial<Record<DamageType, ResistTier>>;
+  r: number;
+  /** Respawn cooldown, seconds (GDD 7.3: 30–60 s). */
+  respawn: number;
+  onBreak?: BreakEvent[];
+}
+const GRAVE_RISE: BreakEvent[] = [{ type: 'spawnMob', mob: 'skeleton_worker', chance: 0.35, bark: 'Кто потревожил мой сон?!' }];
+// wood is easy to chop, stone needs a hammer
+const WOOD: BreakableDef['resist'] = { chop: 'weak', crush: 'resist' };
+const STONE: BreakableDef['resist'] = { slash: 'resist', chop: 'resist', crush: 'weak' };
+export const BREAKABLES: Record<string, BreakableDef> = {
+  barrel: { model: 'barrel', hits: 2, color: 0x8a5a2b, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
+  orc_barrel: { model: 'orc_barrel', hits: 2, color: 0x7a4a22, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
+  box: { model: 'box_small_1', hits: 1, color: 0xa87a45, scale: 0.9, reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
+  box_large: { model: 'box_large_1', hits: 3, color: 0xa87a45, scale: 0.8, reward: { power: 2 }, resist: WOOD, r: 0.7, respawn: 60 },
+  orc_box: { model: 'orc_box_small_1', hits: 1, color: 0x8a5a2b, scale: 0.9, reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
+  bush: { model: null, hits: 1, color: 0x3f8f2f, scale: 1, reward: { regen: 1 }, resist: { slash: 'weak', crush: 'resist' }, r: 0.6, respawn: 25 },
+  tomb1: { model: 'undead_tomb_stone_1', hits: 2, color: 0x77748a, scale: 0.75, reward: { power: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb2: { model: 'undead_tomb_stone_2', hits: 2, color: 0x77748a, scale: 0.75, reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb3: { model: 'undead_tomb_stone_3', hits: 2, color: 0x77748a, scale: 0.75, reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb4: { model: 'undead_tomb_stone_4', hits: 2, color: 0x77748a, scale: 0.75, reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  coffin: { model: 'undead_coffin', hits: 3, color: 0x5a3c2c, scale: 0.34, reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
+};
+
 // ---------- spawners ----------
 /**
  * A spawner stands at a fixed spot on the map and always spawns the same unit: a mob or a breakable prop
@@ -565,7 +604,7 @@ const props = (kinds: string[], n: number, charges?: number[]): SpawnerDef[] =>
 const GRAVES = ['tomb1', 'tomb2', 'tomb3', 'tomb4', 'tomb1', 'tomb2', 'coffin'];
 export const PROP_SPAWNERS: Record<'camp' | 'forest' | 'cemetery' | 'cemeteryField', SpawnerDef[]> = {
   camp: props(['barrel', 'box', 'box', 'barrel'], 4, FOREST_CHARGES),
-  forest: props(['barrel', 'box', 'bush', 'box_large', 'orc_barrel', 'bush', 'orc_box'], 24, FOREST_CHARGES),
+  forest: props(['barrel', 'box', 'bush', 'box_large', 'orc_barrel', 'box', 'orc_box'], 24, FOREST_CHARGES),
   cemetery: props(GRAVES, 18),
   cemeteryField: props(GRAVES, 6),
 };
@@ -580,6 +619,8 @@ export const GACHA = {
   tiers: [0, 2, 3, 4],
   rates: [0.7, 0.22, 0.074, 0.006],
   pity: 60,
+  /** Chance a kill gives one pull, by mob rank (tuned with `npm run sim` to ~1 pull per 5 min of play). */
+  token: { normal: 0.015, elite: 0.15, mini: 0.3, boss: 1 } as Record<MobRank, number>,
   banner: { def: 'hammer', name: 'Молот Короля-лича', subtitle: 'Выкован из костей павших королей. Шанс повышен!' },
   /** Hammer blows per pull; the rarity colour can climb after each, legendary only on the last one. */
   strikes: 5,

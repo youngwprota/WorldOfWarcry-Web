@@ -6,13 +6,13 @@ import { HELPER_SEEK, Helpers, type Helper } from './helpers';
 import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from './offhand';
 import { Creature } from './creature';
 import {
-  COMBOS, DUAL, FACTIONS, LEFT_SWING, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
-  mobRank, type ComboDef, type DamageType, type MobDef, type OrbKind, type WeaponDef, type ZoneDef,
+  COMBOS, DUAL, FACTIONS, GACHA, LEFT_SWING, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type WeaponDef, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
-  ARMOR, BAG_SIZE, armorStats, copyGain, dropIconId, dropItem, itemName, sameItem, weaponDamage,
-  type ArmorSlot, type BonusStat, type Item, type VisualPart,
+  ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemName, sameItem, weaponDamage,
+  type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
 import { sfx } from './audio';
@@ -22,6 +22,7 @@ import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } 
 import { UI, type MapMark } from './ui';
 import { icon, resistIcons, rewardChips } from './icons';
 import { heroDeaths, logFight, logSnap } from './balancelog';
+import { BLOODLUST, SHIELD_DELAY, armorMul, gearOf, guardMul, handMulOf, heroDps, heroStats, powerMult } from './balance';
 
 /** Debris colour of hits and kills: bone dust for skeletons and spirits, blood for the rest. */
 const bloodColor = (m: Mob) => m.def.id.startsWith('skel') || m.def.id === 'ghost' || m.def.id === 'death' ? 0xd8d4c8 : 0xc0392b;
@@ -450,29 +451,18 @@ export class Game {
   // ---------- hero stats ----------
   get faction() { return this.save.faction; }
   /** Totals from equipped armour and jewellery. */
-  gear() {
-    const g = { defense: 0, hp: 0, regen: 0, power: 0, speed: 0 } as { defense: number } & Record<BonusStat, number>;
-    for (const it of Object.values(this.save.equip)) {
-      if (!it) continue;
-      const s = armorStats(it);
-      g.defense += s.defense;
-      if (s.bonus) g[s.bonus.stat] += s.bonus.value;
-    }
-    return g;
-  }
-  get power() { return this.save.stats.power + this.gear().power; }
-  get defense() { return this.gear().defense; }
-  get maxHp() { return Math.round((this.save.stats.hp + this.gear().hp) * (this.faction === 'human' ? 1.1 : 1)); }
-  get shieldMax() { return this.faction === 'human' ? Math.round(this.maxHp * 0.15) : 0; }
-  get regen() { return Math.round(Math.min(HERO.regenCap, (this.save.stats.regen + this.gear().regen) * (this.faction === 'human' ? 1.1 : 1))); }
+  gear() { return gearOf(this.save.equip); }
+  get power() { return heroStats(this.save).power; }
+  get defense() { return heroStats(this.save).defense; }
+  get maxHp() { return heroStats(this.save).maxHp; }
+  get shieldMax() { return heroStats(this.save).shieldMax; }
+  get regen() { return heroStats(this.save).regen; }
   /** Speed stat in whole points (HERO.speedPerMs per m/s). */
-  get speedStat() {
-    return Math.round(Math.min(HERO.speedCap, this.save.stats.speed + this.gear().speed) * (this.faction === 'orc' ? 1.05 : 1));
-  }
+  get speedStat() { return heroStats(this.save).speedStat; }
   /** Running speed, m/s (HERO.speedMul applies on top: 100 points = 4 m/s). */
-  get speed() { return (this.speedStat / HERO.speedPerMs) * HERO.speedMul; }
+  get speed() { return heroStats(this.save).speed; }
   /** Orc racial: up to +30% damage as HP drops. */
-  get bloodlustMax() { return 0.3; }
+  get bloodlustMax() { return BLOODLUST; }
   /** Main weapon: the right hand, or the left one when the right is empty (stats, balance log). */
   get weaponItem(): Item { return this.save.weapons[0] ?? this.save.weapons[1]!; }
   get weapon() { return WEAPONS[this.weaponItem.def]; }
@@ -480,33 +470,11 @@ export class Game {
   get dual() { return !!this.save.weapons[0] && !!this.save.weapons[1]; }
   handMul() { return this.dual ? DUAL.mul : 1; }
   /** Hand multiplier of one weapon: the hidden blade carries the folded-in sword at full damage. */
-  handMulOf(it: Item) {
-    if (this.pair?.kind === 'hidden_blade' && it.def !== 'sword') return 1;
-    // beside a shield the weapon is the only one that swings
-    const other = this.save.weapons[this.save.weapons[0] === it ? 1 : 0];
-    return other && WEAPONS[other.def].guard && !WEAPONS[it.def].guard ? 1 : this.handMul();
-  }
-  powerMult() {
-    let m = 1 + this.power / 100;
-    if (this.faction === 'orc') m *= 1.1 * (1 + this.bloodlustMax * (1 - this.hp / this.maxHp));
-    return m;
-  }
+  handMulOf(it: Item) { return handMulOf(this.save.weapons, this.pair, it); }
+  powerMult() { return powerMult(this.faction, this.power, this.hp / this.maxHp); }
   itemDamage(it: Item) { return weaponDamage(it); }
   /** Both hands together; `resist` applies each hand's own damage type. */
-  heroDps(resist?: Partial<Record<DamageType, string>>) {
-    let dps = 0;
-    const blade = this.pair?.kind === 'hidden_blade';
-    for (const it of this.save.weapons) {
-      if (!it) continue;
-      const w = WEAPONS[it.def];
-      if (w.guard && this.dual) continue;
-      if (blade && it.def === 'sword') continue;
-      const r = resist ? RESIST_MULT[(resist[w.type] as 'weak') ?? 'normal'] : 1;
-      const k = blade ? SWORD_PAIRS.hidden_blade.dmg * SWORD_PAIRS.hidden_blade.aps : 1;
-      dps += this.itemDamage(it) * w.aps * r * k * this.handMulOf(it);
-    }
-    return dps * this.powerMult();
-  }
+  heroDps(resist?: Partial<Record<DamageType, ResistTier>>) { return heroDps(this.save.weapons, this.pair, this.powerMult(), resist); }
 
   /** Model names of the right / left hand weapons. */
   handModels(): [string | null, string | null] {
@@ -703,7 +671,7 @@ export class Game {
     let rate = this.regen; // HP per second
     if (inCamp(p.x, p.z)) rate += (HERO.campRegen / 100) * this.maxHp;
     this.hp = Math.min(this.maxHp, this.hp + rate * dt);
-    if (this.shieldMax > 0 && this.time - this.lastHurt > 6) this.shield = this.shieldMax;
+    if (this.shieldMax > 0 && this.time - this.lastHurt > SHIELD_DELAY) this.shield = this.shieldMax;
 
     // zone + interactions
     const zone = this.world.zoneAt(p.x, p.z);
@@ -1248,7 +1216,17 @@ export class Game {
     for (const it of m.loot) this.pickups.spawnItem(m.pos, it);
     m.loot = [];
     if (m.def.bonus) this.grantBonus(m);
+    if (Math.random() < GACHA.token[mobRank(m.def)]) this.grantPull(m);
     if (m.def.boss) this.persist();
+  }
+
+  /** A kill dropped a gacha pull. */
+  private grantPull(m: Mob) {
+    this.save.pulls = (this.save.pulls ?? 0) + 1;
+    this.fx.spawn(v1.copy(m.pos).setY(2.6), '+1 крутка', 'loot', 1.6, { color: '#ffb347' });
+    this.ui.gachaBadge(this.save.pulls);
+    sfx.levelUp();
+    this.persist();
   }
 
   /** Micro-boss kill: permanent stats straight onto the hero. */
@@ -1615,7 +1593,7 @@ export class Game {
   private hurtHero(raw: number, from: THREE.Vector3, src?: Mob) {
     if (this.dead) return;
     // GDD 10.5: reduction = defense / (defense + 100).
-    let dmg = Math.max(1, Math.round(raw * (100 / (100 + this.defense)) * this.guardMul() * (0.9 + Math.random() * 0.2)));
+    let dmg = Math.max(1, Math.round(raw * armorMul(this.defense) * this.guardMul() * (0.9 + Math.random() * 0.2)));
     this.lastHurt = this.time;
     if (src) this.tryCounter(src);
     if (src) this.fightOf(src).taken += Math.min(dmg, this.hp + this.shield);
@@ -1649,11 +1627,7 @@ export class Game {
   }
 
   /** Incoming damage multiplier from the shields in hand. */
-  private guardMul() {
-    let k = 1;
-    for (const it of this.save.weapons) if (it && WEAPONS[it.def].guard) k *= 1 - WEAPONS[it.def].guard!.reduce;
-    return k;
-  }
+  private guardMul() { return guardMul(this.save.weapons); }
 
   private lastCounter = -99;
   private counterHand = newHand(0);
@@ -1981,6 +1955,7 @@ export class Game {
     if (full) {
       this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it) * this.handMul(), this.save.equip);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
+      this.ui.gachaBadge(this.save.pulls ?? 0);
     }
     this.ui.minimap(this.hero.position, this.hero.facing, this.mapDots(45), this.world, this.mapMarks(45));
     this.ui.edgeArrow(g.at && g.at.alive ? g.at.pos : null, this.camera);
@@ -1997,6 +1972,12 @@ export class Game {
   god = false;
 
   /** Debug: a rare weapon of this type straight into a hand; the old one goes to the bag if it fits. */
+  debugAddPulls(n: number) {
+    this.save.pulls = (this.save.pulls ?? 0) + n;
+    this.refreshHud(true);
+    this.persist();
+  }
+
   debugGiveWeapon(def: string, slot: 0 | 1 = 0) {
     const old = this.save.weapons[slot];
     this.save.weapons[slot] = dropItem({ kind: 'weapon', def, rarity: 2 });

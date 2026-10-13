@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, type SpawnerDef, type DamageType, type FactionId, type OrbReward, type ResistTier, type ZoneId } from './config';
+import { FACTIONS, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
   ARENA, FORT, GATE, ISLAND, MAP_BOX, PATH, PATH_W, GATES, RIDGES, angleOf, gateDist, edgePoint, heightAt, inCamp, pathAt, pathDist, progressAt, rimCliff, rimTrees,
   shoreR, walkR, walkable, zoneAt, zoneIdAt, zoneWeights,
@@ -11,6 +11,8 @@ import type { Gate } from './island';
 import {
   bakeGroundMaps, buildFlowers, buildGrass, buildGround, buildMist, buildOcean, buildPond, windTime, zoneTexture, type Pond,
 } from './terrain';
+import { BREAKABLES } from './config';
+export { BREAKABLES, type BreakableDef, type BreakEvent } from './config';
 
 /** Deterministic RNG so the map is the same every session. */
 export function rng(seed: number) {
@@ -34,43 +36,6 @@ export interface SpawnPoint {
   id: string; unit: 'mob' | 'prop'; kind: string; x: number; z: number; charges: number[]; zone: ZoneId; depth: number; rot: number;
 }
 
-/**
- * Something that happens when a prop is destroyed (data-driven; add new types here).
- * - spawnMob: a mob crawls out of the prop (e.g. a skeleton rising from a grave).
- */
-export type BreakEvent = { type: 'spawnMob'; mob: string; chance: number; count?: number; bark?: string };
-
-export interface BreakableDef {
-  model: string | null;
-  hits: number; // HP in "normal hits"
-  color: number;
-  scale: number;
-  /** Fixed power orbs, shown above the HP bar like on mobs — one stat only. */
-  reward: OrbReward;
-  /** Material resistances: wood is easy to chop, stone needs a hammer. */
-  resist: Partial<Record<DamageType, ResistTier>>;
-  r: number;
-  /** Respawn cooldown, seconds (GDD 7.3: 30–60 s). */
-  respawn: number;
-  onBreak?: BreakEvent[];
-}
-const GRAVE_RISE: BreakEvent[] = [{ type: 'spawnMob', mob: 'skeleton_worker', chance: 0.35, bark: 'Кто потревожил мой сон?!' }];
-// wood is easy to chop, stone needs a hammer
-const WOOD: BreakableDef['resist'] = { chop: 'weak', crush: 'resist' };
-const STONE: BreakableDef['resist'] = { slash: 'resist', chop: 'resist', crush: 'weak' };
-export const BREAKABLES: Record<string, BreakableDef> = {
-  barrel: { model: 'barrel', hits: 2, color: 0x8a5a2b, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
-  orc_barrel: { model: 'orc_barrel', hits: 2, color: 0x7a4a22, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
-  box: { model: 'box_small_1', hits: 1, color: 0xa87a45, scale: 0.9, reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
-  box_large: { model: 'box_large_1', hits: 3, color: 0xa87a45, scale: 0.8, reward: { power: 2 }, resist: WOOD, r: 0.7, respawn: 60 },
-  orc_box: { model: 'orc_box_small_1', hits: 1, color: 0x8a5a2b, scale: 0.9, reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
-  bush: { model: null, hits: 1, color: 0x3f8f2f, scale: 1, reward: { regen: 1 }, resist: { slash: 'weak', crush: 'resist' }, r: 0.6, respawn: 25 },
-  tomb1: { model: 'undead_tomb_stone_1', hits: 2, color: 0x77748a, scale: 0.75, reward: { power: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb2: { model: 'undead_tomb_stone_2', hits: 2, color: 0x77748a, scale: 0.75, reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb3: { model: 'undead_tomb_stone_3', hits: 2, color: 0x77748a, scale: 0.75, reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb4: { model: 'undead_tomb_stone_4', hits: 2, color: 0x77748a, scale: 0.75, reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  coffin: { model: 'undead_coffin', hits: 3, color: 0x5a3c2c, scale: 0.34, reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
-};
 
 const bushGeo = new THREE.IcosahedronGeometry(0.55, 0);
 const bushMat = new THREE.MeshLambertMaterial({ color: 0x4c9a35, flatShading: true });
