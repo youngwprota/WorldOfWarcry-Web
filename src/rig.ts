@@ -85,6 +85,9 @@ export function attachWeapon(character: THREE.Object3D, weapon: string, left = f
   offset.position.copy(grip).negate();
   offset.add(pivot);
   holder.add(offset);
+  // blade tip along the holder's +Y (cm, before scale): weapon trails sample it
+  holder.updateMatrixWorld(true);
+  holder.userData.tip = new THREE.Box3().setFromObject(offset).max.y;
   // Weapon +Y -> fist axis (hand +Z) tilted toward the forearm (hand +X).
   const tilt = cfg.tilt ?? 0.22;
   const dir = new THREE.Vector3(Math.sin(tilt), cfg.out ?? 0.4, Math.cos(tilt)).normalize();

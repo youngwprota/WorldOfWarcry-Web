@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { Character } from './character';
+import { Trail } from './swing';
 import { Creature } from './creature';
 import {
-  COMBOS, DUAL, FACTIONS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  COMBOS, DUAL, FACTIONS, LEFT_SWING, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
   type DamageType, type MobDef, type OrbKind, type WeaponDef, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -294,6 +295,12 @@ export class Game {
   /** Attack state per hand (save.weapons[0] right, [1] left). */
   private hands: [Hand, Hand] = [newHand(0), newHand(1)];
   private comboShown = -1;
+  private trails: [Trail, Trail] = [new Trail(), new Trail()];
+  /** Hit-stop / slow motion: game time runs at `slowK` for `slowT` more real seconds. */
+  private slowT = 0;
+  private slowK = 1;
+  /** Camera push-in 0..1 (assassin strike), eases back by itself. */
+  private zoom = 0;
   /** Shove from mob hits (MobDef.push), decays like mob knockback. */
   private heroKnock = new THREE.Vector3();
   newItems = 0;
@@ -352,6 +359,7 @@ export class Game {
     this.hero.position.set(SPAWN.x, 0, SPAWN.z);
     this.hero.facing = Math.PI;
     this.scene.add(this.hero.root);
+    for (const t of this.trails) this.scene.add(t.mesh);
     this.hp = this.maxHp;
     this.shield = this.shieldMax;
 
@@ -487,6 +495,7 @@ export class Game {
   update(dt: number) {
     if (this.paused) { this.render(0); return; }
     dt = Math.min(dt, 1 / 20);
+    if (this.slowT > 0) { this.slowT -= dt; dt *= this.slowK; }
     this.time += dt;
     const played = this.save.playTime ?? 0;
     this.save.playTime = played + dt;
@@ -534,10 +543,12 @@ export class Game {
     this.world.fog.reveal(hp.x, hp.z);
     const sh = this.shake > 0 ? this.shake : 0;
     this.shake = Math.max(0, this.shake - dt * 2.5);
+    this.zoom = Math.max(0, this.zoom - dt * 1.6);
+    const zk = 1 - 0.38 * this.zoom * this.zoom * (3 - 2 * this.zoom);
     this.camera.position.set(
       this.camPos.x + (Math.random() - 0.5) * sh,
-      this.camPos.y + 19,
-      this.camPos.z + 12.5 + (Math.random() - 0.5) * sh,
+      this.camPos.y + 19 * zk,
+      this.camPos.z + 1.2 + 11.3 * zk + (Math.random() - 0.5) * sh,
     );
     // Look slightly in front of (below on screen) the hero, so the hero sits above centre, clear of the bottom UI.
     this.camera.lookAt(this.camPos.x, 0.6, this.camPos.z + 1.2);
@@ -652,6 +663,20 @@ export class Game {
     }
 
     ch.update(dt, moving);
+    // blade trails from a bit before the blow to a bit after it
+    for (const h of this.hands) {
+      const it = this.save.weapons[h.i];
+      const since = this.time - h.lastSwing;
+      const on = !!it && since > h.impactAt * 0.45 && since < h.impactAt * 1.5;
+      this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, it ? COMBOS[it.def].color : 0xffffff);
+    }
+  }
+
+  /** Freeze-frame / slow motion for `real` seconds at `k` × speed, plus an optional camera push-in. */
+  private slowMo(real: number, k: number, zoom = 0) {
+    this.slowK = this.slowT > 0 ? Math.min(this.slowK, k) : k;
+    this.slowT = Math.max(this.slowT, real);
+    this.zoom = Math.max(this.zoom, zoom);
   }
 
   /** Longest reach of the two hands. */
@@ -681,7 +706,10 @@ export class Game {
       h.finisher = h.combo >= combo.hits;
       h.lastSwing = this.time;
       const impactAt = Math.min(0.42, period * 0.4);
-      this.hero.attack(w.anim, period, impactAt);
+      h.impactAt = impactAt;
+      const kinds = w.swing ?? (h.i === 1 ? LEFT_SWING[w.anim] : null);
+      if (kinds) this.hero.swing(kinds[(h.combo - 1) % kinds.length], h.i, period, impactAt);
+      else this.hero.attack(w.anim, period, impactAt);
       if (w.pull) this.reapPull(w.pull, h.finisher);
       h.impact = impactAt;
       h.atkCd = period;
@@ -781,6 +809,7 @@ export class Game {
       h.combo = 0;
       this.waves.add(this.hero.position, range + 0.5, fin.color);
       if (fin.spin) this.hero.spin(0.35);
+      if (hits) this.slowMo(0.07, 0.08);
       this.shake = Math.max(this.shake, 0.35);
       sfx.combo();
     }
@@ -1718,7 +1747,7 @@ function turn(cur: number, want: number, k: number) {
 
 
 /** Swing timer and combo chain of one hand. */
-interface Hand { i: 0 | 1; atkCd: number; impact: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean }
+interface Hand { i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean }
 function newHand(i: 0 | 1): Hand {
-  return { i, atkCd: 0, impact: -1, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false };
+  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false };
 }

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { HIT_FLASH, applyHitFlash } from './hitflash';
 import { assets } from './assets';
 import { attachWeapon } from './rig';
+import { Swinger, type SwingKind } from './swing';
 import { PART_PREFIXES, type VisualPart } from './items';
 import { ATTACK_HIT, type AttackAnim } from './config';
 
@@ -77,6 +78,8 @@ export class Character {
   walkRate = 1;
   /** Ground speed (m/s) of the walk clip at walkRate 1. */
   readonly stride = 2.1;
+  /** Procedural swings on top of the clips (src/swing.ts). */
+  readonly swinger: Swinger;
   private spinT = 0;
   private spinDur = 0;
   private baseParts = new Map<VisualPart, THREE.Mesh[]>();
@@ -107,6 +110,7 @@ export class Character {
     });
     if (weaponName) this.setWeapon(weaponName);
 
+    this.swinger = new Swinger(this.model);
     const { full, upper, lower } = assets.clipsFor(modelName);
     this.mixer = new THREE.AnimationMixer(this.model);
     const act = (clip: THREE.AnimationClip, w = 0) => {
@@ -263,6 +267,11 @@ export class Character {
     this.atkTimer = period;
   }
 
+  /** Procedural swing of one hand (no clip): the blow lands `impactAt` s after the start. */
+  swing(kind: SwingKind, hand: 0 | 1, period: number, impactAt: number) {
+    this.swinger.start(kind, hand, Math.min(period, impactAt * 2.4), impactAt);
+  }
+
   hit() {
     this.flashT = HIT_FLASH;
     if (this.atkTimer <= 0 && !this.dead) {
@@ -326,6 +335,7 @@ export class Character {
       this.hitU.setEffectiveWeight(this.atkW > 0 ? 0 : this.hitW);
     }
     this.mixer.update(dt);
+    if (!this.dead) this.swinger.apply(dt);
   }
 
   setTint(c: THREE.ColorRepresentation, opacity = 1) {

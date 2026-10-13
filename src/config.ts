@@ -1,3 +1,4 @@
+import type { SwingKind } from './swing';
 // All gameplay numbers live here (GDD: "все числа — ориентиры").
 
 /** Sword — slash (режущий), axe — chop (рубящий), hammer — crush (дробящий). */
@@ -6,6 +7,8 @@ export type ResistTier = 'weak' | 'normal' | 'resist' | 'immune';
 export type FactionId = 'human' | 'orc';
 export type ZoneId = 'forest' | 'cemetery' | 'peaks' | 'swamp' | 'grove' | 'dunes' | 'hills';
 export type AttackAnim = 'SwordAttack' | 'AxeAttack';
+/** The left hand has no clips: its swings by the right-hand clip the weapon uses. */
+export const LEFT_SWING: Record<AttackAnim, SwingKind[]> = { SwordAttack: ['slashLR', 'slashRL'], AxeAttack: ['overhead'] };
 /**
  * Hit markers: seconds into each attack clip at natural speed where the blow connects. Mob damage lands on this
  * frame if the hero is still in reach. Humanoid FBX clips by name, GLB creatures as `<model>:attack`.
@@ -71,6 +74,8 @@ export interface WeaponDef {
    * × (1 + perEnemy × (mobs hit − 1)), up to × `max`.
    */
   pull?: { radius: number; ahead: number; force: number; perEnemy: number; max: number };
+  /** Procedural swings (src/swing.ts) cycled along the combo chain, instead of the `anim` clip. */
+  swing?: SwingKind[];
 }
 
 export const WEAPONS: Record<string, WeaponDef> = {
@@ -99,22 +104,27 @@ export const WEAPONS: Record<string, WeaponDef> = {
   nagamaki: {
     id: 'nagamaki', name: 'Нагамаки', type: 'slash', dmgMul: 0.75, aps: 1.3, shape: 'arc', arc: 200, range: 2.6,
     anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️',
+    swing: ['slashRL', 'slashLR', 'thrust'],
   },
   scythe: {
     id: 'scythe', name: 'Коса', type: 'slash', dmgMul: 0.9, aps: 0.55, shape: 'circle', arc: 360, range: 3,
     anim: 'AxeAttack', model: { human: 'scythe', orc: 'scythe' }, icon: '🌀',
+    swing: ['throw'],
   },
   pan: {
     id: 'pan', name: 'Сковорода', type: 'crush', dmgMul: 1.1, aps: 0.9, shape: 'circle', arc: 360, range: 2.2,
     anim: 'AxeAttack', model: { human: 'pan', orc: 'pan' }, icon: '🍳', stun: 0.6,
+    swing: ['overhead'],
   },
   hidden_blade: {
     id: 'hidden_blade', name: 'Скрытый клинок', type: 'slash', dmgMul: 3.2, aps: 0.45, shape: 'arc', arc: 120, range: 2.0,
     anim: 'SwordAttack', model: { human: 'hidden_blade', orc: 'hidden_blade' }, icon: '🗡', single: true,
+    swing: ['assassin'],
   },
   shield: {
     id: 'shield', name: 'Щит', type: 'crush', dmgMul: 0.5, aps: 0.8, shape: 'arc', arc: 120, range: 1.8,
     anim: 'AxeAttack', model: { human: 'shield', orc: 'shield' }, icon: '🛡️',
+    swing: ['bash'],
   },
 };
 
