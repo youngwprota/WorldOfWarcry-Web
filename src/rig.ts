@@ -17,6 +17,8 @@ export const WEAPON_GRIPS: Record<string, { tilt?: number; out?: number; grip?: 
   axe_orc_peon: { scale: 0.78, grip: 0.18, roll: Math.PI },
   axe: { scale: 0.78, grip: 0.18, roll: Math.PI },
   hammer_human_paladin: { scale: 0.75, grip: 0.16 },
+  dagger: { scale: 1.15, grip: 0.15 },
+  reaper: { scale: 1.05, grip: 0.3, tilt: 0.1, out: 0.2 },
   spear_undead_warrior: { scale: 0.7, grip: 0.4, tilt: 0.1, out: 0.15 },
 };
 
