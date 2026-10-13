@@ -278,3 +278,16 @@ export function depthMul(zone: ZoneId, z: number) {
 
 export const RESPAWN_MIN_DIST = 10;
 export const LEASH = 15;
+
+/**
+ * "Горнило судьбы" — gacha forge (docs/features/ludka). `rates` are the per-pull chances of rarity 0..3;
+ * a legendary always drops on pull number `pity` without one. Every legendary is the banner weapon.
+ */
+export const GACHA = {
+  rates: [0.7, 0.22, 0.074, 0.006],
+  pity: 60,
+  banner: { def: 'hammer', name: 'Молот Короля-лича', subtitle: 'Выкован из костей павших королей. Шанс повышен!' },
+  /** Reveal timing, seconds: delay between hammer blows, then the final flash. */
+  strikeGap: 0.75,
+  revealHold: 0.9,
+};

@@ -25,6 +25,8 @@ export interface SaveData {
   skills: (string | null)[];
   /** Number of talent resets done (the first one is free). */
   resets: number;
+  /** Gacha pulls since the last legendary (src/gacha.ts). */
+  gachaPity: number;
   muted: boolean;
   lowGfx?: boolean;
 }
@@ -49,6 +51,7 @@ export function newSave(faction: FactionId): SaveData {
     talents: {},
     skills: [null, null],
     resets: 0,
+    gachaPity: 0,
     muted: false,
   };
 }
@@ -68,6 +71,7 @@ export function loadSave(): SaveData | null {
     d.talents ??= {};
     d.skills ??= [null, null];
     d.resets ??= 0;
+    d.gachaPity ??= 0;
     return d;
   } catch {
     return null;

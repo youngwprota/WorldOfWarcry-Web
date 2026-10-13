@@ -11,6 +11,8 @@ export interface Item {
   rarity: number;
   sharpen: number;
   lvl: number; // zone level the item dropped in
+  /** Unique name (gacha banner weapons); replaces the generic def name. */
+  name?: string;
 }
 
 export type ArmorSlot = 'head' | 'chest' | 'arms' | 'legs' | 'ring' | 'amulet';
@@ -100,7 +102,7 @@ export function slotOf(it: Item): ArmorSlot | 'weapon' {
 }
 
 export function itemName(it: Item, f: FactionId) {
-  return it.kind === 'weapon' ? WEAPONS[it.def].name : ARMOR[it.def].name[f];
+  return it.name ?? (it.kind === 'weapon' ? WEAPONS[it.def].name : ARMOR[it.def].name[f]);
 }
 
 /** Icon id for icon(): weapon id or armour slot. */
@@ -162,5 +164,5 @@ export function rollItem(lvl: number, luck = 0): Item {
 
 /** Old saves stored bare {def, rarity, sharpen} weapons. */
 export function normalizeItem(it: Partial<Item> & { def: string }): Item {
-  return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def: it.def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1 };
+  return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def: it.def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
 }
