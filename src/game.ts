@@ -150,6 +150,11 @@ class Mob extends Unit {
   awake = true;
   /** Damage type of the mob's hits (its location's, config ZONE_FOES); the hero's armour resists it. */
   dmgType: DamageType;
+  /** Dagger stacks (WeaponDef.stack): each adds to the hero's damage on this mob; game time of the last one. */
+  stacks = 0;
+  stackAt = -99;
+  /** "×N" badge under the HP bar while the mob has stacks. */
+  stackEl: HTMLDivElement;
   /** Depth-scaled stats (DEPTH in config): use these instead of def.dmg / def.reward. */
   dmg: number;
   constructor(public def: MobDef, spawn: THREE.Vector3, faction: 'human' | 'orc', layer: HTMLElement,
@@ -171,8 +176,9 @@ class Mob extends Unit {
       title +
       // a micro-boss shows its permanent bonus (+500 HP) in the stat chips instead of its orbs
       `<div class="mside"><div class="rws">${def.bonus ? rewardChips({ reward: def.bonus }, true) : rewardChips({ reward })}</div><div class="ris">${resistIcons(def, named ? 27 : 24)}</div></div>` +
-      '<div class="mobhp"><div></div><span></span></div>',
+      '<div class="mobhp"><div></div><span></span></div><div class="stk"></div>',
       'respawn' + (named ? ' boss' : ''));
+    this.stackEl = this.uiEl.querySelector('.stk')!;
     this.reward = reward;
     const [model, weapon] = def.model[faction];
     this.dmgType = def.attack;
@@ -194,7 +200,16 @@ class Mob extends Unit {
   get barY() { return 2.15 * this.def.scale * this.ch.root.scale.x; }
   get barRange() { return this.def.boss || this.def.rank ? 24 : 16; }
   get loaderReady() { return !this.temp && ((!this.rewardsDue && this.deadT - this.paidAt > 2.2) || this.boss); }
+  /** Sets the dagger stacks and their badge (text only changes here, never per frame). */
+  setStacks(n: number, at: number) {
+    this.stackAt = at;
+    if (n === this.stacks) return;
+    this.stacks = n;
+    this.stackEl.textContent = n ? `×${n}` : '';
+    this.stackEl.classList.toggle('on', n > 0);
+  }
   respawn() {
+    this.setStacks(0, -99);
     this.fight = null;
     this.rewardsDue = false;
     this.loot = [];
@@ -699,7 +714,10 @@ export class Game {
         continue;
       }
       const m = u as Mob;
-      const { dmg, tier } = this.damageFor(w.type, m.def.resist, fin ? fin.mult : 1);
+      // daggers: +stack.add per stack on this mob, the finisher counts them twice; then one more stack
+      const stackMul = w.stack ? 1 + w.stack.add * m.stacks * (fin ? 2 : 1) : 1;
+      const { dmg, tier } = this.damageFor(w.type, m.def.resist, (fin ? fin.mult : 1) * stackMul);
+      if (w.stack) m.setStacks(Math.min(w.stack.max, m.stacks + 1), this.time);
       const f = this.fightOf(m);
       f.hits++;
       if (fin) f.combos++;
@@ -747,6 +765,7 @@ export class Game {
   /** Lethal hit: death clip, blood, shake and the knockback now; orbs and items in grantKillRewards. */
 
   private killMob(m: Mob) {
+    m.setStacks(0, -99);
     m.state = 'dead';
     m.hp = 0;
     m.deadT = 0;
@@ -1208,7 +1227,10 @@ export class Game {
   private updateMobBars(w: number, h: number) {
     const hp = this.hero.position;
     const explored = (p: THREE.Vector3) => this.world.fog.isExplored(p.x, p.z);
+    const decay = this.weapon.stack?.decay ?? 0;
     for (const u of this.units) {
+      // dagger stacks drop off a while after the last hit (at once with another weapon in hand)
+      if (u instanceof Mob && u.stacks && this.time - u.stackAt > decay) u.setStacks(0, -99);
       // HP bar + weakness icons + reward over living units near the hero.
       const show = u.alive && u.visible && u.pos.distanceTo(hp) < u.barRange && explored(u.pos);
       if (!show) { if (u.uiEl.classList.contains('show')) u.uiEl.classList.remove('show'); }
