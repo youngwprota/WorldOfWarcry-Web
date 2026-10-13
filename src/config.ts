@@ -98,6 +98,9 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
 };
 
+/** Two weapons at once: each hand hits for `mul` of its damage (both hands ≈ ×1.2 of one). */
+export const DUAL = { mul: 0.6 };
+
 export const SHARPEN = { max: 10, perLevel: 0.08, cost: (lvl: number) => 40 + lvl * lvl * 25 };
 
 /** Combo finisher: the 3rd uninterrupted hit in a row (each swing must connect, no pause between). */

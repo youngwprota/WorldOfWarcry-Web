@@ -42,7 +42,8 @@ if (gallery) {
   camera.position.set(0, cols * 9, cols * 12);
   controls.target.set(0, 0, cols * 4);
 }
-const names = gallery ? [] : [...new Set([...pairs.flat().filter(Boolean), ...props])];
+const leftName = new URLSearchParams(location.search).get('left');
+const names = gallery ? [] : [...new Set([...pairs.flat().filter(Boolean), ...props, ...(leftName ? [leftName] : [])])];
 if (!gallery) await assets.loadAll(names, () => {});
 
 const mixers: THREE.AnimationMixer[] = [];
@@ -53,6 +54,9 @@ pairs.forEach(([c, w], i) => {
   if (solo === null) g.position.set((i % 6) * 1.6 - 4, 0, -Math.floor(i / 6) * 2.5);
   scene.add(g);
   if (w) attachWeapon(g, w);
+  // ?left=model — the same or another weapon in the left hand too (dual wield grip check)
+  const left = new URLSearchParams(location.search).get('left');
+  if (left) attachWeapon(g, left, true);
   const m = new THREE.AnimationMixer(g);
   m.clipAction(assets.clips.full.Idle).play();
   mixers.push(m);

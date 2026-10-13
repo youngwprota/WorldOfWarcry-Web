@@ -261,7 +261,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #equipbar .armorside .cell .ic { width: 72%; height: 72%; }
 #equipbar .armorside .cell .lv { font-size: 11px; right: 2px; }
 #equipbar .armorside .cell .sh { display: none; }
-.wslot .swap { position: absolute; top: -9px; left: -9px; width: 22px; height: 22px; border-radius: 50%; background: #ffd23f; border: 2px solid var(--ink); font-size: 13px; font-weight: 900; color: var(--ink); display: flex; align-items: center; justify-content: center; }
 #weapons .wslot .sh { right: auto; left: 4px; top: auto; bottom: 1px; }
 #combo { position: absolute; left: 12px; bottom: calc(92px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 5px; opacity: 0; transition: opacity 0.15s; }
 #combo.live { opacity: 1; }
@@ -386,7 +385,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #equipbar .armorside .cell .ic, #equipbar .cell .ic { width: 70%; height: 70%; }
 #equipbar .cell .lv { font-size: 16px; right: 3px; }
 #equipbar .cell .badge { width: 20px; height: 20px; }
-.wslot .swap { width: 28px; height: 28px; font-size: 17px; top: -12px; left: -10px; }
 #combo { bottom: calc(108px + env(safe-area-inset-bottom)); gap: 7px; }
 #combo i { width: 20px; height: 20px; border-width: 3px; }
 /* over-head bars and numbers */
@@ -469,7 +467,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #equipbar .cell .badge { width: 18px; height: 18px; left: -4px; top: -4px; border-radius: 6px 3px 5px 3px; }
 #equipbar .cell .badge .svgi { width: 11px; height: 11px; }
 #equipbar .cell .sh { font-size: 11px; }
-.wslot .swap { left: -6px; }
 .big-stats { justify-content: space-between; padding: 0 2px; }
 .big-stats div { gap: 3px; }
 .big-stats .svgi { width: 38px; height: 38px; }
@@ -615,7 +612,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .well { box-shadow: inset 0 5px 0 #0006; border: 4px solid #2a180c; }
 .divider::before, .divider::after { height: 7px; border: 2px solid var(--ink); background: #4a2f1d; box-shadow: none; }
 .cell .badge { border-width: 3px; }
-.wslot .swap { border-width: 3px; }
 #minimap, #bigmap { border-width: 5px; box-shadow: 0 0 0 6px #b07a48, 0 0 0 11px var(--ink), 0 6px 0 11px #0006; }
 .herohp { border-width: 3px; border-color: var(--ink); height: 17px; }
 .mobhp { border-width: 2px; }

@@ -52,8 +52,12 @@ function gripPoint(name: string, w: THREE.Object3D, frac: number): THREE.Vector3
   return g;
 }
 
-export function attachWeapon(character: THREE.Object3D, weapon: string): THREE.Object3D {
-  const hand = character.getObjectByName('hand_r')!;
+/**
+ * `left`: into hand_l. The left hand bone is the mirror of the right one (X flipped), so the palm offset and
+ * the outward push flip with it.
+ */
+export function attachWeapon(character: THREE.Object3D, weapon: string, left = false): THREE.Object3D {
+  const hand = character.getObjectByName(left ? 'hand_l' : 'hand_r')!;
   const cfg = WEAPON_GRIPS[weapon] ?? {};
   const inner = assets.clone(weapon);
   inner.scale.setScalar(1); // hand bone already lives in the 0.01-scaled character space (cm)
@@ -78,7 +82,21 @@ export function attachWeapon(character: THREE.Object3D, weapon: string): THREE.O
   holder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   if (cfg.roll) holder.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), cfg.roll));
   holder.position.copy(PALM);
+  if (left) mirrorX(holder);
   holder.scale.setScalar(cfg.scale ?? 1);
   hand.add(holder);
   return holder;
+}
+
+/**
+ * Left hand: mirror the right-hand holder across the hand's X (the bones match in bind pose), then turn it by
+ * the left/right asymmetry of the Idle pose (hand_l⁻¹ · mirrored hand_r, measured on the shared Idle clip), so
+ * the left weapon is the mirror image of the right one while standing.
+ */
+const LEFT_FIX = new THREE.Quaternion(-0.375, 0.35, -0.123, 0.849).normalize();
+function mirrorX(o: THREE.Object3D) {
+  const q = o.quaternion;
+  q.set(q.x, -q.y, -q.z, q.w).premultiply(LEFT_FIX);
+  o.position.x = -o.position.x;
+  o.position.applyQuaternion(LEFT_FIX);
 }

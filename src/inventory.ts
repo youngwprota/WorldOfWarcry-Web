@@ -57,8 +57,8 @@ class HeroPreview {
     this.loop();
   }
 
-  setGear(weapon: string | null, outfit: Partial<Record<VisualPart, string>>) {
-    this.ch.setWeapon(weapon);
+  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>) {
+    this.ch.setWeapon(weapon, left);
     this.ch.setOutfit(outfit);
   }
 
@@ -93,6 +93,9 @@ type BagFilter = 'all' | 'weapon' | 'armor';
 type Source = { at: 'bag'; index: number } | { at: 'armor'; slot: ArmorSlot } | { at: 'weapon'; slot: 0 | 1 };
 
 /** Inventory window: paper doll, stats and the bag in one sheet. */
+/** Weapon slot captions: save.weapons[0] is the right hand. */
+const HAND_NAME = ['правая', 'левая'];
+
 export class Inventory {
   private preview: HeroPreview | null = null;
   private opened = false;
@@ -128,9 +131,9 @@ export class Inventory {
   private renderStats() {
     const g = this.game;
     const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
-    const hit = g.itemDamage(g.weaponItem) * g.powerMult();
+    const hit = g.itemDamage(g.weaponItem) * g.handMul() * g.powerMult();
     const big = (ic: string, v: string, label: string) => `<div>${art(ic, 46)}<b>${v}</b><span>${label}</span></div>`;
-    q('#i-big').innerHTML = big('sword', fmtK(hit * g.weapon.aps), 'DPS') + big('heart', fmtK(g.maxHp), 'HP') +
+    q('#i-big').innerHTML = big('sword', fmtK(g.heroDps()), 'DPS') + big('heart', fmtK(g.maxHp), 'HP') +
       big('regen', fmtK(g.regen), 'Реген');
     const combo = COMBOS[g.weaponItem.def];
     const chip = (ic: string, v: string, title: string) => `<div class="chip" title="${title}">${art(ic, 28)}<b>${v}</b></div>`;
@@ -191,10 +194,10 @@ export class Inventory {
     q('#i-right').innerHTML = side('right');
     // Weapon slots 1 and 2 on the left and right of the hero, in the middle of the preview.
     for (const i of [0, 1] as const) {
-      const tag = `<span class="wtag ${s.active === i ? 'on' : ''}">${s.active === i ? 'в руке' : `слот ${i + 1}`}</span>`;
-      q(`#i-w${i}`).innerHTML = this.cell(s.weapons[i], `data-weapon="${i}"`, 'sword', tag, s.active === i ? 'active' : '');
+      const tag = `<span class="wtag ${s.weapons[i] ? 'on' : ''}">${HAND_NAME[i]}</span>`;
+      q(`#i-w${i}`).innerHTML = this.cell(s.weapons[i], `data-weapon="${i}"`, 'sword', tag, s.weapons[i] ? 'active' : '');
     }
-    this.preview?.setGear(g.weapon.model[g.faction], g.outfit());
+    this.preview?.setGear(...g.handModels(), g.outfit());
     g.newItems = 0;
   }
 
@@ -292,13 +295,12 @@ export class Inventory {
     if (src.at === 'bag') {
       actions = btn('discard', 'Выбросить');
       if (it.kind === 'weapon') {
-        actions += btn('eq0', s.active === 0 ? 'В руку' : 'Слот 1', 'primary') + btn('eq1', s.active === 1 ? 'В руку' : 'Слот 2', 'primary');
+        actions += btn('eq0', 'В правую', 'primary') + btn('eq1', 'В левую', 'primary');
       } else actions += btn('equip', 'Экипировать', 'primary');
     } else if (src.at === 'armor') {
       actions = btn('unequip', 'Снять', 'red');
     } else {
       if (s.weapons[1 - src.slot]) actions += btn('unequip', 'Снять', 'red');
-      if (s.active !== src.slot) actions += btn('active', 'В руку', 'primary');
     }
     const type = slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
     tip.innerHTML = `<div class="card-head">${cellHtml(it, 'disabled', '', '', 'big')}
@@ -329,8 +331,6 @@ export class Inventory {
       else if (action === 'discard') g.discardFromBag(src.index);
     } else if (src.at === 'armor') {
       ok = g.unequipArmor(src.slot);
-    } else if (action === 'active') {
-      g.setActiveWeapon(src.slot);
     } else if (action === 'unequip') {
       ok = g.unequipWeapon(src.slot);
     }

@@ -52,6 +52,8 @@ export class Character {
   readonly model: THREE.Group;
   readonly mixer: THREE.AnimationMixer;
   weapon: THREE.Object3D | null = null;
+  /** Second weapon in the left hand. */
+  weaponL: THREE.Object3D | null = null;
   private materials: THREE.MeshLambertMaterial[] = [];
   private flashT = 0;
   private baseColor = new THREE.Color(1, 1, 1);
@@ -133,10 +135,12 @@ export class Character {
     this.walkL.time = this.walkU.time = off;
   }
 
-  setWeapon(name: string | null) {
-    if (this.weapon) this.weapon.removeFromParent();
+  setWeapon(name: string | null, left: string | null = null) {
+    this.weapon?.removeFromParent();
+    this.weaponL?.removeFromParent();
     this.weapon = name ? attachWeapon(this.model, name) : null;
-    this.weapon?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
+    this.weaponL = left ? attachWeapon(this.model, left, true) : null;
+    for (const w of [this.weapon, this.weaponL]) w?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
     if (this.highlighted) this.rebuildOutline();
   }
 

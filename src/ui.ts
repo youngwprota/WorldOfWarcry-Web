@@ -115,7 +115,6 @@ export class UI {
   onArmor: () => void = () => {};
   onDebug: () => void = () => {};
   private gains = new Map<OrbKind, { el: HTMLDivElement; n: number; until: number }>();
-  private swapCb: () => void = () => {};
   private mm = $<HTMLCanvasElement>('minimap').getContext('2d')!;
 
   constructor() {
@@ -200,7 +199,6 @@ export class UI {
     setTimeout(() => el.classList.remove('pop'), 150);
   }
 
-  bindWeapons(swap: () => void) { this.swapCb = swap; }
 
   combo(n: number, max: number) {
     const el = $('combo');
@@ -235,19 +233,14 @@ export class UI {
     b.dataset.badge = full ? '!' : n > 0 ? String(n) : '';
   }
 
-  /** Bottom "equipped" bar: armour left, the two weapons in the centre (tap the other one to swap), gloves and jewellery right. */
-  weapons(items: (Item | null)[], active: number, dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>) {
+  /** Bottom "equipped" bar: armour left, the right / left hand weapons in the centre, gloves and jewellery right. */
+  weapons(items: (Item | null)[], dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>) {
     const box = $('weapons');
     box.innerHTML = [0, 1].map((i) => {
       const it = items[i];
-      const on = i === active;
-      const tag = !on && it ? '<span class="swap">⇄</span>' : '';
       const title = it ? `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"` : '';
-      return cellHtml(it, `data-w="${i}" ${title}`, 'sword', tag, on ? 'wslot active' : 'wslot');
+      return cellHtml(it, `data-w="${i}" ${title}`, 'sword', '', it ? 'wslot active' : 'wslot');
     }).join('');
-    box.querySelectorAll<HTMLElement>('[data-w]').forEach((b) => {
-      if (+b.dataset.w! !== active && items[+b.dataset.w!]) b.addEventListener('click', () => this.swapCb());
-    });
     const side = (ids: ArmorSlot[]) => ids.map((id) => {
       const x = ARMOR_SLOTS.find((s) => s.id === id)!;
       return cellHtml(equip[id], `data-armor="${id}" title="${x.name}"`, x.icon);

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Character } from './character';
 import { Creature } from './creature';
 import {
-  COMBOS, FACTIONS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  COMBOS, DUAL, FACTIONS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
   type DamageType, type MobDef, type OrbKind, type WeaponDef, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -291,14 +291,11 @@ export class Game {
   private telegraphs: Telegraphs;
   private pickups: Pickups;
   private waves: Shockwaves;
-  // combo: consecutive connecting swings without a pause
-  private combo = 0;
+  /** Attack state per hand (save.weapons[0] right, [1] left). */
+  private hands: [Hand, Hand] = [newHand(0), newHand(1)];
   private comboShown = -1;
-  private lastSwing = -99;
   /** Shove from mob hits (MobDef.push), decays like mob knockback. */
   private heroKnock = new THREE.Vector3();
-  private lastSwingHit = false;
-  private finisher = false;
   newItems = 0;
   onOpenCharacter: () => void = () => {};
   onOpenBag: () => void = () => {};
@@ -308,8 +305,6 @@ export class Game {
   private hp: number;
   private shield = 0;
   private lastHurt = -99;
-  private atkCd = 0;
-  private impact = -1;
   private target: Unit | null = null;
   private dead = false;
   private deadT = 0;
@@ -395,7 +390,6 @@ export class Game {
     this.pickups.onCollect = (k, it) => this.collect(k, it);
     this.waves = new Shockwaves(this.scene);
     this.camPos.copy(this.hero.position);
-    this.ui.bindWeapons(() => this.swapWeapon());
     this.refreshHud(true);
   }
 
@@ -444,23 +438,38 @@ export class Game {
   get speed() { return (this.speedStat / HERO.speedPerMs) * HERO.speedMul; }
   /** Orc racial: up to +30% damage as HP drops. */
   get bloodlustMax() { return 0.3; }
-  get weaponItem(): Item { return this.save.weapons[this.save.active] ?? this.save.weapons[0]!; }
+  /** Main weapon: the right hand, or the left one when the right is empty (stats, balance log). */
+  get weaponItem(): Item { return this.save.weapons[0] ?? this.save.weapons[1]!; }
   get weapon() { return WEAPONS[this.weaponItem.def]; }
+  /** Both hands armed: each hand hits for DUAL.mul. */
+  get dual() { return !!this.save.weapons[0] && !!this.save.weapons[1]; }
+  handMul() { return this.dual ? DUAL.mul : 1; }
   powerMult() {
     let m = 1 + this.power / 100;
     if (this.faction === 'orc') m *= 1.1 * (1 + this.bloodlustMax * (1 - this.hp / this.maxHp));
     return m;
   }
   itemDamage(it: Item) { return weaponDamage(it); }
-  heroDps(type?: DamageType, resist?: Partial<Record<DamageType, string>>) {
-    const w = this.weapon;
-    const r = resist && type ? RESIST_MULT[(resist[type] as 'weak') ?? 'normal'] : 1;
-    return this.itemDamage(this.weaponItem) * this.powerMult() * w.aps * r;
+  /** Both hands together; `resist` applies each hand's own damage type. */
+  heroDps(resist?: Partial<Record<DamageType, string>>) {
+    let dps = 0;
+    for (const it of this.save.weapons) {
+      if (!it) continue;
+      const w = WEAPONS[it.def];
+      const r = resist ? RESIST_MULT[(resist[w.type] as 'weak') ?? 'normal'] : 1;
+      dps += this.itemDamage(it) * w.aps * r;
+    }
+    return dps * this.powerMult() * this.handMul();
+  }
+
+  /** Model names of the right / left hand weapons. */
+  handModels(): [string | null, string | null] {
+    const m = (it: Item | null) => (it ? WEAPONS[it.def].model[this.faction] : null);
+    return [m(this.save.weapons[0]), m(this.save.weapons[1])];
   }
 
   private equipVisual() {
-    const w = this.weapon;
-    this.hero.setWeapon(w.model[this.faction]);
+    this.hero.setWeapon(...this.handModels());
   }
 
   /** Body parts borrowed from other characters for the equipped armour. */
@@ -474,16 +483,6 @@ export class Game {
     return o;
   }
 
-  swapWeapon() {
-    const other = (1 - this.save.active) as 0 | 1;
-    if (!this.save.weapons[other] || this.dead) return;
-    this.save.active = other;
-    this.equipVisual();
-    this.atkCd = Math.max(this.atkCd, 0.15);
-    sfx.click();
-    this.refreshHud(true);
-  }
-
   // ---------- main loop ----------
   update(dt: number) {
     if (this.paused) { this.render(0); return; }
@@ -492,7 +491,6 @@ export class Game {
     const played = this.save.playTime ?? 0;
     this.save.playTime = played + dt;
     if (Math.floor(this.save.playTime / 60) > Math.floor(played / 60)) this.snapshot();
-    if (this.input.pressed('KeyQ') || this.input.pressed('Space')) this.swapWeapon();
     if (this.input.pressed('KeyI') || this.input.pressed('KeyC')) { this.onOpenCharacter(); return; }
     if (this.input.pressed('KeyB')) { this.onOpenBag(); return; }
     if (this.input.pressed('KeyM')) { this.onOpenMap(); return; }
@@ -606,8 +604,7 @@ export class Game {
     this.world.collide(p, HERO.radius);
 
     // targeting: keep the current target while it lives and stays near (GDD 6.2)
-    const w = this.weapon;
-    const reach = w.range + HERO.acquireExtra;
+    const reach = this.reach() + HERO.acquireExtra;
     if (this.target) {
       const t = this.target;
       if (!t.alive || t.pos.distanceTo(p) > reach + t.radius + 1) this.target = null;
@@ -633,33 +630,12 @@ export class Game {
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
     ch.facing += diff * Math.min(1, dt * 16);
 
-    // auto attack while moving
-    this.atkCd -= dt;
-    const period = 1 / w.aps;
-    const combo = COMBOS[this.weaponItem.def];
-    // A pause or a whiff breaks the chain (GDD: combo = N uninterrupted attacks).
-    if (this.combo > 0 && this.impact < 0 && this.time - this.lastSwing > period + combo.window) this.combo = 0;
-    // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
-    // up to 1 m further for facing, and swinging there was a whiff into thin air.
-    const inReach = !!this.target && this.target.pos.distanceTo(p) - this.target.radius <= w.range + 0.35;
-    if (inReach && this.atkCd <= 0) {
-      const chained = this.lastSwingHit && this.time - this.lastSwing <= period + combo.window;
-      this.combo = chained ? this.combo + 1 : 1;
-      this.finisher = this.combo >= combo.hits;
-      this.lastSwing = this.time;
-      const impactAt = Math.min(0.42, period * 0.4);
-      ch.attack(w.anim, period, impactAt);
-      if (w.pull) this.reapPull(w.pull);
-      this.impact = impactAt;
-      this.atkCd = period;
-    }
-    if (this.impact >= 0) {
-      this.impact -= dt;
-      if (this.impact < 0) this.heroStrike();
-    }
-    if (this.comboShown !== this.combo) {
-      this.comboShown = this.combo;
-      this.ui.combo(this.combo, combo.hits);
+    // auto attack while moving: every hand on its own timer
+    for (const h of this.hands) this.updateHand(h, dt);
+    const shown = this.hands[this.save.weapons[0] ? 0 : 1];
+    if (this.comboShown !== shown.combo) {
+      this.comboShown = shown.combo;
+      this.ui.combo(shown.combo, COMBOS[this.weaponItem.def].hits);
     }
 
     // regen; much faster in the camp
@@ -678,9 +654,47 @@ export class Game {
     ch.update(dt, moving);
   }
 
-  private damageFor(type: DamageType, resist: MobDef['resist'], mult = 1) {
-    const tier = resist[type] ?? 'normal';
-    const dmg = this.itemDamage(this.weaponItem) * this.powerMult() * RESIST_MULT[tier] * mult * (0.9 + Math.random() * 0.2);
+  /** Longest reach of the two hands. */
+  private reach() {
+    let r = 0;
+    for (const it of this.save.weapons) if (it) r = Math.max(r, WEAPONS[it.def].range);
+    return r;
+  }
+
+  /** One hand's swing timer and combo chain; the blow lands `impact` s after the swing starts. */
+  private updateHand(h: Hand, dt: number) {
+    const it = this.save.weapons[h.i];
+    if (!it) { h.combo = 0; h.impact = -1; return; }
+    const w = WEAPONS[it.def];
+    h.atkCd -= dt;
+    const period = 1 / w.aps;
+    const combo = COMBOS[it.def];
+    // A pause or a whiff breaks the chain (GDD: combo = N uninterrupted attacks).
+    if (h.combo > 0 && h.impact < 0 && this.time - h.lastSwing > period + combo.window) h.combo = 0;
+    // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
+    // up to 1 m further for facing, and swinging there was a whiff into thin air.
+    const t = this.target;
+    const inReach = !!t && t.pos.distanceTo(this.hero.position) - t.radius <= w.range + 0.35;
+    if (inReach && h.atkCd <= 0) {
+      const chained = h.lastSwingHit && this.time - h.lastSwing <= period + combo.window;
+      h.combo = chained ? h.combo + 1 : 1;
+      h.finisher = h.combo >= combo.hits;
+      h.lastSwing = this.time;
+      const impactAt = Math.min(0.42, period * 0.4);
+      this.hero.attack(w.anim, period, impactAt);
+      if (w.pull) this.reapPull(w.pull, h.finisher);
+      h.impact = impactAt;
+      h.atkCd = period;
+    }
+    if (h.impact >= 0) {
+      h.impact -= dt;
+      if (h.impact < 0) this.heroStrike(h);
+    }
+  }
+
+  private damageFor(it: Item, resist: MobDef['resist'], mult = 1) {
+    const tier = resist[WEAPONS[it.def].type] ?? 'normal';
+    const dmg = this.itemDamage(it) * this.handMul() * this.powerMult() * RESIST_MULT[tier] * mult * (0.9 + Math.random() * 0.2);
     return { dmg: Math.max(1, Math.round(dmg)), tier };
   }
 
@@ -697,10 +711,10 @@ export class Game {
   }
 
   /** Reaper swing start: slide the mobs around towards a point in front of the hero, they land by the impact. */
-  private reapPull(pull: NonNullable<WeaponDef['pull']>) {
+  private reapPull(pull: NonNullable<WeaponDef['pull']>, finisher: boolean) {
     const p = this.hero.position;
     const at = v2.set(p.x + Math.sin(this.hero.facing) * pull.ahead, 0, p.z + Math.cos(this.hero.facing) * pull.ahead);
-    const radius = pull.radius * (this.finisher ? 2 : 1);
+    const radius = pull.radius * (finisher ? 2 : 1);
     let n = 0;
     for (const m of this.mobs) {
       if (!m.hittable || m.def.boss || m.pos.distanceTo(p) - m.radius > radius) continue;
@@ -715,9 +729,11 @@ export class Game {
     }
   }
 
-  private heroStrike() {
-    const w = this.weapon;
-    const fin = this.finisher ? COMBOS[this.weaponItem.def] : null;
+  private heroStrike(h: Hand) {
+    const it = this.save.weapons[h.i];
+    if (!it) return;
+    const w = WEAPONS[it.def];
+    const fin = h.finisher ? COMBOS[it.def] : null;
     const shape = fin ? fin.shape : w.shape;
     const arc = fin ? fin.arc : w.arc;
     const range = w.range + (fin ? fin.rangeAdd : 0);
@@ -744,7 +760,7 @@ export class Game {
       const m = u as Mob;
       // daggers: +stack.add per stack on this mob, then one more stack
       const stackMul = w.stack ? 1 + w.stack.add * m.stacks : 1;
-      const { dmg, tier } = this.damageFor(w.type, m.def.resist, (fin ? fin.mult : 1) * stackMul * crowd);
+      const { dmg, tier } = this.damageFor(it, m.def.resist, (fin ? fin.mult : 1) * stackMul * crowd);
       if (w.stack) m.setStacks(Math.min(w.stack.max, m.stacks + 1), this.time);
       const f = this.fightOf(m);
       f.hits++;
@@ -761,15 +777,15 @@ export class Game {
       this.particles.burst(v1.copy(this.hero.position).setY(0.2), 0x9a8a70, 8, 0.12, 5, 0.5);
     }
     if (fin) {
-      this.finisher = false;
-      this.combo = 0;
+      h.finisher = false;
+      h.combo = 0;
       this.waves.add(this.hero.position, range + 0.5, fin.color);
       if (fin.spin) this.hero.spin(0.35);
       this.shake = Math.max(this.shake, 0.35);
       sfx.combo();
     }
-    this.lastSwingHit = hits > 0;
-    if (!hits) this.combo = 0;
+    h.lastSwingHit = hits > 0;
+    if (!hits) h.combo = 0;
   }
 
   private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5) {
@@ -1122,7 +1138,7 @@ export class Game {
 
   private bossColor(m: Mob) {
     // Time-to-kill against the hero's current weapon decides the name colour (GDD 6.4).
-    const ttk = m.maxHp / Math.max(1, this.heroDps(this.weapon.type, m.def.resist));
+    const ttk = m.maxHp / Math.max(1, this.heroDps(m.def.resist));
     return ttk < 35 ? '#6cff7a' : ttk < 80 ? '#ffd84d' : '#ff5a5a';
   }
 
@@ -1256,7 +1272,8 @@ export class Game {
   private updateMobBars(w: number, h: number) {
     const hp = this.hero.position;
     const explored = (p: THREE.Vector3) => this.world.fog.isExplored(p.x, p.z);
-    const decay = this.weapon.stack?.decay ?? 0;
+    let decay = 0;
+    for (const it of this.save.weapons) if (it) decay = Math.max(decay, WEAPONS[it.def].stack?.decay ?? 0);
     for (const u of this.units) {
       // dagger stacks drop off a while after the last hit (at once with another weapon in hand)
       if (u instanceof Mob && u.stacks && this.time - u.stackAt > decay) u.setStacks(0, -99);
@@ -1338,7 +1355,8 @@ export class Game {
     if (!it) return;
     this.save.bag.splice(index, 1);
     if (it.kind === 'weapon') {
-      const slot = weaponSlot ?? (this.save.weapons.findIndex((x) => !x) >= 0 ? (this.save.weapons.findIndex((x) => !x) as 0 | 1) : this.save.active);
+      const free = this.save.weapons.findIndex((x) => !x);
+      const slot = weaponSlot ?? (free >= 0 ? (free as 0 | 1) : 0);
       const old = this.save.weapons[slot];
       this.save.weapons[slot] = it;
       if (old) this.save.bag.splice(index, 0, old);
@@ -1366,15 +1384,8 @@ export class Game {
     if (!it || !other || this.save.bag.length >= BAG_SIZE) return false;
     this.save.weapons[slot] = null;
     this.save.bag.push(it);
-    if (this.save.active === slot) this.save.active = (1 - slot) as 0 | 1;
     this.afterGearChange();
     return true;
-  }
-
-  setActiveWeapon(slot: 0 | 1) {
-    if (!this.save.weapons[slot]) return;
-    this.save.active = slot;
-    this.afterGearChange();
   }
 
   /** Throws an item out of the bag for good. */
@@ -1387,27 +1398,37 @@ export class Game {
     this.refreshHud(true);
   }
 
+  /** Fresh chains; the left hand starts half its period behind so the hands alternate. */
+  private resetHands() {
+    for (const h of this.hands) {
+      const it = this.save.weapons[h.i];
+      Object.assign(h, newHand(h.i));
+      if (h.i === 1 && it && this.dual) h.atkCd = 0.5 / WEAPONS[it.def].aps;
+    }
+  }
+
   private afterGearChange() {
     const hpFrac = this.hp / this.maxHp;
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
     this.hp = Math.min(this.maxHp, Math.max(1, hpFrac * this.maxHp));
-    this.combo = 0;
+    this.resetHands();
     sfx.click();
     this.persist();
     this.refreshHud(true);
   }
 
   statRows(): [string, string][] {
-    const w = this.weapon;
     return [
       ['Урон (Power)', String(Math.round(this.power))],
       ['Здоровье', String(this.maxHp)],
       ['Реген', `${this.regen} HP/с`],
       ['Скорость', String(this.speedStat)],
       ['Защита', `${this.defense} (−${Math.round((this.defense / (this.defense + 100)) * 100)}%)`],
-      ['Оружие', `${Math.round(this.itemDamage(this.weaponItem) * this.powerMult())} × ${w.aps}/с`],
-      ['Комбо', `${COMBOS[this.weaponItem.def].name} ×${COMBOS[this.weaponItem.def].mult}`],
+      ...this.save.weapons.flatMap((it, i): [string, string][] => it ? [
+        [i ? 'Левая рука' : 'Правая рука', `${Math.round(this.itemDamage(it) * this.handMul() * this.powerMult())} × ${WEAPONS[it.def].aps}/с`],
+        [`Комбо ${WEAPONS[it.def].name.toLowerCase()}`, `${COMBOS[it.def].name} ×${COMBOS[it.def].mult}`],
+      ] : []),
       ['Пассивка', FACTIONS[this.faction].passiveName],
     ];
   }
@@ -1487,7 +1508,7 @@ export class Game {
     });
     this.ui.tickGains(this.time);
     if (full) {
-      this.ui.weapons(this.save.weapons, this.save.active, (it) => this.itemDamage(it), this.save.equip);
+      this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it) * this.handMul(), this.save.equip);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
     }
     this.ui.minimap(this.hero.position, this.hero.facing, this.mapDots(45), this.world, this.mapMarks(45));
@@ -1504,10 +1525,10 @@ export class Game {
   /** Debug: the hero cannot die (HP stops at 1). */
   god = false;
 
-  /** Debug: a rare weapon of this type straight into the active hand; the old one goes to the bag if it fits. */
-  debugGiveWeapon(def: string) {
-    const old = this.save.weapons[this.save.active];
-    this.save.weapons[this.save.active] = dropItem({ kind: 'weapon', def, rarity: 2 });
+  /** Debug: a rare weapon of this type straight into a hand; the old one goes to the bag if it fits. */
+  debugGiveWeapon(def: string, slot: 0 | 1 = 0) {
+    const old = this.save.weapons[slot];
+    this.save.weapons[slot] = dropItem({ kind: 'weapon', def, rarity: 2 });
     if (old && this.save.bag.length < BAG_SIZE) this.save.bag.push(old);
     this.afterGearChange();
   }
@@ -1661,13 +1682,12 @@ export class Game {
   }
 
   private snapshot() {
-    const it = this.weaponItem;
     const ttk: Record<string, number> = {};
-    for (const d of Object.values(MOBS)) if (d.boss) ttk[d.id] = d.hp / Math.max(1, this.heroDps(this.weapon.type, d.resist));
+    for (const d of Object.values(MOBS)) if (d.boss) ttk[d.id] = d.hp / Math.max(1, this.heroDps(d.resist));
     logSnap({
       t: Math.round(this.save.playTime ?? 0), zone: this.zone?.id ?? '?', power: this.power, maxHp: this.maxHp, regen: this.regen,
       kills: this.save.kills, deaths: heroDeaths(),
-      weapon: `${it.def} r${it.rarity} lv${it.lvl}${it.sharpen ? ` +${it.sharpen}` : ''}`, ttk,
+      weapon: this.save.weapons.filter((x): x is Item => !!x).map((x) => `${x.def} r${x.rarity} lv${x.lvl}${x.sharpen ? ` +${x.sharpen}` : ''}`).join(' + '), ttk,
     });
   }
 }
@@ -1687,3 +1707,9 @@ function turn(cur: number, want: number, k: number) {
   return cur + d * Math.min(1, k);
 }
 
+
+/** Swing timer and combo chain of one hand. */
+interface Hand { i: 0 | 1; atkCd: number; impact: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean }
+function newHand(i: 0 | 1): Hand {
+  return { i, atkCd: 0, impact: -1, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false };
+}
