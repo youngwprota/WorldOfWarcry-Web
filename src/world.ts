@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { assets } from './assets';
-import { applySeeThrough } from './seethrough';
 import { blobShadow } from './character';
 import {
   FACTIONS, HERO, WORLD, ZONES, type DamageType, type FactionId, type OrbKind, type ResistTier, type ZoneId,
@@ -267,8 +266,8 @@ export class World {
     const trunk = new THREE.CylinderGeometry(0.15, 0.25, 1.4, 5).translate(0, 0.7, 0);
     const c1 = new THREE.ConeGeometry(1.4, 2.6, 7).translate(0, 2.4, 0);
     const c2 = new THREE.ConeGeometry(1.0, 2.0, 7).translate(0, 3.6, 0);
-    const trunkMat = applySeeThrough(new THREE.MeshLambertMaterial({ color: 0x6b4a2f, flatShading: true }));
-    const leafMat = applySeeThrough(new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }));
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x6b4a2f, flatShading: true });
+    const leafMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const col = new THREE.Color();
@@ -299,7 +298,7 @@ export class World {
     if (!items.length) return;
     const trunk = new THREE.CylinderGeometry(0.12, 0.3, 2.6, 6).translate(0, 1.3, 0);
     const branch = new THREE.CylinderGeometry(0.04, 0.1, 1.5, 5).translate(0, 0.75, 0);
-    const mat = applySeeThrough(new THREE.MeshLambertMaterial({ color: 0x4a3f5a, flatShading: true }));
+    const mat = new THREE.MeshLambertMaterial({ color: 0x4a3f5a, flatShading: true });
     const trunks = new THREE.InstancedMesh(trunk, mat, items.length);
     const branches = new THREE.InstancedMesh(branch, mat, items.length * 4);
     const m = new THREE.Matrix4();

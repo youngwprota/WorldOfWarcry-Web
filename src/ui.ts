@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  DAMAGE_TYPE_NAME, FACTIONS, SHARPEN, WEAPONS, WORLD, ZONES,
+  DAMAGE_TYPE_NAME, FACTIONS, SHARPEN, UI_BASE, WEAPONS, WORLD, ZONES,
   type FactionId, type OrbKind, type ZoneDef,
 } from './config';
 import { ARMOR_SLOTS, cellHtml, scrapValue, type ArmorSlot, type Item } from './items';
@@ -86,6 +86,13 @@ export class UI {
   }
 
   size() { return { w: this.app.clientWidth, h: this.app.clientHeight }; }
+  /** UI scale for small screens: #hud, #modal and friends are scale(--ui), their px are virtual (screen px / scale). */
+  scale = 1;
+  fit() {
+    const { w, h } = this.size();
+    this.scale = Math.min(1, w / UI_BASE.w, h / UI_BASE.h);
+    this.app.style.setProperty('--ui', String(this.scale));
+  }
   get modalOpen() { return this.modal.classList.contains('show'); }
 
   showHud(on: boolean) { $('hud').classList.toggle('hidden', !on); }
@@ -307,21 +314,42 @@ export class UI {
     }, 1000);
   }
 
-  settings(muted: boolean, lowGfx: boolean, toggleMute: () => void, toggleGfx: () => void, reset: () => void, close: () => void) {
+  settings(muted: boolean, lowGfx: boolean, toggleMute: () => void, toggleGfx: () => void, reset: () => void, close: () => void, showLog: () => void, kite: { label: string; cycle: () => void }) {
     this.open(`<div class="panel"><h2>Настройки</h2>
       <p>Управление: тяни палец в любом месте экрана (или WASD). Атака — автоматически. Смена оружия — тап по второму оружию внизу или Q.</p>
       <div class="row"><button class="btn" id="m-mute">${muted ? '🔇 Звук выкл' : '🔊 Звук вкл'}</button>
       <button class="btn" id="m-gfx">${lowGfx ? '🖥 Графика: низкая' : '🖥 Графика: высокая'}</button></div>
-      <div class="row"><button class="btn purple" id="m-debug">🛠 Дебаг-меню</button></div>
-      <div class="row"><button class="btn danger" id="m-reset">Сбросить прогресс</button></div>
+      <div class="row"><button class="btn purple" id="m-debug">🛠 Дебаг-меню</button><button class="btn" id="m-kite">🐞 Анти-кайт: ${kite.label}</button></div>
+      <div class="row"><button class="btn" id="m-log">📊 Лог баланса</button><button class="btn danger" id="m-reset">Сбросить прогресс</button></div>
       <div class="row"><button class="btn primary" id="m-close">Продолжить</button></div></div>`);
     this.on('#m-debug', () => { this.close(); close(); this.onDebug(); });
-    this.on('#m-mute', () => { toggleMute(); this.close(); this.settings(!muted, lowGfx, toggleMute, toggleGfx, reset, close); });
-    this.on('#m-gfx', () => { toggleGfx(); this.close(); this.settings(muted, !lowGfx, toggleMute, toggleGfx, reset, close); });
+    this.on('#m-mute', () => { toggleMute(); this.close(); this.settings(!muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog, kite); });
+    this.on('#m-gfx', () => { toggleGfx(); this.close(); this.settings(muted, !lowGfx, toggleMute, toggleGfx, reset, close, showLog, kite); });
     this.on('#m-reset', () => {
-      this.confirm('Сбросить весь прогресс?', 'Герой, фракция и снаряжение будут удалены.', reset, () => this.settings(muted, lowGfx, toggleMute, toggleGfx, reset, close));
+      this.confirm('Сбросить весь прогресс?', 'Герой, фракция и снаряжение будут удалены.', reset, () => this.settings(muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog, kite));
     });
+    this.on('#m-log', () => { this.close(); showLog(); });
+    this.on('#m-kite', () => { this.close(); kite.cycle(); });
     this.on('#m-close', () => { this.close(); close(); });
+  }
+
+  /** Balance playtest report (src/balancelog.ts): read here, copy to paste into chat. */
+  balanceLog(text: string, back: () => void) {
+    const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    this.open(`<div class="panel"><h2>Лог баланса</h2>
+      <pre class="ballog">${esc || 'Пока пусто: поиграй минуту.'}</pre>
+      <div class="row"><button class="btn" id="m-back">Назад</button><button class="btn primary" id="m-copy">Копировать</button></div></div>`);
+    this.on('#m-copy', () => {
+      // No clipboard API over plain http (phone on the LAN): select the text for a manual copy instead.
+      const selectAll = () => {
+        const pre = this.modal.querySelector('.ballog');
+        if (pre) getSelection()?.selectAllChildren(pre);
+        this.toast('Текст выделен — скопируй вручную');
+      };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => this.toast('Лог скопирован'), selectAll);
+      else selectAll();
+    });
+    this.on('#m-back', () => { this.close(); back(); });
   }
 
   confirm(title: string, text: string, yes: () => void, no: () => void) {
@@ -486,8 +514,9 @@ export class UI {
     const m = Math.max(Math.abs(x) / 0.85, y > 0 ? y / 0.55 : -y / 0.62);
     x /= m;
     y /= m;
-    const px = (x * 0.5 + 0.5) * w;
-    const py = (-y * 0.5 + 0.5) * h;
+    // #hud is scaled by --ui: its px are screen px / scale
+    const px = ((x * 0.5 + 0.5) * w) / this.scale;
+    const py = ((-y * 0.5 + 0.5) * h) / this.scale;
     el.style.display = 'block';
     el.style.transform = `translate(${px - 13}px, ${py - 13}px) rotate(${Math.atan2(-y, x)}rad)`;
   }
