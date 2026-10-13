@@ -52,6 +52,7 @@ export class UI {
   onSettings: () => void = () => {};
   onCharacter: () => void = () => {};
   onBag: () => void = () => {};
+  onGacha: () => void = () => {};
   onMap: () => void = () => {};
   onArmor: () => void = () => {};
   onTalents: () => void = () => {};
@@ -66,12 +67,14 @@ export class UI {
     $('btn-settings').addEventListener('click', () => { sfx.click(); this.onSettings(); });
     $('btn-char').addEventListener('click', () => { sfx.click(); this.onCharacter(); });
     $('btn-bag').addEventListener('click', () => { sfx.click(); this.onBag(); });
+    $('btn-gacha').addEventListener('click', () => { sfx.click(); this.onGacha(); });
     $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('bosses').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('btn-settings').innerHTML = art('gear', 40);
     $('lvl').addEventListener('click', () => { sfx.click(); this.onTalents(); });
     $('btn-char').insertAdjacentHTML('afterbegin', art('hero', 46));
     $('btn-bag').insertAdjacentHTML('afterbegin', art('bag', 48));
+    $('btn-gacha').insertAdjacentHTML('afterbegin', art('anvil', 46));
     $('btn-smith').insertAdjacentHTML('afterbegin', art('anvil', 32) + ' ');
     $('gold').querySelector('i')!.outerHTML = art('coin', 28);
     $('armorbar').addEventListener('click', (e) => {

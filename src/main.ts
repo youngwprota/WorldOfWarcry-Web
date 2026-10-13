@@ -14,6 +14,7 @@ import { TalentsView } from './talentsview';
 import { DebugPanel } from './debug';
 import { Prologue, clearPrologue, prologueDone, type Gains } from './prologue';
 import { MapView } from './mapview';
+import { GachaView } from './gachaview';
 import { loadSave, newSave, wipeAll, writeSave } from './save';
 import { clearLog, report } from './balancelog';
 import { UI } from './ui';
@@ -111,8 +112,15 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   ui.onDebug = () => debug.toggle(true);
   const map = new MapView(game);
   ui.onMap = game.onOpenMap = () => { if (inv.isOpen || ui.modalOpen) return; map.toggle(); };
+  const gacha = new GachaView(ui, game);
+  ui.onGacha = game.onOpenGacha = () => {
+    if (inv.isOpen || ui.modalOpen || map.isOpen) return;
+    input.reset();
+    gacha.open();
+  };
   addEventListener('keydown', (e) => {
-    if (inv.isOpen && (e.code === 'Escape' || e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyB')) inv.close();
+    if (gacha.isOpen && (e.code === 'Escape' || e.code === 'KeyG')) gacha.close();
+    else if (inv.isOpen && (e.code === 'Escape' || e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyB')) inv.close();
     else if (talents.isOpen && (e.code === 'Escape' || e.code === 'KeyT')) talents.close();
   });
   ui.onSettings = function open() {

@@ -257,6 +257,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .side-btn span { position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); text-transform: uppercase; }
 .side-btn.hero { --c1: #6fd77a; --c2: #2c9b48; }
 .side-btn.bag { --c1: #ffb24a; --c2: #d8701c; }
+.side-btn.forge { --c1: #ff8a4a; --c2: #b8321c; }
 .side-btn:active { transform: translateY(2px); }
 #btn-bag[data-badge]:not([data-badge=""])::after { content: attr(data-badge); position: absolute; top: -8px; right: -8px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; background: linear-gradient(#ff7d93, #e8335a); border: 2px solid var(--ink); font-size: 12px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); display: flex; align-items: center; justify-content: center; }
 #zone-banner { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-weight: 900; font-size: 30px; color: #fff; text-shadow: var(--stroke), 0 4px 0 var(--ink); opacity: 0; transform: scale(0.9); transition: opacity 0.4s, transform 0.4s; text-transform: uppercase; }

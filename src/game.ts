@@ -180,6 +180,7 @@ export class Game {
   onOpenBag: () => void = () => {};
   onOpenMap: () => void = () => {};
   onOpenTalents: () => void = () => {};
+  onOpenGacha: () => void = () => {};
   private time = 0;
   private hp: number;
   private shield = 0;
@@ -381,6 +382,7 @@ export class Game {
     if (this.input.pressed('KeyB')) { this.onOpenBag(); return; }
     if (this.input.pressed('KeyM')) { this.onOpenMap(); return; }
     if (this.input.pressed('KeyT')) { this.onOpenTalents(); return; }
+    if (this.input.pressed('KeyG')) { this.onOpenGacha(); return; }
     this.updateHero(dt);
     this.updateMobs(dt);
     this.updateProps(dt);
