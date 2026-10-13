@@ -32,7 +32,7 @@
   из `BossDef`/`BOSS_BASE`. tsc покажет место в `bossLogic`.
 - [x] 2. game.ts: общий реген в цикле мобов для живых и проснувшихся (`time - hurtAt > MOB_REGEN_DELAY` →
   `hp += maxHp * def.regen * dt`, кап maxHp); убрать реген из `bossLogic`.
-- [ ] 3. game.ts: `return` — `stepTo(m, m.spawn, def.speed, dt)`, без отхила; на точке только `state = 'idle'`.
+- [x] 3. game.ts: `return` — `stepTo(m, m.spawn, def.speed, dt)`, без отхила; на точке только `state = 'idle'`.
   Реагро в `return` по `aggro`; в `damageMob` вместо «return остаётся return» — `chase`, если герой внутри поводка.
 - [ ] 4. README.md: «Мобы» — возврат шагом без отхила, реген через 5 с без урона; «Боссы» — 5 с вместо 4.
 

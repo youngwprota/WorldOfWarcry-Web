@@ -829,9 +829,13 @@ export class Game {
             }
           }
         } else if (m.state === 'return') {
-          moving = this.stepTo(m, m.spawn, def.speed * 1.4, dt);
-          m.hp = Math.min(m.maxHp, m.hp + m.maxHp * dt * 0.5);
-          if (m.pos.distanceTo(m.spawn) < 0.6) { m.state = 'idle'; m.hp = m.maxHp; }
+          // Walks home at chase speed, no heal; re-aggros if the hero comes close again inside the leash
+          // (a hit is within aggro range too). Hero outside the leash is ignored, or it would flip every frame.
+          if (!this.dead && !heroInCamp && dHero < def.aggro && hp.distanceTo(m.spawn) < leash) m.state = 'chase';
+          else {
+            moving = this.stepTo(m, m.spawn, def.speed, dt);
+            if (dSpawn < 0.6) m.state = 'idle';
+          }
         }
       }
       if (m.impact >= 0) {
