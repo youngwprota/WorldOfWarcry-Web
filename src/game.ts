@@ -702,7 +702,7 @@ export class Game {
       hits++;
       if (u instanceof Prop) {
         const tier = u.def.resist[w.type] ?? 'normal';
-        this.hitProp(u, (fin ? 3 : 1) * RESIST_MULT[tier]);
+        this.hitProp(u, (fin ? 3 : 1) * RESIST_MULT[tier], tier);
         continue;
       }
       const m = u as Mob;
@@ -1179,11 +1179,14 @@ export class Game {
   }
 
   // ---------- breakables ----------
-  private hitProp(b: Prop, dmg: number) {
+  private hitProp(b: Prop, dmg: number, tier: string) {
     b.hp = +(b.hp - dmg).toFixed(2);
     b.shake = 0.2;
     b.flash = 0.1;
     sfx.hit();
+    // hits count in whole blows: -1, -0.5 against stone, -3 for a finisher
+    const cls = tier === 'weak' ? 'dmg weak' : tier === 'resist' || tier === 'immune' ? 'dmg resist' : 'dmg';
+    this.fx.spawn(this.unitTextAt(b), `-${+dmg.toFixed(1)}`, cls, 0.8, { lift: b.uiEl.offsetHeight });
     this.particles.burst(v1.copy(b.pos).setY(0.7), b.def.color, 3, 0.1, 3, 0.4);
     if (b.hp > 0) return;
     b.broken = true;
