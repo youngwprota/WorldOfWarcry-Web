@@ -287,8 +287,10 @@ export const GACHA = {
   rates: [0.7, 0.22, 0.074, 0.006],
   pity: 60,
   banner: { def: 'hammer', name: 'Молот Короля-лича', subtitle: 'Выкован из костей павших королей. Шанс повышен!' },
+  /** Hammer blows per pull; the rarity colour can climb after each, legendary only on the last one. */
+  strikes: 5,
   /** Reveal timing, seconds: delay between hammer blows, then the final flash. */
-  strikeGap: 0.75,
+  strikeGap: 0.6,
   revealHold: 0.9,
 };
 

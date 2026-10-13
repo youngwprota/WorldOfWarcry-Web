@@ -122,8 +122,9 @@ export class Forge3D {
   private t = 0;
   private playing = false;
   private struck = 0;
-  private stages = [0, 0, 0];
-  private strikeAt = [0, 0, 0];
+  private stages: number[] = [];
+  private strikeAt: number[] = [];
+  private lastBlow = 0;
   private revealAt = 0;
   private revealed = false;
   private rarity = 0;
@@ -298,14 +299,22 @@ export class Forge3D {
     this.reset();
     const r = item.rarity;
     this.rarity = r;
-    // Rarity climbs blow by blow and never goes down; legendary only shows on the last blow.
-    const s1 = r >= 1 && Math.random() < 0.5 ? 1 : 0;
-    const s2 = Math.max(s1, r >= 2 ? (Math.random() < 0.6 ? 2 : 1) : r);
-    this.stages = [s1, s2, r];
+    // Rarity climbs blow by blow and never goes down; before the last blow it stops below legendary,
+    // the last blow always lands on the real rarity.
+    const n = GACHA.strikes, last = n - 1, cap = Math.min(r, 2);
     const gap = GACHA.strikeGap;
+    this.stages.length = this.strikeAt.length = 0;
+    let s = 0;
+    for (let i = 0; i < last; i++) {
+      if (s < cap && Math.random() < ((i + 1) / last) * 0.7) s++;
+      this.stages.push(s);
+      this.strikeAt.push(0.6 + gap * i);
+    }
+    this.stages.push(r);
     // Suspense: a rare-or-better result waits longer before the last blow.
-    this.strikeAt = [0.6, 0.6 + gap, 0.6 + gap * 2 + (r >= 2 ? gap * 0.7 : 0)];
-    this.revealAt = this.strikeAt[2] + 0.35;
+    this.strikeAt.push(0.6 + gap * last + (r >= 2 ? gap * 0.7 : 0));
+    this.lastBlow = last;
+    this.revealAt = this.strikeAt[last] + 0.35;
     this.onReveal = onReveal;
     this.buildItem(item);
     this.playing = true;
@@ -313,9 +322,11 @@ export class Forge3D {
 
   /** Jump to the last blow (it still plays its burst). */
   skip() {
-    if (!this.playing || this.struck >= 3) return;
-    this.struck = 2;
-    this.t = this.strikeAt[2] - 0.15;
+    if (!this.playing || this.struck > this.lastBlow) return;
+    // the colour reached so far jumps to the one before the last blow
+    this.setStage(this.stages[this.lastBlow - 1]);
+    this.struck = this.lastBlow;
+    this.t = this.strikeAt[this.lastBlow] - 0.15;
   }
 
   get busy() { return this.playing && !this.revealed; }
@@ -351,7 +362,7 @@ export class Forge3D {
 
   private strike(i: number) {
     const stage = this.stages[i];
-    const last = i === 2;
+    const last = i === this.lastBlow;
     this.setStage(stage);
     sfx.anvil(stage);
     this.strikeLight.intensity = 3 + stage * 1.2 + (last ? 2 : 0);
@@ -436,7 +447,7 @@ export class Forge3D {
   private update(dt: number, time: number) {
     if (this.playing) {
       this.t += dt;
-      if (this.struck < 3 && this.t >= this.strikeAt[this.struck]) this.strike(this.struck++);
+      if (this.struck <= this.lastBlow && this.t >= this.strikeAt[this.struck]) this.strike(this.struck++);
       if (!this.revealed && this.t >= this.revealAt) this.reveal();
     }
     const t = this.t;
@@ -444,7 +455,7 @@ export class Forge3D {
     // Hammer: raised, slams down over the last 0.14 s before a blow, then lifts back.
     let a = F.hammerUp;
     if (this.playing && !this.revealed) {
-      if (this.struck < 3) {
+      if (this.struck <= this.lastBlow) {
         const k = 1 - (this.strikeAt[this.struck] - t) / 0.14;
         if (k > 0) a = F.hammerUp + (F.hammerDown - F.hammerUp) * k * k;
         // wind-up: lifts a bit higher just before the swing
@@ -468,7 +479,7 @@ export class Forge3D {
       if (this.ringMat.opacity <= 0) this.ring.visible = false;
     }
     // Before a rare-or-better last blow the ingot throbs in the colour reached so far.
-    if (this.playing && this.struck === 2 && this.rarity >= 2) this.ingotMat.emissiveIntensity = 1.8 + Math.sin(time * 18) * 0.8;
+    if (this.playing && this.struck === this.lastBlow && this.rarity >= 2) this.ingotMat.emissiveIntensity = 1.8 + Math.sin(time * 18) * 0.8;
 
     // Embers from the hearth all the time; a heavier stream once the item is out.
     this.emberAcc += dt * (this.revealed ? 30 : 12);
@@ -499,7 +510,7 @@ export class Forge3D {
 
     // Camera: slow push-in during the blows, rises to the item after the reveal, plus decaying shake.
     this.shake *= Math.exp(-dt * 6);
-    const push = this.revealed ? 1 : Math.min(1, t / (this.strikeAt[2] + 0.4));
+    const push = this.revealed ? 1 : Math.min(1, t / (this.strikeAt[this.lastBlow] + 0.4));
     this.camera.position.set(
       this.camBase.x + (Math.random() - 0.5) * this.shake,
       this.camBase.y + (this.revealed ? 0.35 : 0) + (Math.random() - 0.5) * this.shake,
