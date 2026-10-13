@@ -5,6 +5,16 @@ export type ResistTier = 'weak' | 'normal' | 'resist' | 'immune';
 export type FactionId = 'human' | 'orc';
 export type ZoneId = 'camp' | 'forest' | 'cemetery';
 export type AttackAnim = 'SwordAttack' | 'AxeAttack';
+/**
+ * Hit markers: seconds into each attack clip at natural speed where the blow connects. Mob damage lands on this
+ * frame if the hero is still in reach. Humanoid FBX clips by name, GLB creatures as `<model>:attack`.
+ */
+export const ATTACK_HIT: Record<string, number> = {
+  SwordAttack: 0.6, AxeAttack: 0.83,
+  'orc_boar:attack': 9 / 24, 'undead_boar:attack': 9 / 24, 'human_murloc:attack': 0.6 / 1.3,
+};
+/** When a mob's damage lands: on the clip's hit marker, sped up only if the attack period is too short for it. */
+export function mobImpact(hit: number, period: number) { return Math.min(hit, period * 0.8); }
 
 /** HUD and windows are laid out in px for this screen; on a smaller screen they shrink as a whole (src/ui.ts fit). */
 export const UI_BASE = { w: 470, h: 840 };
@@ -136,6 +146,10 @@ export interface MobDef {
   xp: number;
   respawn: number; // seconds
   boss?: BossDef;
+  /** GLB animal (Creature): `model` names a .glb with its own rig and clips, weapon is always null. */
+  creature?: boolean;
+  /** Speed (m/s) the hit shoves the hero back with. */
+  push?: number;
 }
 
 /** Boss fight tunables (bossLogic in game.ts). Damage multipliers apply to the boss's `dmg`. */
@@ -187,6 +201,24 @@ export const MOBS: Record<string, MobDef> = {
       ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest',
       slamRadius: 4.2, slamMul: 2.4, chaseMul: 1.4, phase2Dmg: 1.2,
     },
+  },
+  boar: {
+    id: 'boar', name: 'Вепрь', creature: true, push: 5,
+    model: { human: ['orc_boar', null], orc: ['orc_boar', null] },
+    anim: 'AxeAttack', hp: 90, dmg: 8, aps: 0.9, range: 1.6, speed: 2.1, aggro: 6, scale: 1.5,
+    resist: { slash: 'weak' }, reward: { speed: 1, hp: 1 }, gold: [0, 2], xp: 10, respawn: 40,
+  },
+  undead_boar: {
+    id: 'undead_boar', name: 'Нежить-вепрь', creature: true, push: 5,
+    model: { human: ['undead_boar', null], orc: ['undead_boar', null] },
+    anim: 'AxeAttack', hp: 150, dmg: 9, aps: 0.85, range: 1.6, speed: 1.9, aggro: 7, scale: 1.5,
+    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { speed: 1, regen: 1, hp: 1 }, gold: [3, 6], xp: 24, respawn: 50,
+  },
+  murloc: {
+    id: 'murloc', name: 'Мурлок', creature: true,
+    model: { human: ['human_murloc', null], orc: ['human_murloc', null] },
+    anim: 'SwordAttack', hp: 1000, dmg: 2, aps: 0.85, range: 1.5, speed: 3.4, aggro: 6.5, scale: 1.1,
+    resist: { slash: 'weak' }, reward: { hp: 1, power: 1 }, gold: [1, 3], xp: 12, respawn: 45,
   },
   skeleton_worker: {
     id: 'skeleton_worker', name: 'Мертвяк',

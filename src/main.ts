@@ -49,7 +49,8 @@ for (const f of Object.values(FACTIONS)) {
   models.add(f.campfire);
 }
 for (const w of Object.values(WEAPONS)) Object.values(w.model).forEach((m) => models.add(m));
-for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { models.add(c); if (w) models.add(w); }
+const creatures = new Set<string>();
+for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { (m.creature ? creatures : models).add(c); if (w) models.add(w); }
 for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
 ['orc_stone_big', 'orc_stone_mid', 'orc_stone_small', 'orc_log', 'orc_wood_pile_big', 'orc_tusk_standing', 'orc_skull',
   'undead_fence', 'undead_ruins_01', 'undead_ruins_02', 'undead_obelisk', 'undead_column_1', 'undead_big_bone',
@@ -68,7 +69,10 @@ for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
   'undead_ground_bone_2', 'undead_ground_bone_3', 'orc_bucket', 'orc_box_large_2', 'shield', 'spear',
   'orc_wood_pile_small', 'orc_beam_pile'].forEach((m) => models.add(m));
 
-await assets.loadAll([...models], (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`));
+await Promise.all([
+  assets.loadAll([...models], (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`)),
+  assets.loadCreatures([...creatures]),
+]);
 ui.loading(1, 'Готово');
 
 let game: Game | null = null;

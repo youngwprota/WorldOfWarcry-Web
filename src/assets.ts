@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { applySeeThrough } from './seethrough';
 
@@ -44,6 +45,9 @@ export interface CharacterClips {
 class Assets {
   private manager = new THREE.LoadingManager();
   private fbx = new FBXLoader(this.manager);
+  private gltf = new GLTFLoader();
+  /** GLB creatures (own skeleton and clips, textures embedded). */
+  private creatures = new Map<string, { scene: THREE.Group; clips: THREE.AnimationClip[] }>();
   private texLoader = new THREE.TextureLoader();
   private sources = new Map<string, THREE.Group>();
   private textures = new Map<string, THREE.Texture>();
@@ -69,6 +73,25 @@ class Assets {
     for (const n of names) this.prepareModel(n);
   }
 
+  async loadCreatures(names: string[]) {
+    await Promise.all(
+      names.map(async (n) => {
+        const g = await this.gltf.loadAsync(`${BASE}models/${n}.glb`);
+        this.creatures.set(n, { scene: g.scene, clips: g.animations });
+      }),
+    );
+  }
+
+  /** Creature clone with its own skeleton, plus its clips by name (idle, walk, attack, death). */
+  cloneCreature(name: string): { model: THREE.Group; clips: Record<string, THREE.AnimationClip> } {
+    const src = this.creatures.get(name);
+    if (!src) throw new Error('creature not loaded: ' + name);
+    return {
+      model: SkeletonUtils.clone(src.scene) as THREE.Group,
+      clips: Object.fromEntries(src.clips.map((c) => [c.name, c])),
+    };
+  }
+
   texture(name: string): THREE.Texture {
     let t = this.textures.get(name);
     if (!t) {
@@ -80,8 +103,10 @@ class Assets {
     return t;
   }
 
-  material(texName: string): THREE.Material {
-    let m = this.materials.get(texName);
+  /** seeThrough: level kit (buildings, props, elf foliage) fades out between the camera and the hero. */
+  material(texName: string, seeThrough: boolean): THREE.Material {
+    const key = seeThrough ? texName + '#see' : texName;
+    let m = this.materials.get(key);
     if (!m) {
       const emissive = EMISSIVE_OF[texName];
       m = new THREE.MeshLambertMaterial({
@@ -90,9 +115,8 @@ class Assets {
         emissiveMap: emissive ? this.texture(emissive) : null,
       });
       m.name = texName;
-      // Level kit (buildings, props, elf foliage) fades out between the camera and the hero.
-      if (texName.startsWith('proto_')) applySeeThrough(m);
-      this.materials.set(texName, m);
+      if (seeThrough) applySeeThrough(m);
+      this.materials.set(key, m);
     }
     return m;
   }
@@ -132,7 +156,8 @@ class Assets {
     g.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(g);
     if (box.max.y - box.min.y > 20) g.scale.setScalar(0.01);
-    const mat = this.material(textureFor(name));
+    // Characters and weapons (some share the level kit's texture) never fade
+    const mat = this.material(textureFor(name), !(name in TEXTURE_OF) && textureFor(name).startsWith('proto_'));
     g.traverse((o) => {
       if (o.name === 'Character1_RightHand') o.name = 'hand_r';
       const m = o as THREE.Mesh;

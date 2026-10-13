@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { Character } from './character';
+import { Creature } from './creature';
 import {
-  ANTI_KITE, COMBOS, FACTIONS, HERO, LEASH, MOBS, ORBS, depthMul, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
+  ANTI_KITE, COMBOS, FACTIONS, HERO, LEASH, MOBS, ORBS, depthMul, mobImpact, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
   type AntiKite, type DamageType, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -32,7 +33,7 @@ const v2 = new THREE.Vector3();
 interface Target { kind: 'mob' | 'prop'; ref: Mob | Breakable; }
 
 class Mob {
-  ch: Character;
+  ch: Character | Creature;
   hp: number;
   maxHp: number;
   state: 'idle' | 'chase' | 'return' | 'dead' = 'idle';
@@ -74,7 +75,7 @@ class Mob {
     const [model, weapon] = def.model[faction];
     this.dmgType = !weapon || weapon.includes('hammer') ? 'crush' : weapon.includes('spear') ? 'pierce' : 'slash';
     const scale = def.scale * mul.scale;
-    this.ch = new Character(model, weapon, scale);
+    this.ch = def.creature ? new Creature(model, scale) : new Character(model, weapon, scale);
     this.dmg = def.dmg * mul.dmg;
     this.reward = {};
     for (const [k, n] of Object.entries(def.reward) as [OrbKind, number][]) this.reward[k] = Math.round(n * mul.reward);
@@ -82,7 +83,7 @@ class Mob {
     this.ch.position.copy(spawn);
     this.ch.facing = Math.random() * Math.PI * 2;
     this.maxHp = this.hp = Math.round(def.hp * mul.hp);
-    this.radius = 0.45 * scale;
+    this.radius = (def.creature ? 0.7 : 0.45) * scale;
     this.wander.copy(spawn);
     // Above the head: stats granted by the kill, weakness/resistance icons, HP bar.
     // Bosses get a bigger version with their name (coloured by difficulty) and HP numbers.
@@ -185,6 +186,8 @@ export class Game {
   private hp: number;
   private shield = 0;
   private lastHurt = -99;
+  /** Shove from mob hits (MobDef.push), decays like mob knockback. */
+  private heroKnock = new THREE.Vector3();
   private lastFight = -99;
   private atkCd = 0;
   private impact = -1;
@@ -469,6 +472,10 @@ export class Game {
       const slowed = this.antiKite === 'slow' && this.time - this.lastSwing < ANTI_KITE.slowTime;
       p.addScaledVector(this.moveDir, this.speed * (slowed ? ANTI_KITE.slowMul : 1) * dt);
       ch.walkRate = Math.min(2.4, (this.speed * this.moveDir.length()) / 2.1);
+    }
+    if (this.heroKnock.lengthSq() > 0.001) {
+      p.addScaledVector(this.heroKnock, dt);
+      this.heroKnock.multiplyScalar(Math.max(0, 1 - dt * 9));
     }
     // soft push from living mobs
     for (const m of this.mobs) {
@@ -818,12 +825,16 @@ export class Game {
               this.bossLogic(m, dt, dHero);
             }
             if (m.casting <= 0) {
-              if (dHero > reach * 0.85) moving = this.stepTo(m, hp, def.speed, dt);
+              const back = m.ch instanceof Creature ? m.ch.backstep() : 0;
+              if (back > 0) {
+                m.pos.x -= Math.sin(m.ch.facing) * back;
+                m.pos.z -= Math.cos(m.ch.facing) * back;
+              } else if (dHero > reach * 0.85) moving = this.stepTo(m, hp, def.speed, dt);
               m.ch.facing = turn(m.ch.facing, Math.atan2(hp.x - m.pos.x, hp.z - m.pos.z), dt * 8);
               m.atkCd -= dt;
               if (dHero < reach && m.atkCd <= 0 && m.impact < 0) {
                 const period = 1 / def.aps;
-                const impactAt = Math.min(0.55, period * 0.45);
+                const impactAt = mobImpact(m.ch.hitTime(def.anim), period);
                 m.ch.attack(def.anim, period, impactAt);
                 m.impact = impactAt;
                 m.atkCd = period;
@@ -840,7 +851,13 @@ export class Game {
         m.impact -= dt;
         if (m.impact < 0 && !this.dead && m.stun <= 0) {
           const reach = def.range + m.radius * 0.5 + HERO.radius + 0.5;
-          if (m.pos.distanceTo(hp) < reach) this.hurtHero(m.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos, m.dmgType, m);
+          if (m.pos.distanceTo(hp) < reach) {
+            this.hurtHero(m.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos, m.dmgType, m);
+            if (def.push) {
+              this.heroKnock.set(hp.x - m.pos.x, 0, hp.z - m.pos.z).normalize().multiplyScalar(def.push);
+              this.shake = Math.max(this.shake, 0.25);
+            }
+          }
         }
       }
       // knockback
@@ -913,7 +930,7 @@ export class Game {
     v1.multiplyScalar(Math.min(d, speed * dt) / d);
     m.pos.add(v1);
     m.ch.facing = turn(m.ch.facing, Math.atan2(v1.x, v1.z), dt * 8);
-    m.ch.walkRate = speed / 2.1;
+    m.ch.walkRate = speed / m.ch.stride;
     return true;
   }
 

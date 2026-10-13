@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { sfx } from './audio';
 import { Character } from './character';
-import { HERO, MOBS, ORBS, fmtOrb, type OrbKind } from './config';
+import { HERO, MOBS, ORBS, fmtOrb, mobImpact, type OrbKind } from './config';
 import { FloatingText, Particles, Pickups } from './fx';
 import type { Input } from './input';
 import { seeThrough } from './seethrough';
@@ -571,7 +571,7 @@ export class Prologue {
           s.atkCd -= dt;
           if (dHero < reach && s.atkCd <= 0 && s.impact < 0) {
             const period = 1 / SKEL.aps;
-            const impactAt = Math.min(0.55, period * 0.45);
+            const impactAt = mobImpact(s.ch.hitTime('SwordAttack'), period);
             s.ch.attack('SwordAttack', period, impactAt);
             s.impact = impactAt;
             s.atkCd = period;
