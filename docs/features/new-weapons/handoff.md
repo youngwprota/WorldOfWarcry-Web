@@ -5,6 +5,7 @@
 Шаг: 14 готов, все шаги [x] · Дальше: проверка пользователем в браузере
 
 ## Решения по ходу
+- Влит main (combat-targeting, webgl-contexts): выбор цели — inStrike из main по самой длинной руке (reach()), удары рук — inStrike(t, range + ahead).
 - Пары: SWORD_PAIRS в config, Game.pair (offhand.swordPair) обновляется в equipVisual. Клинок+меч: меч сам не бьёт, handMulOf(blade)=1. Топор+меч: руки бьют синхронно.
 - Щит рядом с оружием сам не бьёт; один щит или два — бьёт сам (иначе нельзя ломать ящики). Ранг врага — mobRank() (boss/rank/normal).
 - Удары: WeaponDef.swing — процедурные (Swinger поверх клипа, кости spine_01/upperarm); левая рука без своего swing — LEFT_SWING по клипу. Клинок перпендикулярен предплечью: «ровный» укол = низкая рука + наклон корпуса.

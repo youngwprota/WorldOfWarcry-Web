@@ -35,6 +35,8 @@ const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
 const v3 = new THREE.Vector3();
 const vFlee = new THREE.Vector3();
+/** Slack over the weapon's range for a hit to land (unit edge to hero centre); targeting and swings use the same. */
+const STRIKE_PAD = 0.35;
 
 /** Respawn timer text: 45s, 4m05s, or 11h45m from an hour up (no seconds). */
 function fmtRespawn(sec: number) {
@@ -658,23 +660,27 @@ export class Game {
     }
     this.world.collide(p, HERO.radius);
 
-    // targeting: keep the current target while it lives and stays near (GDD 6.2)
-    const reach = this.reach() + HERO.acquireExtra;
+    // targeting (GDD 6.2): keep the current target while it can be struck; once it is out of the strike
+    // distance (or it is a prop and a mob came in) switch to the best unit that can. With nothing else to
+    // strike the old target is kept a bit further, only for facing. Strike distance: the longer hand.
+    const strike = this.reach();
+    const reach = strike + HERO.acquireExtra;
     if (this.target) {
       const t = this.target;
-      if (!t.alive || t.pos.distanceTo(p) > reach + t.radius + 1) this.target = null;
+      if (!t.hittable || t.pos.distanceTo(p) > reach + t.radius + 1) this.target = null;
     }
-    if (!this.target) {
-      // the nearest unit in reach; any mob goes before props
+    const cur = this.target;
+    if (!cur || cur.kind === 'prop' || !this.inStrike(cur, strike)) {
+      // the nearest unit in strike distance; any mob goes before props
       let best: Unit | null = null;
       let bd = Infinity;
       for (const u of this.units) {
-        if (!u.hittable) continue;
-        const d = u.pos.distanceTo(p) - u.radius;
-        const score = d + (u.kind === 'prop' ? 1000 : 0);
-        if (d < reach && score < bd) { bd = score; best = u; }
+        if (!u.hittable || !this.inStrike(u, strike)) continue;
+        const score = u.pos.distanceTo(p) - u.radius + (u.kind === 'prop' ? 1000 : 0);
+        if (score < bd) { bd = score; best = u; }
       }
-      this.target = best;
+      // a prop being struck stays the target unless a mob came in
+      if (best && !(cur && cur.kind === 'prop' && best.kind === 'prop' && this.inStrike(cur, strike))) this.target = best;
     }
 
     // facing
@@ -764,7 +770,7 @@ export class Game {
     // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
     // up to 1 m further for facing, and swinging there was a whiff into thin air.
     const t = this.target;
-    const inReach = !!t && t.pos.distanceTo(this.hero.position) - t.radius <= w.range + (w.ahead ?? 0) + 0.35;
+    const inReach = !!t && this.inStrike(t, w.range + (w.ahead ?? 0));
     if (inReach && h.atkCd <= 0) {
       const chained = w.cycle || (h.lastSwingHit && this.time - h.lastSwing <= period + combo.window);
       if (w.assassin) this.lunge(t!, w.assassin.dash);
@@ -798,13 +804,19 @@ export class Game {
     return { dmg: Math.max(1, Math.round(dmg)), tier };
   }
 
+  /** The unit's edge is within the strike distance (any direction). */
+  private inStrike(u: Unit, range: number) {
+    const p = this.hero.position;
+    return Math.hypot(u.pos.x - p.x, u.pos.z - p.z) - u.radius <= range + STRIKE_PAD;
+  }
+
   /** `ahead`: the shape is centred that far in front of the hero; `yaw`: strike direction (default: facing). */
   private inShape(pos: THREE.Vector3, radius: number, shape: 'arc' | 'circle', arc: number, range: number, ahead = 0, yaw = this.hero.facing) {
     const p = this.hero.position;
     const dx = pos.x - p.x - Math.sin(yaw) * ahead;
     const dz = pos.z - p.z - Math.cos(yaw) * ahead;
     const d = Math.hypot(dx, dz);
-    if (d - radius > range + 0.35) return false;
+    if (d - radius > range + STRIKE_PAD) return false;
     if (shape === 'circle' || d < 0.6) return true;
     let a = Math.atan2(dx, dz) - yaw;
     a = Math.atan2(Math.sin(a), Math.cos(a));
@@ -870,7 +882,7 @@ export class Game {
       hits++;
       if (u instanceof Prop) {
         const tier = u.def.resist[w.type] ?? 'normal';
-        this.hitProp(u, (fin ? 3 : 1) * RESIST_MULT[tier]);
+        this.hitProp(u, (fin ? 3 : 1) * RESIST_MULT[tier], tier);
         continue;
       }
       const m = u as Mob;
@@ -1073,7 +1085,11 @@ export class Game {
         const last = o.last.get(u) ?? -99;
         if (this.time - last < o.rehit) continue;
         o.last.set(u, this.time);
-        if (u instanceof Prop) { this.hitProp(u, RESIST_MULT[u.def.resist[WEAPONS[tag.item.def].type] ?? 'normal']); continue; }
+        if (u instanceof Prop) {
+          const tier = u.def.resist[WEAPONS[tag.item.def].type] ?? 'normal';
+          this.hitProp(u, RESIST_MULT[tier], tier);
+          continue;
+        }
         const m = u as Mob;
         const { dmg, tier } = this.damageFor(tag.item, m.def.resist, tag.mult);
         const f = this.fightOf(m);
@@ -1688,11 +1704,14 @@ export class Game {
   }
 
   // ---------- breakables ----------
-  private hitProp(b: Prop, dmg: number) {
+  private hitProp(b: Prop, dmg: number, tier: string) {
     b.hp = +(b.hp - dmg).toFixed(2);
     b.shake = 0.2;
     b.flash = 0.1;
     sfx.hit();
+    // hits count in whole blows: -1, -0.5 against stone, -3 for a finisher
+    const cls = tier === 'weak' ? 'dmg weak' : tier === 'resist' || tier === 'immune' ? 'dmg resist' : 'dmg';
+    this.fx.spawn(this.unitTextAt(b), `-${+dmg.toFixed(1)}`, cls, 0.8, { lift: b.uiEl.offsetHeight });
     this.particles.burst(v1.copy(b.pos).setY(0.7), b.def.color, 3, 0.1, 3, 0.4);
     if (b.hp > 0) return;
     b.broken = true;

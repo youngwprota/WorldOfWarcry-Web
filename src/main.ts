@@ -29,6 +29,18 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.domElement.className = 'game';
 app.prepend(renderer.domElement);
+// three.js stops the loop on context loss and restarts it on restore. If the browser never gives
+// the context back (GPU reset, too many contexts), the world would stay blank: save and reload.
+let ctxLostTimer = 0;
+renderer.domElement.addEventListener('webglcontextlost', () => {
+  console.warn('WebGL context lost');
+  clearTimeout(ctxLostTimer);
+  ctxLostTimer = window.setTimeout(() => { game?.persist(); location.reload(); }, 3000);
+});
+renderer.domElement.addEventListener('webglcontextrestored', () => {
+  console.warn('WebGL context restored');
+  clearTimeout(ctxLostTimer);
+});
 const input = new Input(app);
 const labels = document.getElementById('labels')!;
 
