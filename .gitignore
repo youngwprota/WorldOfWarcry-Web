@@ -3,3 +3,5 @@ dist/
 .vite/
 .claude/
 .DS_Store
+AGENTS.md
+CLAUDE.md
