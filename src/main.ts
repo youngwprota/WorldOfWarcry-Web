@@ -6,7 +6,7 @@ import './grade';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { FACTIONS, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
+import { FACTIONS, FORGE3D, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
@@ -55,6 +55,9 @@ for (const w of Object.values(WEAPONS)) Object.values(w.model).forEach((m) => mo
 const creatures = new Set<string>();
 for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { (m.creature ? creatures : models).add(c); if (w) models.add(w); }
 for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
+// gacha forge scene (src/forge3d.ts): anvil and decor are cloned from here
+models.add('anvil_big');
+for (const [m] of FORGE3D.decor) models.add(m);
 ['orc_stone_big', 'orc_stone_mid', 'orc_stone_small', 'orc_log', 'orc_wood_pile_big', 'orc_tusk_standing', 'orc_skull',
   'undead_fence', 'undead_ruins_01', 'undead_ruins_02', 'undead_obelisk', 'undead_column_1', 'undead_big_bone',
   'undead_bones_remains', 'undead_lamp_post', 'campfire',
