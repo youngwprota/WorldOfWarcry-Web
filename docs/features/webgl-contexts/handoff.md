@@ -1,0 +1,19 @@
+# Handoff — Фикс: мир тёмный на телефоне (утечка WebGL-контекстов)
+Дописывать после каждого шага. Это переживает автокомпакт.
+
+## Сейчас
+Шаг: 1 готов · Дальше: шаг 2 — forceContextLoss в HeroPreview
+
+## Решения по ходу
+- Шаг 1 воспроизведён: headless Chrome (swiftshader) + CDP-скрипт ctx.mjs в scratchpad, только инвентарь
+  (`__game().onOpenBag()` / keydown Escape) — на 16-м открытии «Too many active WebGL contexts», главный контекст lost.
+  Горнило без ковки контекст не создаёт (Forge3D создаётся в gachaview.ts:89 при крафте).
+
+## Грабли и что не сработало
+
+## Важный контекст
+- Ветку fix/webgl-contexts создал агент от main (016bac5) по просьбе пользователя («в отдельной ветке»).
+- Скриншот: Android, youngwprota.github.io. HUD нормальный (color-scheme фикс работает), мир — сплошной
+  тёмно-синий фон, метки мобов и миникарта видны → потерян основной WebGL-контекст, не тёмная тема.
+- Новый WebGLRenderer на каждое открытие: inventory.ts:169 (HeroPreview), gachaview.ts:89 → forge3d.ts:139.
+- Цикл игры — renderer.setAnimationLoop в main.ts run(); three.js останавливает его при потере контекста.
