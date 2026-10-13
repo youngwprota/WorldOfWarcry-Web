@@ -1,4 +1,4 @@
-import { FACTIONS, HERO, type AntiKite, type FactionId } from './config';
+import { FACTIONS, HERO, type FactionId } from './config';
 import { makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
 
 /** Number scale of the save: 2 = hero HP ×10, regen in HP/s, 6 item qualities, item level = copies. */
@@ -8,7 +8,6 @@ export interface SaveData {
   v: 1;
   faction: FactionId;
   stats: { power: number; hp: number; regen: number; speed: number };
-  gold: number;
   weapons: [Item | null, Item | null];
   active: 0 | 1;
   equip: Partial<Record<ArmorSlot, Item>>;
@@ -28,21 +27,10 @@ export interface SaveData {
   kills: number;
   /** Seconds of actual play (balance log). */
   playTime?: number;
-  /** Hero level 1..100 and XP towards the next level (src/talents.ts). */
-  level: number;
-  xp: number;
-  /** Talent id → rank. */
-  talents: Record<string, number>;
-  /** Two equipped auto-cast skills (ids of learned actives). */
-  skills: (string | null)[];
-  /** Number of talent resets done (the first one is free). */
-  resets: number;
   muted: boolean;
   lowGfx?: boolean;
   /** Fog of war: explored location ids, comma-separated (src/fog.ts). */
   fog?: string;
-  /** Debug: anti-kite variant (ANTI_KITE in config). */
-  antiKite?: AntiKite;
 }
 
 const KEY = 'warcry-save-v1';
@@ -52,7 +40,6 @@ export function newSave(faction: FactionId): SaveData {
     v: 1,
     faction,
     stats: { power: HERO.power, hp: HERO.hp, regen: HERO.regen, speed: HERO.speed },
-    gold: 0,
     weapons: [makeItem('weapon', FACTIONS[faction].startWeapon, 0, 1), null],
     active: 0,
     equip: {},
@@ -61,11 +48,6 @@ export function newSave(faction: FactionId): SaveData {
     scale: SCALE,
     bosses: {},
     kills: 0,
-    level: 1,
-    xp: 0,
-    talents: {},
-    skills: [null, null],
-    resets: 0,
     muted: false,
   };
 }
@@ -81,11 +63,8 @@ export function loadSave(): SaveData | null {
     d.equip ??= {};
     for (const k of Object.keys(d.equip) as ArmorSlot[]) { const it = d.equip[k]; if (it) d.equip[k] = normalizeItem(it); }
     d.bag = (d.bag ?? []).map(normalizeItem);
-    d.level ??= 1;
-    d.xp ??= 0;
-    d.talents ??= {};
-    d.skills ??= [null, null];
-    d.resets ??= 0;
+    // gold, hero level, XP and talents are gone from the game
+    for (const k of ['gold', 'level', 'xp', 'talents', 'skills', 'resets']) delete (d as unknown as Record<string, unknown>)[k];
     if (d.barrierOpen) { d.gates = [...new Set([...(d.gates ?? []), 'forest-cemetery'])]; delete d.barrierOpen; }
     if ((d.scale ?? 1) < 2) migrateScale(d);
     if ((d.scale ?? 1) < 3) migrateInts(d);

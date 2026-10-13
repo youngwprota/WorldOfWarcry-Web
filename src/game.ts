@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { Character } from './character';
+import { Creature } from './creature';
 import {
-  ANTI_KITE, COMBOS, FACTIONS, HERO, LEASH, MOBS, ORBS, depthMul, fmtOrb, RARITY, RESIST_MULT, WEAPONS,
-  type AntiKite, type DamageType, type MobDef, type OrbKind, type ResistTier, type ZoneDef,
+  COMBOS, FACTIONS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  type DamageType, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
-  ARMOR, BAG_SIZE, armorStats, copyGain, dropIconId, dropItem, itemName, sameItem, scrapValue, weaponDamage,
+  ARMOR, BAG_SIZE, armorStats, copyGain, dropIconId, dropItem, itemName, sameItem, weaponDamage,
   type ArmorSlot, type BonusStat, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
@@ -17,11 +18,11 @@ import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } 
 import { UI, type MapMark } from './ui';
 import { icon, resistIcons, rewardChips } from './icons';
 import { heroDeaths, logFight, logSnap } from './balancelog';
-import {
-  MAX_LEVEL, RESIST_CAP, SKILL_SLOTS, STAT_CAP, TIER_LEVELS, TREES, canLearn, tierOf, tierOpen, freePoints, passiveTotals, rankValues, resetCost, spentPoints,
-  talent, xpToNext,
-  type ActiveDef, type TalentStat,
-} from './talents';
+
+/** Debris colour of hits and kills: bone dust for skeletons and spirits, blood for the rest. */
+const bloodColor = (m: Mob) => m.def.id.startsWith('skel') || m.def.id === 'ghost' || m.def.id === 'death' ? 0xd8d4c8 : 0xc0392b;
+/** White-yellow sparks of a non-lethal hit (blood is for the kill). */
+const HIT_SPARK = 0xfff3a8;
 
 /** Running counters of one fight with a mob (balance log). */
 interface FightStat { t0: number; dealt: number; taken: number; hits: number; combos: number; slams: number; slamHits: number; hpStart: number }
@@ -73,10 +74,11 @@ abstract class Unit {
   chargesUsed = 0;
   /** Dropped on death. */
   reward: Partial<Record<OrbKind, number>> = {};
-  gold: [number, number] = [0, 0];
   /** Above the unit: reward chips, weakness/resistance icons, HP bar. */
   uiEl: HTMLDivElement;
   hpFill: HTMLDivElement;
+  /** HP number on the bar (mobs; props have none). */
+  hpText: HTMLSpanElement | null;
   /** Shown at the spawn point while the unit is dead. */
   respawnEl: HTMLDivElement;
   private lastSec = -1;
@@ -85,6 +87,7 @@ abstract class Unit {
     this.uiEl.className = uiCls;
     this.uiEl.innerHTML = uiHtml;
     this.hpFill = this.uiEl.querySelector('.mobhp > div')!;
+    this.hpText = this.uiEl.querySelector('.mobhp span');
     layer.appendChild(this.uiEl);
     this.respawnEl = respawnLoader(layer, loaderCls);
   }
@@ -92,7 +95,6 @@ abstract class Unit {
   abstract get pos(): THREE.Vector3;
   abstract readonly radius: number;
   abstract get visible(): boolean;
-  abstract get xp(): number;
   /** Special units get their own map mark instead of a red dot (see Game.mapMarks). */
   get mark(): 'boss' | 'mini' | 'elite' | null { return null; }
   /** Can be targeted and hit right now. */
@@ -116,7 +118,7 @@ abstract class Unit {
 
 class Mob extends Unit {
   readonly kind = 'mob';
-  ch: Character;
+  ch: Character | Creature;
   state: 'idle' | 'chase' | 'return' | 'dead' = 'idle';
   atkCd = 0;
   impact = -1;
@@ -125,6 +127,13 @@ class Mob extends Unit {
   wanderT = Math.random() * 3;
   wander = new THREE.Vector3();
   knock = new THREE.Vector3();
+  /** Knockback applied once the death freeze (KILL_FX) is over. */
+  deathKnock = new THREE.Vector3();
+  /** Orbs and items wait for the death clip to finish. */
+  rewardsDue = false;
+  loot: Item[] = [];
+  /** deadT when the rewards were paid; the corpse sinks after that. */
+  paidAt = 0;
   radius: number;
   /** Spawned by a prop (grave): no respawn, removed after death. */
   temp = false;
@@ -133,15 +142,15 @@ class Mob extends Unit {
   rise = 0;
   // boss
   special = 4;
-  /** Game time of the last hit taken (boss regen). */
+  /** Game time of the last hit taken (regen waits MOB_REGEN_DELAY after it). */
   hurtAt = -99;
   fight: FightStat | null = null;
   casting = 0;
   phase2 = false;
   awake = true;
-  /** Damage type of the mob's hits (its location's, config ZONE_FOES); talent resists use it. */
+  /** Damage type of the mob's hits (its location's, config ZONE_FOES); the hero's armour resists it. */
   dmgType: DamageType;
-  /** Depth-scaled stats (DEPTH in config): use these instead of def.dmg / def.reward / def.gold. */
+  /** Depth-scaled stats (DEPTH in config): use these instead of def.dmg / def.reward. */
   dmg: number;
   constructor(public def: MobDef, spawn: THREE.Vector3, faction: 'human' | 'orc', layer: HTMLElement,
     mul = { hp: 1, dmg: 1, reward: 1, scale: 1 }) {
@@ -161,34 +170,36 @@ class Mob extends Unit {
     super(spawn, layer, named ? 'mobui boss' : 'mobui',
       title +
       // a micro-boss shows its permanent bonus (+500 HP) in the stat chips instead of its orbs
-      `<div class="rws">${def.bonus ? rewardChips({ reward: def.bonus }, true) : rewardChips({ reward })}</div><div class="ris">${resistIcons(def, named ? 22 : 19)}</div>` +
-      `<div class="mobhp"><div></div>${named ? '<span></span>' : ''}</div>`,
+      `<div class="mside"><div class="rws">${def.bonus ? rewardChips({ reward: def.bonus }, true) : rewardChips({ reward })}</div><div class="ris">${resistIcons(def, named ? 27 : 24)}</div></div>` +
+      '<div class="mobhp"><div></div><span></span></div>',
       'respawn' + (named ? ' boss' : ''));
     this.reward = reward;
     const [model, weapon] = def.model[faction];
     this.dmgType = def.attack;
     const scale = def.scale * mul.scale;
-    this.ch = new Character(model, weapon, scale);
+    this.ch = def.creature ? new Creature(model, scale) : new Character(model, weapon, scale);
     this.dmg = def.dmg * mul.dmg;
-    this.gold = [Math.round(def.gold[0] * mul.reward), Math.round(def.gold[1] * mul.reward)];
     this.ch.position.copy(spawn);
     this.ch.facing = Math.random() * Math.PI * 2;
     this.maxHp = this.hp = Math.round(def.hp * mul.hp);
-    this.radius = 0.45 * scale;
+    this.radius = (def.creature ? 0.7 : 0.45) * scale;
     this.wander.copy(spawn);
   }
   get alive() { return this.state !== 'dead'; }
   get pos() { return this.ch.position; }
   get visible() { return this.ch.root.visible; }
-  get xp() { return this.def.xp; }
   get boss() { return !!this.def.boss; }
   get mark() { return this.def.boss ? 'boss' as const : this.def.rank ?? null; }
   get hittable() { return this.alive && this.awake && this.rise <= 0; }
   get barY() { return 2.15 * this.def.scale * this.ch.root.scale.x; }
   get barRange() { return this.def.boss || this.def.rank ? 24 : 16; }
-  get loaderReady() { return !this.temp && (this.deadT > 2.5 || this.boss); }
+  get loaderReady() { return !this.temp && ((!this.rewardsDue && this.deadT - this.paidAt > 2.2) || this.boss); }
   respawn() {
     this.fight = null;
+    this.rewardsDue = false;
+    this.loot = [];
+    this.knock.set(0, 0, 0);
+    this.deathKnock.set(0, 0, 0);
     this.state = 'idle';
     this.hp = this.maxHp;
     this.phase2 = false;
@@ -203,6 +214,7 @@ class Mob extends Unit {
     this.state = 'dead';
     this.ch.root.visible = false;
     this.deadT = 99;
+    this.rewardsDue = false;
   }
 }
 
@@ -217,11 +229,10 @@ class Prop extends Unit {
   constructor(spot: SpawnPoint, layer: HTMLElement) {
     const def = BREAKABLES[spot.kind];
     super(new THREE.Vector3(spot.x, 0, spot.z), layer, 'mobui prop',
-      `<div class="rws">${rewardChips(def)}</div><div class="ris">${resistIcons(def, 16)}</div><div class="mobhp"><div></div></div>`,
+      `<div class="mside"><div class="rws">${rewardChips(def)}</div><div class="ris">${resistIcons(def, 24)}</div></div><div class="mobhp"><div></div><span></span></div>`,
       'respawn prop');
     this.def = def;
     this.reward = def.reward;
-    this.gold = def.gold;
     this.obj = makeBreakable(spot.kind);
     this.obj.position.set(spot.x, 0, spot.z);
     this.obj.rotation.y = spot.rot;
@@ -235,7 +246,6 @@ class Prop extends Unit {
   get pos() { return this.obj.position; }
   get radius() { return this.def.r; }
   get visible() { return this.obj.visible; }
-  get xp() { return XP_BREAKABLE; }
   get barY() { return 1.25 * this.def.scale + 0.3; }
   get barRange() { return 9; }
   respawn() {
@@ -270,18 +280,18 @@ export class Game {
   private combo = 0;
   private comboShown = -1;
   private lastSwing = -99;
+  /** Shove from mob hits (MobDef.push), decays like mob knockback. */
+  private heroKnock = new THREE.Vector3();
   private lastSwingHit = false;
   private finisher = false;
   newItems = 0;
   onOpenCharacter: () => void = () => {};
   onOpenBag: () => void = () => {};
   onOpenMap: () => void = () => {};
-  onOpenTalents: () => void = () => {};
   private time = 0;
   private hp: number;
   private shield = 0;
   private lastHurt = -99;
-  private lastFight = -99;
   private atkCd = 0;
   private impact = -1;
   private target: Unit | null = null;
@@ -294,19 +304,6 @@ export class Game {
   private hudT = 0;
   paused = false;
   private moveDir = new THREE.Vector3();
-  // ---------- talents ----------
-  /** Passive talent totals, recomputed when ranks change. */
-  private tal: Partial<Record<TalentStat, number>> = {};
-  /** Timed effects from auto-cast skills. */
-  private buffs: { id: string; name: string; until: number; power: number; atkSpeed: number; speed: number; lifesteal: number }[] = [];
-  /** Skill shield (absorbs damage before the human racial shield). */
-  private absorb = 0;
-  private absorbUntil = 0;
-  private invulnUntil = 0;
-  /** Game time when each skill is ready again. */
-  private skillReady: Record<string, number> = {};
-  private swings = 0;
-  onLevelUp: () => void = () => {};
   /** Player HP (+ human shield) floating above the hero's head. */
   private heroBar!: { el: HTMLDivElement; fill: HTMLDivElement; shield: HTMLDivElement; text: HTMLSpanElement };
 
@@ -342,7 +339,6 @@ export class Game {
     this.hero.position.set(SPAWN.x, 0, SPAWN.z);
     this.hero.facing = Math.PI;
     this.scene.add(this.hero.root);
-    this.refreshTalents();
     this.hp = this.maxHp;
     this.shield = this.shieldMax;
 
@@ -378,7 +374,7 @@ export class Game {
     this.particles = new Particles(this.scene);
     this.telegraphs = new Telegraphs(this.scene);
     this.pickups = new Pickups(this.scene);
-    this.pickups.onCollect = (k, a, p, it) => this.collect(k, a, p, it);
+    this.pickups.onCollect = (k, it) => this.collect(k, it);
     this.waves = new Shockwaves(this.scene);
     this.camPos.copy(this.hero.position);
     this.ui.bindWeapons(() => this.swapWeapon());
@@ -417,36 +413,23 @@ export class Game {
     }
     return g;
   }
-  /** Passive talent stat (capped where needed). */
-  t(k: TalentStat) { return Math.min(this.tal[k] ?? 0, STAT_CAP[k] ?? Infinity); }
-  private buffSum(k: 'power' | 'atkSpeed' | 'speed' | 'lifesteal') { return this.buffs.reduce((a, b) => a + b[k], 0); }
-  refreshTalents() {
-    const hpFrac = this.hp ? this.hp / this.maxHp : 1;
-    this.tal = passiveTotals(this.save);
-    // Unequip skills that are no longer learned (after a reset).
-    this.save.skills = this.save.skills.map((id) => (id && (this.save.talents[id] ?? 0) > 0 ? id : null));
-    if (this.hp) this.hp = Math.min(this.maxHp, hpFrac * this.maxHp);
-  }
   get power() { return this.save.stats.power + this.gear().power; }
-  get defense() { return this.gear().defense + this.t('defense'); }
-  get maxHp() { return Math.round((this.save.stats.hp + this.gear().hp) * (this.faction === 'human' ? 1.1 : 1) * (1 + this.t('hpPct') / 100)); }
-  get shieldMax() { return this.faction === 'human' ? Math.round(this.maxHp * (0.15 + this.t('shieldPct') / 100)) : 0; }
-  get regen() { return Math.round(Math.min(HERO.regenCap, (this.save.stats.regen + this.gear().regen) * (this.faction === 'human' ? 1.1 : 1)) * (1 + this.t('healPct') / 100)); }
+  get defense() { return this.gear().defense; }
+  get maxHp() { return Math.round((this.save.stats.hp + this.gear().hp) * (this.faction === 'human' ? 1.1 : 1)); }
+  get shieldMax() { return this.faction === 'human' ? Math.round(this.maxHp * 0.15) : 0; }
+  get regen() { return Math.round(Math.min(HERO.regenCap, (this.save.stats.regen + this.gear().regen) * (this.faction === 'human' ? 1.1 : 1))); }
   /** Speed stat in whole points (HERO.speedPerMs per m/s). */
   get speedStat() {
-    return Math.round(Math.min(HERO.speedCap, this.save.stats.speed + this.gear().speed) * (this.faction === 'orc' ? 1.05 : 1) *
-      (1 + (this.t('speedPct') + this.buffSum('speed')) / 100));
+    return Math.round(Math.min(HERO.speedCap, this.save.stats.speed + this.gear().speed) * (this.faction === 'orc' ? 1.05 : 1));
   }
-  /** Running speed, m/s. */
-  get speed() { return this.speedStat / HERO.speedPerMs; }
-  /** Attack speed multiplier from talents and buffs. */
-  get haste() { return 1 + (this.t('atkSpeed') + this.buffSum('atkSpeed')) / 100; }
-  get bloodlustMax() { return 0.3 + this.t('bloodlust') / 100; }
-  get lifesteal() { return Math.min(STAT_CAP.lifesteal!, this.t('lifesteal') + this.buffSum('lifesteal')); }
+  /** Running speed, m/s (HERO.speedMul applies on top: 100 points = 4 m/s). */
+  get speed() { return (this.speedStat / HERO.speedPerMs) * HERO.speedMul; }
+  /** Orc racial: up to +30% damage as HP drops. */
+  get bloodlustMax() { return 0.3; }
   get weaponItem(): Item { return this.save.weapons[this.save.active] ?? this.save.weapons[0]!; }
   get weapon() { return WEAPONS[this.weaponItem.def]; }
   powerMult() {
-    let m = (1 + this.power / 100) * (1 + (this.t('powerPct') + this.buffSum('power')) / 100);
+    let m = 1 + this.power / 100;
     if (this.faction === 'orc') m *= 1.1 * (1 + this.bloodlustMax * (1 - this.hp / this.maxHp));
     return m;
   }
@@ -454,8 +437,7 @@ export class Game {
   heroDps(type?: DamageType, resist?: Partial<Record<DamageType, string>>) {
     const w = this.weapon;
     const r = resist && type ? RESIST_MULT[(resist[type] as 'weak') ?? 'normal'] : 1;
-    const crit = 1 + this.t('crit') / 100;
-    return this.itemDamage(this.weaponItem) * this.powerMult() * w.aps * this.haste * r * crit;
+    return this.itemDamage(this.weaponItem) * this.powerMult() * w.aps * r;
   }
 
   private equipVisual() {
@@ -496,7 +478,6 @@ export class Game {
     if (this.input.pressed('KeyI') || this.input.pressed('KeyC')) { this.onOpenCharacter(); return; }
     if (this.input.pressed('KeyB')) { this.onOpenBag(); return; }
     if (this.input.pressed('KeyM')) { this.onOpenMap(); return; }
-    if (this.input.pressed('KeyT')) { this.onOpenTalents(); return; }
     this.updateHero(dt);
     this.updateMobs(dt);
     this.updateProps(dt);
@@ -561,8 +542,7 @@ export class Game {
     hb.el.classList.toggle('dead', this.dead);
     const total = this.maxHp + this.shieldMax;
     hb.fill.style.width = `${(this.hp / this.maxHp) * 100}%`;
-    const absorb = this.time < this.absorbUntil ? this.absorb : 0;
-    hb.shield.style.width = `${Math.min(1, (this.shield + absorb) / Math.max(1, total)) * 100}%`;
+    hb.shield.style.width = `${Math.min(1, this.shield / Math.max(1, total)) * 100}%`;
     hb.text.textContent = `${Math.ceil(this.hp)}`;
     hb.el.classList.toggle('low', this.hp < this.maxHp * 0.3);
     this.updateMobBars(w, h);
@@ -583,9 +563,12 @@ export class Game {
     this.moveDir.set(ix, 0, iy);
     const p = ch.position;
     if (moving) {
-      const slowed = this.antiKite === 'slow' && this.time - this.lastSwing < ANTI_KITE.slowTime;
-      p.addScaledVector(this.moveDir, this.speed * (slowed ? ANTI_KITE.slowMul : 1) * dt);
+      p.addScaledVector(this.moveDir, this.speed * dt);
       ch.walkRate = Math.min(2.4, (this.speed * this.moveDir.length()) / 2.1);
+    }
+    if (this.heroKnock.lengthSq() > 0.001) {
+      p.addScaledVector(this.heroKnock, dt);
+      this.heroKnock.multiplyScalar(Math.max(0, 1 - dt * 9));
     }
     // soft push from living mobs
     for (const m of this.mobs) {
@@ -633,7 +616,7 @@ export class Game {
 
     // auto attack while moving
     this.atkCd -= dt;
-    const period = 1 / (w.aps * this.haste);
+    const period = 1 / w.aps;
     const combo = COMBOS[this.weaponItem.def];
     // A pause or a whiff breaks the chain (GDD: combo = N uninterrupted attacks).
     if (this.combo > 0 && this.impact < 0 && this.time - this.lastSwing > period + combo.window) this.combo = 0;
@@ -656,7 +639,7 @@ export class Game {
     }
     if (this.comboShown !== this.combo) {
       this.comboShown = this.combo;
-      this.ui.combo(this.combo, combo.hits, combo.name);
+      this.ui.combo(this.combo, combo.hits);
     }
 
     // regen; much faster in the camp
@@ -664,7 +647,6 @@ export class Game {
     if (inCamp(p.x, p.z)) rate += (HERO.campRegen / 100) * this.maxHp;
     this.hp = Math.min(this.maxHp, this.hp + rate * dt);
     if (this.shieldMax > 0 && this.time - this.lastHurt > 6) this.shield = this.shieldMax;
-    this.updateSkills();
 
     // zone + interactions
     const zone = this.world.zoneAt(p.x, p.z);
@@ -676,12 +658,10 @@ export class Game {
     ch.update(dt, moving);
   }
 
-  private damageFor(type: DamageType, resist: MobDef['resist'], mult = 1, boss = false) {
+  private damageFor(type: DamageType, resist: MobDef['resist'], mult = 1) {
     const tier = resist[type] ?? 'normal';
-    const crit = Math.random() * 100 < this.t('crit');
-    const dmg = this.itemDamage(this.weaponItem) * this.powerMult() * RESIST_MULT[tier] * mult * (0.9 + Math.random() * 0.2) *
-      (crit ? 2 : 1) * (boss ? 1 + this.t('bossDmg') / 100 : 1);
-    return { dmg: Math.max(1, Math.round(dmg)), tier, crit };
+    const dmg = this.itemDamage(this.weaponItem) * this.powerMult() * RESIST_MULT[tier] * mult * (0.9 + Math.random() * 0.2);
+    return { dmg: Math.max(1, Math.round(dmg)), tier };
   }
 
   private inShape(pos: THREE.Vector3, radius: number, shape: 'arc' | 'circle', arc: number, range: number) {
@@ -711,15 +691,15 @@ export class Game {
       hits++;
       if (u instanceof Prop) {
         const tier = u.def.resist[w.type] ?? 'normal';
-        this.hitProp(u, (fin ? 3 : 1) * RESIST_MULT[tier], tier);
+        this.hitProp(u, (fin ? 3 : 1) * RESIST_MULT[tier]);
         continue;
       }
       const m = u as Mob;
-      const { dmg, tier, crit } = this.damageFor(w.type, m.def.resist, fin ? fin.mult * (1 + this.t('comboPct') / 100) : 1, !!m.def.boss);
+      const { dmg, tier } = this.damageFor(w.type, m.def.resist, fin ? fin.mult : 1);
       const f = this.fightOf(m);
       f.hits++;
       if (fin) f.combos++;
-      this.damageMob(m, dmg, tier, fin ? fin.knock : 3.5, crit);
+      this.damageMob(m, dmg, tier, fin ? fin.knock : 3.5);
       if (m.alive && !m.def.boss) {
         if (fin?.stun) m.stun = Math.max(m.stun, fin.stun);
         else if (w.stun && Math.random() < w.stun) m.stun = 0.9;
@@ -735,56 +715,65 @@ export class Game {
       this.waves.add(this.hero.position, range + 0.5, fin.color);
       if (fin.spin) this.hero.spin(0.35);
       this.shake = Math.max(this.shake, 0.35);
-      this.fx.spawn(v1.copy(this.hero.position).setY(2.6), `${fin.name}!`, 'combo', 0.9);
       sfx.combo();
     }
     this.lastSwingHit = hits > 0;
     if (!hits) this.combo = 0;
-    if (hits) {
-      this.lastFight = this.time;
-      this.swings++;
-      this.fireSkills('everyHit');
-    }
   }
 
-  private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5, crit = false) {
+  private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5) {
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
     m.hp -= dmg;
     m.hurtAt = this.time;
-    if (this.lifesteal > 0) this.hp = Math.min(this.maxHp, this.hp + dmg * this.lifesteal / 100);
     m.ch.hit();
     m.state = m.state === 'return' ? 'return' : 'chase';
     if (!m.def.boss) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
-    const head = v1.copy(m.pos).setY(1.9 * m.def.scale);
-    if (crit) { this.fx.spawn(head, `${dmg}<small>Крит!</small>`, 'dmg crit', 0.9, { html: true }); sfx.hit(true); }
-    else if (tier === 'weak') { this.fx.spawn(head, `${dmg}<small>${tierLabel('weak')}</small>`, 'dmg weak', 0.8, { html: true }); sfx.hit(true); }
-    else if (tier === 'resist' || tier === 'immune') {
-      this.fx.spawn(head, `${dmg}<small>${tierLabel(tier)}</small>`, 'dmg resist', 0.8, { html: true });
-      sfx.resist();
-    } else { this.fx.spawn(head, String(dmg), 'dmg'); sfx.hit(); }
-    this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), m.def.id.startsWith('skel') || m.def.id === 'ghost' || m.def.id === 'death' ? 0xd8d4c8 : 0xc0392b, 4, 0.08, 4, 0.45);
+    const head = this.unitTextAt(m);
+    const lift = m.uiEl.offsetHeight;
+    if (tier === 'weak') { this.fx.spawn(head, `-${dmg}`, 'dmg weak', 0.8, { lift }); sfx.hit(true); }
+    else if (tier === 'resist' || tier === 'immune') { this.fx.spawn(head, `-${dmg}`, 'dmg resist', 0.8, { lift }); sfx.resist(); }
+    else { this.fx.spawn(head, `-${dmg}`, 'dmg', 0.8, { lift }); sfx.hit(); }
+    this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), HIT_SPARK, 2, 0.06, 5, 0.3);
     if (m.hp <= 0) this.killMob(m);
   }
+
+  /** World point the over-head block (HP bar + chips) is anchored to; damage numbers start there plus its height. */
+  private unitTextAt(u: Unit, out = v1) { return out.copy(u.pos).setY(u.barY); }
+
+  /** Lethal hit: death clip, blood, shake and the knockback now; orbs and items in grantKillRewards. */
 
   private killMob(m: Mob) {
     m.state = 'dead';
     m.hp = 0;
     m.deadT = 0;
     m.ch.die();
+    m.deathKnock.copy(m.knock).multiplyScalar(KILL_FX.knockMul);
+    m.knock.set(0, 0, 0);
+    this.shake = Math.max(this.shake, KILL_FX.shake);
+    this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), bloodColor(m), KILL_FX.blood, 0.12, 6, 0.7);
     this.save.kills++;
     this.endFight(m, 'kill');
     const d = m.def;
-    // Bosses give double XP on the first kill.
-    this.unitDied(m, d.boss && !this.save.bosses[d.id]?.firstKill ? 2 : 1);
-    if (this.t('killHeal') > 0) this.hp = Math.min(this.maxHp, this.hp + this.maxHp * this.t('killHeal') / 100);
-    this.fireSkills('kill');
-    if (d.bonus) this.grantBonus(m);
+    m.loot = [];
+    m.rewardsDue = true;
+    this.unitDied(m, false);
     if (d.boss) this.killBoss(m);
     else {
       // elites: their own item on every kill (spawner charges limit the farming)
-      if (d.drop) this.pickups.spawnItem(m.pos, dropItem(d.drop));
+      if (d.drop) m.loot.push(dropItem(d.drop));
       if (m.temp) m.respawnAt = Infinity;
     }
+  }
+
+  /** Once the death clip has finished: stat orbs, items and a micro-boss's bonus. */
+  private grantKillRewards(m: Mob) {
+    m.rewardsDue = false;
+    m.paidAt = m.deadT;
+    this.payRewards(m);
+    for (const it of m.loot) this.pickups.spawnItem(m.pos, it);
+    m.loot = [];
+    if (m.def.bonus) this.grantBonus(m);
+    if (m.def.boss) this.persist();
   }
 
   /** Micro-boss kill: permanent stats straight onto the hero. */
@@ -806,18 +795,21 @@ export class Game {
   }
 
   /**
-   * Common death of a unit (mob killed / prop broken): rewards, XP and the spawner's next charge.
+   * Common death of a unit (mob killed / prop broken): rewards and the spawner's next charge.
    * Bosses and grave-risen mobs have no spawner: their respawn is set by the caller.
    */
-  private unitDied(u: Unit, xpMul = 1) {
+  private unitDied(u: Unit, pay = true) {
     u.uiEl.classList.remove('show');
     if (this.target === u) this.target = null;
-    this.addXp(u.xp * xpMul, u.pos);
-    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(u.pos, k);
-    this.dropGold(u.pos, u.gold);
+    if (pay) this.payRewards(u);
     if (!u.spawner) return;
     [u.respawnTotal, u.chargesUsed] = this.useCharge(u.spawner);
     u.respawnAt = this.time + u.respawnTotal;
+  }
+
+  /** Stat orbs of a dead unit (a mob's wait for its death clip, see grantKillRewards). */
+  private payRewards(u: Unit) {
+    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(u.pos, k);
   }
 
   /** Spawners: a dead unit comes back when its charge's cooldown ends (the hero's position does not matter). */
@@ -849,7 +841,7 @@ export class Game {
     this.shake = 0.6;
     sfx.levelUp();
     // its own item on every kill (copies level it up)
-    if (d.drop) this.pickups.spawnItem(m.pos, dropItem(d.drop));
+    if (d.drop) m.loot.push(dropItem(d.drop));
     if (!rec.firstKill) {
       rec.firstKill = true;
       // The main boss opens the way into the next location(s).
@@ -871,30 +863,10 @@ export class Game {
     return true;
   }
 
-  private dropGold(at: THREE.Vector3, range: [number, number]) {
-    const g = range[0] + Math.floor(Math.random() * (range[1] - range[0] + 1));
-    if (g <= 0) return;
-    const coins = Math.min(g, 8);
-    const per = Math.floor(g / coins);
-    let rest = g - per * coins;
-    for (let i = 0; i < coins; i++) {
-      this.pickups.spawn(at, 'gold', per + (rest > 0 ? 1 : 0));
-      rest--;
-    }
-  }
-
-  private collect(kind: PickupKind, amount: number, pos: THREE.Vector3, item?: Item) {
+  private collect(kind: PickupKind, item?: Item) {
     const s = this.save.stats;
-    const head = v1.copy(this.hero.position).setY(2.1);
     if (kind === 'item' && item) {
       this.lootItem(item);
-      return;
-    }
-    if (kind === 'gold') {
-      amount = Math.round(amount * (1 + this.t('goldPct') / 100));
-      this.save.gold += amount;
-      sfx.coin();
-      this.fx.spawn(head, `+${amount}`, 'gold', 0.6);
       return;
     }
     sfx.orb();
@@ -904,10 +876,8 @@ export class Game {
       case 'regen': s.regen = Math.min(HERO.regenCap, s.regen + ORBS.regen.value); break;
       case 'speed': s.speed = Math.min(HERO.speedCap, s.speed + ORBS.speed.value); break;
     }
-    const o = ORBS[kind as OrbKind];
-    this.fx.spawn(head, `${fmtOrb(kind as OrbKind)} ${o.label}`, 'orb', 0.7, { color: o.css });
+    this.ui.gain(kind as OrbKind, this.time);
     this.ui.popStat(kind as OrbKind);
-    void pos;
   }
 
   // ---------- mobs ----------
@@ -930,16 +900,28 @@ export class Game {
       m.awake = dHero < 40;
       m.ch.root.visible = m.state !== 'dead' ? dHero < 34 : m.ch.root.visible && dHero < 34;
       if (m.state === 'dead') {
+        const holdEnd = KILL_FX.holdAt + KILL_FX.freeze;
+        const held = m.deadT < holdEnd;
         m.deadT += dt;
-        m.ch.update(dt, false, m.deadT < 3 && dHero < 34);
-        if (m.deadT > 2.2) m.ch.position.y = -(m.deadT - 2.2) * 0.8;
-        if (m.deadT > 4) m.ch.root.visible = false;
-        if (m.temp && m.deadT > 4.5) { this.removeMob(m); removed = true; }
+        if (held && m.deadT >= holdEnd) m.knock.copy(m.deathKnock);
+        const holding = m.deadT > KILL_FX.holdAt && m.deadT < holdEnd;
+        m.ch.update(dt, false, !holding && m.rewardsDue && dHero < 34);
+        if (m.knock.lengthSq() > 0.001) {
+          m.pos.addScaledVector(m.knock, dt);
+          m.knock.multiplyScalar(Math.max(0, 1 - dt * 9));
+        }
+        // Off-screen corpses do not animate, so their clip never finishes: pay out right after the freeze.
+        if (m.rewardsDue && m.deadT >= holdEnd && (m.ch.deathDone || dHero >= 34)) this.grantKillRewards(m);
+        const gone = m.rewardsDue ? 0 : m.deadT - m.paidAt;
+        if (gone > 0.4) m.ch.position.y = -(gone - 0.4) * 0.8;
+        if (gone > 2.2) m.ch.root.visible = false;
+        if (m.temp && gone > 2.7) { this.removeMob(m); removed = true; }
         continue;
       }
       if (!m.awake) continue;
       const def = m.def;
       let moving = false;
+      if (m.hp < m.maxHp && this.time - m.hurtAt > MOB_REGEN_DELAY) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * def.regen * dt);
       if (m.stun > 0) {
         m.stun -= dt;
       } else if (m.casting > 0) {
@@ -968,16 +950,19 @@ export class Game {
             const reach = def.range + m.radius * 0.5 + HERO.radius;
             if (def.boss) {
               // A boss on your tail keeps you in combat: no out-of-combat regen while kiting.
-              this.lastFight = this.time;
               this.bossLogic(m, dt, dHero);
             }
             if (m.casting <= 0) {
-              if (dHero > reach * 0.85) moving = this.stepTo(m, hp, def.speed, dt);
+              const back = m.ch instanceof Creature ? m.ch.backstep() : 0;
+              if (back > 0) {
+                m.pos.x -= Math.sin(m.ch.facing) * back;
+                m.pos.z -= Math.cos(m.ch.facing) * back;
+              } else if (dHero > reach * 0.85) moving = this.stepTo(m, hp, def.speed, dt);
               m.ch.facing = turn(m.ch.facing, Math.atan2(hp.x - m.pos.x, hp.z - m.pos.z), dt * 8);
               m.atkCd -= dt;
               if (dHero < reach && m.atkCd <= 0 && m.impact < 0) {
                 const period = 1 / def.aps;
-                const impactAt = Math.min(0.55, period * 0.45);
+                const impactAt = mobImpact(m.ch.hitTime(def.anim), period);
                 m.ch.attack(def.anim, period, impactAt);
                 m.impact = impactAt;
                 m.atkCd = period;
@@ -985,16 +970,26 @@ export class Game {
             }
           }
         } else if (m.state === 'return') {
-          moving = this.stepTo(m, m.spawn, def.speed * 1.4, dt);
-          m.hp = Math.min(m.maxHp, m.hp + m.maxHp * dt * 0.5);
-          if (m.pos.distanceTo(m.spawn) < 0.6) { m.state = 'idle'; m.hp = m.maxHp; }
+          // Walks home at chase speed, no heal; re-aggros if the hero comes close again inside the leash
+          // (a hit is within aggro range too). Hero outside the leash is ignored, or it would flip every frame.
+          if (!this.dead && !heroInCamp && dHero < def.aggro && hp.distanceTo(m.spawn) < leash) m.state = 'chase';
+          else {
+            moving = this.stepTo(m, m.spawn, def.speed, dt);
+            if (dSpawn < 0.6) m.state = 'idle';
+          }
         }
       }
       if (m.impact >= 0) {
         m.impact -= dt;
         if (m.impact < 0 && !this.dead && m.stun <= 0) {
           const reach = def.range + m.radius * 0.5 + HERO.radius + 0.5;
-          if (m.pos.distanceTo(hp) < reach) this.hurtHero(m.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos, m.dmgType, m);
+          if (m.pos.distanceTo(hp) < reach) {
+            this.hurtHero(m.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos, m);
+            if (def.push) {
+              this.heroKnock.set(hp.x - m.pos.x, 0, hp.z - m.pos.z).normalize().multiplyScalar(def.push);
+              this.shake = Math.max(this.shake, 0.25);
+            }
+          }
         }
       }
       // knockback
@@ -1069,12 +1064,9 @@ export class Game {
     v1.multiplyScalar(Math.min(d, speed * dt) / d);
     m.pos.add(v1);
     m.ch.facing = turn(m.ch.facing, Math.atan2(v1.x, v1.z), dt * 8);
-    m.ch.walkRate = speed / 2.1;
+    m.ch.walkRate = speed / m.ch.stride;
     return true;
   }
-
-  /** Old saves may hold the removed 'lunge' variant: anything but 'off' means slow. */
-  get antiKite(): AntiKite { return this.save.antiKite === 'off' ? 'off' : 'slow'; }
 
   private bossColor(m: Mob) {
     // Time-to-kill against the hero's current weapon decides the name colour (GDD 6.4).
@@ -1084,7 +1076,6 @@ export class Game {
 
   private bossLogic(m: Mob, dt: number, dHero: number) {
     const b = m.def.boss!;
-    if (this.time - m.hurtAt > b.regenDelay) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * b.regen * dt);
     if (!m.phase2 && m.hp < m.maxHp * b.phase2At) {
       m.phase2 = true;
       this.fx.spawn(v1.copy(m.pos).setY(4.5), m.def.id === 'death' ? 'Твоё время вышло!' : 'Ты меня разозлил!', 'bark', 2);
@@ -1106,7 +1097,7 @@ export class Game {
         f.slams++;
         if (!this.dead && this.hero.position.distanceTo(at) < radius + HERO.radius) {
           f.slamHits++;
-          this.hurtHero(m.dmg * dmgMul, at, 'crush', m);
+          this.hurtHero(m.dmg * dmgMul, at, m);
         }
       });
     };
@@ -1126,29 +1117,12 @@ export class Game {
     }
   }
 
-  private hurtHero(raw: number, from: THREE.Vector3, type: DamageType = 'crush', src?: Mob) {
+  private hurtHero(raw: number, from: THREE.Vector3, src?: Mob) {
     if (this.dead) return;
-    if (this.time < this.invulnUntil) {
-      this.fx.spawn(v1.copy(this.hero.position).setY(2), 'Неуязвим', 'hurt small', 0.5, { color: '#fff1a0' });
-      return;
-    }
-    // GDD 10.5: reduction = defense / (defense + 100); talents add a resist per damage type.
-    const resKey = ({ slash: 'resSlash', crush: 'resCrush', chop: 'resChop' } as Record<DamageType, TalentStat>)[type];
-    const res = Math.min(RESIST_CAP, this.t('resAll') + (resKey ? this.t(resKey) : 0));
-    let dmg = Math.max(1, Math.round(raw * (100 / (100 + this.defense)) * (1 - res / 100) * (0.9 + Math.random() * 0.2)));
-    this.lastHurt = this.lastFight = this.time;
+    // GDD 10.5: reduction = defense / (defense + 100).
+    let dmg = Math.max(1, Math.round(raw * (100 / (100 + this.defense)) * (0.9 + Math.random() * 0.2)));
+    this.lastHurt = this.time;
     if (src) this.fightOf(src).taken += Math.min(dmg, this.hp + this.shield);
-    if (src && src.alive && this.t('thorns') > 0) {
-      const back = Math.max(1, Math.round(dmg * this.t('thorns') / 100));
-      src.hp -= back;
-      this.fx.spawn(v2.copy(src.pos).setY(1.9 * src.def.scale), String(back), 'dmg resist small', 0.6);
-      if (src.hp <= 0) this.killMob(src);
-    }
-    if (this.absorb > 0 && this.time < this.absorbUntil) {
-      const absorbed = Math.min(this.absorb, dmg);
-      this.absorb -= absorbed;
-      dmg -= absorbed;
-    }
     if (this.shield > 0) {
       const absorbed = Math.min(this.shield, dmg);
       this.shield -= absorbed;
@@ -1158,13 +1132,13 @@ export class Game {
     this.hero.hit();
     sfx.hurt();
     // Fully absorbed by the human shield: show it in shield blue instead of "-0".
-    if (dmg > 0) this.fx.spawn(v1.copy(this.hero.position).setY(2), `-${dmg}`, 'hurt', 0.7);
-    else this.fx.spawn(v1.copy(this.hero.position).setY(2), '🛡', 'hurt', 0.5, { color: '#6cc6ff' });
+    const barY = 2.45 * this.heroScale;
+    const lift = this.heroBar.el.offsetHeight + 14;
+    if (dmg > 0) this.fx.spawn(v1.copy(this.hero.position).setY(barY), `-${dmg}`, 'hurt', 0.7, { lift });
+    else this.fx.spawn(v1.copy(this.hero.position).setY(barY), '🛡', 'hurt', 0.5, { color: '#6cc6ff', lift });
     void from;
     this.ui.hurtFlash();
-    if (this.hp <= 0 && this.fireSkills('lethal')) return;
-    if (this.hp <= 0 && this.god) this.hp = 1; // debug: lethal skills still get their chance first
-    if (this.hp > 0) this.fireSkills('hurt');
+    if (this.hp <= 0 && this.god) this.hp = 1; // debug
     if (this.hp <= 0) {
       this.hp = 0;
       for (const m of this.mobs) this.endFight(m, 'death');
@@ -1185,8 +1159,6 @@ export class Game {
   }
 
   private revive() {
-    this.buffs = [];
-    this.absorb = 0;
     this.dead = false;
     this.hp = this.maxHp;
     this.shield = this.shieldMax;
@@ -1196,10 +1168,8 @@ export class Game {
   }
 
   // ---------- breakables ----------
-  private hitProp(b: Prop, dmg: number, tier: string) {
+  private hitProp(b: Prop, dmg: number) {
     b.hp = +(b.hp - dmg).toFixed(2);
-    if (tier === 'weak') this.fx.spawn(v2.copy(b.pos).setY(1.4), tierLabel('weak'), 'dmg weak small', 0.6);
-    else if (tier !== 'normal') this.fx.spawn(v2.copy(b.pos).setY(1.4), tierLabel(tier as ResistTier), 'dmg resist small', 0.6);
     b.shake = 0.2;
     b.flash = 0.1;
     sfx.hit();
@@ -1244,10 +1214,12 @@ export class Game {
         u.uiEl.classList.toggle('hurt', u.hp < u.maxHp);
         u.uiEl.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
         u.hpFill.style.width = `${Math.max(0, u.hp / u.maxHp) * 100}%`;
-        if (u instanceof Mob && u.def.boss) {
-          (u.uiEl.querySelector('.mobhp span') as HTMLElement).textContent = `${Math.ceil(u.hp)} / ${u.maxHp}`;
-          (u.uiEl.querySelector('.bname') as HTMLElement).style.color = this.bossColor(u);
+        if (u.hpText) {
+          // every unit has the same bar: current HP only
+          const t = `${Math.ceil(u.hp)}`;
+          if (u.hpText.textContent !== t) u.hpText.textContent = t;
         }
+        if (u instanceof Mob && u.def.boss) (u.uiEl.querySelector('.bname') as HTMLElement).style.color = this.bossColor(u);
       }
       // Respawn loader at the spawn point (for a mob, once the corpse has gone).
       const dead = !u.alive && u.loaderReady && u.spawn.distanceTo(hp) < 30 && explored(u.spawn);
@@ -1292,9 +1264,8 @@ export class Game {
       this.newItems++;
       this.fx.spawn(head, `+ ${name}`, 'loot', 1.4, { color });
     } else {
-      const g = scrapValue(item);
-      this.save.gold += g;
-      this.fx.spawn(head, `Сумка полна: ${name} → +${g} 🪙`, 'loot', 1.6, { color });
+      this.fx.spawn(head, `Сумка полна: ${name} потерян`, 'loot', 1.6, { color });
+      this.ui.toast(`Сумка полна — ${name} не поместился`);
     }
     this.refreshHud(true);
     this.persist();
@@ -1345,11 +1316,11 @@ export class Game {
     this.afterGearChange();
   }
 
-  scrapFromBag(index: number) {
+  /** Throws an item out of the bag for good. */
+  discardFromBag(index: number) {
     const it = this.save.bag[index];
     if (!it) return;
     this.save.bag.splice(index, 1);
-    this.save.gold += scrapValue(it);
     sfx.break();
     this.persist();
     this.refreshHud(true);
@@ -1442,23 +1413,18 @@ export class Game {
     const g = this.goal();
     this.ui.hud({
       hp: this.hp, maxHp: this.maxHp, shield: this.shield, shieldMax: this.shieldMax,
-      gold: this.save.gold,
       stats: { power: Math.round(this.power), hp: this.maxHp, regen: this.regen, speed: this.speedStat },
       goal: g.text,
       buffs: [
         inCamp(this.hero.position.x, this.hero.position.z) && this.hp < this.maxHp ? '🏠 Лагерь: быстрое восстановление' : '',
         this.faction === 'orc' && this.hp < this.maxHp * 0.7 ? `🩸 Жажда крови: +${Math.round(this.bloodlustMax * 100 * (1 - this.hp / this.maxHp))}% урона` : '',
-        ...this.buffs.map((b) => `✨ ${b.name}: ${Math.ceil(b.until - this.time)} с`),
-        this.time < this.invulnUntil ? `✨ Неуязвимость: ${Math.ceil(this.invulnUntil - this.time)} с` : '',
-        this.absorb > 0 && this.time < this.absorbUntil ? `🛡 Щит: ${Math.ceil(this.absorb)}` : '',
       ].filter(Boolean),
       bosses: this.mobs.filter((m) => m.def.boss).map((m) => ({
         name: m.def.boss!.titles[this.faction],
         left: m.alive ? 0 : Math.max(1, Math.ceil(m.respawnAt - this.time)),
       })),
     });
-    this.ui.progress(this.save.level, this.save.xp, this.save.level >= MAX_LEVEL ? 0 : xpToNext(this.save.level), freePoints(this.save));
-    this.ui.skills(this.skillHud());
+    this.ui.tickGains(this.time);
     if (full) {
       this.ui.weapons(this.save.weapons, this.save.active, (it) => this.itemDamage(it), this.save.equip);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
@@ -1473,235 +1439,13 @@ export class Game {
     this.world.setLowDetail(low);
   }
 
-  // ---------- level & experience ----------
-  addXp(amount: number, at?: THREE.Vector3) {
-    const s = this.save;
-    if (s.level >= MAX_LEVEL || amount <= 0) return;
-    amount = Math.round(amount * (1 + this.t('xpPct') / 100));
-    s.xp += amount;
-    if (at) this.fx.spawn(v2.copy(at).setY(2.4), `+${amount} XP`, 'xp', 0.8);
-    let up = 0;
-    while (s.level < MAX_LEVEL && s.xp >= xpToNext(s.level)) {
-      s.xp -= xpToNext(s.level);
-      s.level++;
-      up++;
-    }
-    if (s.level >= MAX_LEVEL) s.xp = 0;
-    if (!up) return;
-    // Level up: full heal, fanfare, a talent point (and maybe a new tier).
-    this.hp = this.maxHp;
-    this.shield = this.shieldMax;
-    this.ui.flash();
-    sfx.levelUp();
-    this.waves.add(this.hero.position, 4, 0xffd23f, 0.6);
-    this.particles.burst(v1.copy(this.hero.position).setY(1.2), 0xffd23f, 18, 0.12, 6, 1);
-    this.fx.spawn(v1.copy(this.hero.position).setY(3), `Уровень ${s.level}!`, 'combo', 1.6);
-    const tier = TIER_LEVELS.findIndex((l, i) => i > 0 && l > s.level - up && l <= s.level);
-    this.ui.toast(tier > 0 ? `Открыт ${tier + 1}-й этап талантов! Очков: ${freePoints(s)}` : `Новый уровень! Очко таланта: ${freePoints(s)}`, 3500);
-    this.persist();
-    this.onLevelUp();
-  }
-
-  // ---------- auto-cast skills ----------
-  private equippedSkills(): { def: ActiveDef; v: Record<string, number> }[] {
-    const out: { def: ActiveDef; v: Record<string, number> }[] = [];
-    for (const id of this.save.skills.slice(0, SKILL_SLOTS)) {
-      const def = id ? talent(id) : null;
-      const rank = id ? this.save.talents[id] ?? 0 : 0;
-      if (def?.kind === 'active' && rank > 0) out.push({ def, v: rankValues(def, rank) });
-    }
-    return out;
-  }
-
-  /** Called every frame: cooldown and low-HP triggers, buff expiry. */
-  private updateSkills() {
-    this.buffs = this.buffs.filter((b) => b.until > this.time);
-    if (this.time >= this.absorbUntil) this.absorb = 0;
-    this.fireSkills('cooldown');
-    this.fireSkills('lowHp');
-  }
-
-  /** Swapping a skill in combat starts it on cooldown (no free re-casts by juggling slots). */
-  onSkillEquipped(id: string) {
-    const def = talent(id);
-    if (def?.kind !== 'active') return;
-    const v = rankValues(def, this.save.talents[id] ?? 1);
-    if (this.time - this.lastFight < 4 && v.cd) this.skillReady[id] = this.time + v.cd;
-  }
-
-  /** Fires every equipped skill with this trigger whose condition holds. Returns true if any fired. */
-  private fireSkills(trigger: ActiveDef['trigger']): boolean {
-    let fired = false;
-    const inCombat = this.time - this.lastFight < 4;
-    for (const { def, v } of this.equippedSkills()) {
-      if (def.trigger !== trigger || this.dead) continue;
-      if ((this.skillReady[def.id] ?? 0) > this.time) continue;
-      switch (trigger) {
-        case 'cooldown': if (!inCombat || !this.mobs.some((m) => m.alive && m.state === 'chase')) continue; break;
-        case 'lowHp': if (this.hp > this.maxHp * v.below / 100) continue; break;
-        case 'everyHit': if (this.swings % v.every !== 0) continue; break;
-        case 'hurt': if (Math.random() * 100 >= v.chance) continue; break;
-        default: break;
-      }
-      if (def.effect === 'aoe' && !this.castAoe(def, v)) continue;
-      this.castEffect(def, v);
-      this.skillReady[def.id] = this.time + (v.cd || 0);
-      fired = true;
-    }
-    return fired;
-  }
-
-  private castEffect(def: ActiveDef, v: Record<string, number>) {
-    const p = this.hero.position;
-    const head = v1.copy(p).setY(2.9);
-    switch (def.effect) {
-      case 'heal': this.hp = Math.max(this.hp, this.maxHp * v.to / 100); break;
-      case 'cheatDeath':
-        this.hp = this.maxHp * v.to / 100;
-        this.invulnUntil = this.time + v.dur;
-        break;
-      case 'shield':
-        this.absorb = this.maxHp * v.shield / 100;
-        this.absorbUntil = this.time + v.dur;
-        break;
-      case 'invuln': this.invulnUntil = this.time + v.dur; break;
-      case 'buff':
-        this.buffs = this.buffs.filter((b) => b.id !== def.id);
-        this.buffs.push({ id: def.id, name: def.name, until: this.time + v.dur, power: v.power ?? 0, atkSpeed: v.atkSpeed ?? 0, speed: v.speed ?? 0, lifesteal: v.lifesteal ?? 0 });
-        break;
-      case 'aoe': break; // damage already dealt in castAoe
-    }
-    if (def.effect !== 'aoe') {
-      this.waves.add(p, 2.6, def.color, 0.5);
-      this.particles.burst(v2.copy(p).setY(1.2), def.color, 12, 0.1, 5, 0.8);
-      sfx.barrier();
-    }
-    this.fx.spawn(head, def.name.endsWith('!') ? def.name : `${def.name}!`, 'skill', 1.2, { color: '#' + def.color.toString(16).padStart(6, '0') });
-    this.ui.skillFlash(def.id);
-  }
-
-  /** Area hit of a skill around the hero or on the current target. False if nobody is in range. */
-  private castAoe(def: ActiveDef, v: Record<string, number>) {
-    const t = this.target instanceof Mob ? this.target : null;
-    const center = (def.at === 'target' && t ? t.pos : this.hero.position).clone();
-    const hit = this.mobs.filter((m) => m.alive && m.awake && m.rise <= 0 && m.pos.distanceTo(center) < v.radius + m.radius);
-    if (!hit.length) return false;
-    for (const m of hit) {
-      if (v.mult > 0) {
-        const { dmg, tier, crit } = this.damageFor(this.weapon.type, m.def.resist, v.mult / 100, !!m.def.boss);
-        this.damageMob(m, dmg, tier, 4, crit);
-      }
-      if (v.stun && m.alive && !m.def.boss) m.stun = Math.max(m.stun, v.stun);
-    }
-    this.waves.add(center, v.radius, def.color, 0.45);
-    this.particles.burst(v2.copy(center).setY(0.4), def.color, 16, 0.14, 6, 0.8);
-    if (def.id.includes('whirl')) this.hero.spin(0.35);
-    this.shake = Math.max(this.shake, 0.3);
-    this.lastFight = this.time;
-    sfx.combo();
-    return true;
-  }
-
-  // ---------- talent actions (called from the talents window) ----------
-  learnTalent(id: string): string | null {
-    const err = canLearn(this.save, id);
-    if (err) return err;
-    const s = this.save;
-    s.talents[id] = (s.talents[id] ?? 0) + 1;
-    const def = talent(id)!;
-    // A freshly learned skill goes into a free slot.
-    if (def.kind === 'active' && s.talents[id] === 1 && !s.skills.includes(id)) {
-      const free = s.skills.findIndex((x, i) => i < SKILL_SLOTS && !x);
-      if (free >= 0) s.skills[free] = id; // learning is not a swap: no cooldown penalty
-    }
-    this.refreshTalents();
-    sfx.orb();
-    this.persist();
-    return null;
-  }
-
-  equipSkill(id: string | null, slot: number) {
-    const s = this.save;
-    if (id && !(s.talents[id] > 0)) return;
-    const other = s.skills.indexOf(id);
-    if (id && other >= 0 && other !== slot) s.skills[other] = s.skills[slot] ?? null; // swap the two slots
-    s.skills[slot] = id;
-    if (id) this.onSkillEquipped(id);
-    sfx.click();
-    this.persist();
-  }
-
-  get resetPrice() { return resetCost(this.save.level, this.save.resets); }
-
-  /** Returns every spent point; costs gold after the first time. */
-  resetTalents(): boolean {
-    const s = this.save;
-    const cost = this.resetPrice;
-    if (s.gold < cost || spentPoints(s) === 0) return false;
-    s.gold -= cost;
-    s.talents = {};
-    s.skills = [null, null];
-    s.resets++;
-    this.buffs = [];
-    this.absorb = 0;
-    this.refreshTalents();
-    sfx.break();
-    this.persist();
-    return true;
-  }
-
-  /** Equipped skills for the HUD: icon, 0..1 cooldown left. */
-  private skillHud() {
-    return this.save.skills.slice(0, SKILL_SLOTS).map((id) => {
-      const def = id ? talent(id) : null;
-      if (def?.kind !== 'active') return null;
-      const v = rankValues(def, this.save.talents[id!] ?? 1);
-      const left = Math.max(0, (this.skillReady[def.id] ?? 0) - this.time);
-      return { id: def.id, icon: def.icon, name: def.name, cd: v.cd ? Math.min(1, left / v.cd) : 0 };
-    });
-  }
-
   // ---------- debug menu (src/debug.ts) ----------
   /** Debug: the hero cannot die (HP stops at 1). */
   god = false;
 
-  /** Sets the level directly. Talents that no longer fit the points are refunded for free. */
-  debugSetLevel(level: number) {
-    const s = this.save;
-    s.level = Math.max(1, Math.min(MAX_LEVEL, Math.round(level)));
-    s.xp = 0;
-    const tooDeep = Object.keys(s.talents).some((id) => !tierOpen(s.level, tierOf(id)));
-    if (freePoints(s) < 0 || tooDeep) { s.talents = {}; s.skills = [null, null]; }
-    this.refreshTalents();
-    this.hp = this.maxHp;
-    this.persist();
-    this.refreshHud(true);
-  }
-
-  /** Spends every free point: actives first (so slots fill up), then passives, tier by tier. */
-  debugSpendAll() {
-    const nodes = TREES[this.faction].flatMap((t) => t.nodes);
-    const order = [...nodes.filter((n) => n.kind === 'active'), ...nodes.filter((n) => n.kind === 'passive')];
-    let spent = true;
-    while (spent && freePoints(this.save) > 0) {
-      spent = false;
-      for (const n of order) if (!this.learnTalent(n.id)) spent = true;
-    }
-    this.refreshHud(true);
-  }
-
-  debugFreeReset() {
-    this.save.resets = 0;
-    this.resetTalents();
-    this.refreshHud(true);
-  }
-
   debugSetHp(frac: number) {
     this.hp = Math.max(1, this.maxHp * frac);
-    this.lastFight = this.time;
   }
-
-  debugResetCooldowns() { this.skillReady = {}; }
 
   /** Visual size of the hero (debug tuning; collisions and range stay the same). */
   heroScale = 1;
@@ -1722,7 +1466,7 @@ export class Game {
     for (const m of this.mobs) m.ch.root.scale.setScalar(this.mobScale);
   }
 
-  /** Debug: every mob and prop dies at once, silently (no loot or XP); spawners spend their next charge as usual. */
+  /** Debug: every mob and prop dies at once, silently (no loot); spawners spend their next charge as usual. */
   debugKillAll() {
     for (const u of this.units) {
       if (!u.alive) continue;
@@ -1805,12 +1549,7 @@ export class Game {
   /** Live numbers for the debug panel. */
   debugInfo() {
     return {
-      level: this.save.level, xp: this.save.xp, need: this.save.level >= MAX_LEVEL ? 0 : xpToNext(this.save.level),
-      free: freePoints(this.save), spent: spentPoints(this.save), gold: this.save.gold,
       hp: Math.ceil(this.hp), maxHp: this.maxHp, god: this.god, heroScale: this.heroScale, mobScale: this.mobScale, fov: this.camera.fov,
-      skills: this.equippedSkills().map(({ def }) => ({ name: def.name, rank: this.save.talents[def.id], left: Math.max(0, (this.skillReady[def.id] ?? 0) - this.time) })),
-      buffs: this.buffs.map((b) => `${b.name} ${Math.ceil(b.until - this.time)}с`),
-      talents: Object.entries(this.tal).filter(([, v]) => v).map(([k, v]) => `${k} ${+(v as number).toFixed(1)}`),
     };
   }
 
@@ -1846,7 +1585,7 @@ export class Game {
     m.fight = null;
     logFight({
       // Depth-scaled mobs are logged as e.g. bandit_thug×1.5 (HP multiplier rounded to 0.5).
-      t: this.save.playTime ?? 0, mob: m.maxHp > m.def.hp ? `${m.def.id}×${Math.round((m.maxHp / m.def.hp) * 2) / 2}` : m.def.id, boss: !!m.def.boss, kite: this.antiKite, result, dur: +(this.time - f.t0).toFixed(1),
+      t: this.save.playTime ?? 0, mob: m.maxHp > m.def.hp ? `${m.def.id}×${Math.round((m.maxHp / m.def.hp) * 2) / 2}` : m.def.id, boss: !!m.def.boss, result, dur: +(this.time - f.t0).toFixed(1),
       dealt: Math.round(f.dealt), taken: Math.round(f.taken), hits: f.hits, combos: f.combos, slams: f.slams, slamHits: f.slamHits,
       hpStart: Math.round(f.hpStart), hpEnd: Math.round(this.hp), maxHp: this.maxHp, power: Math.round(this.power),
     });
@@ -1858,19 +1597,11 @@ export class Game {
     for (const d of Object.values(MOBS)) if (d.boss) ttk[d.id] = d.hp / Math.max(1, this.heroDps(this.weapon.type, d.resist));
     logSnap({
       t: Math.round(this.save.playTime ?? 0), zone: this.zone?.id ?? '?', power: this.power, maxHp: this.maxHp, regen: this.regen,
-      gold: this.save.gold, kills: this.save.kills, deaths: heroDeaths(),
-      weapon: `${it.def} r${it.rarity} lv${it.lvl}${it.sharpen ? ` +${it.sharpen}` : ''}`, kite: this.antiKite, ttk,
+      kills: this.save.kills, deaths: heroDeaths(),
+      weapon: `${it.def} r${it.rarity} lv${it.lvl}${it.sharpen ? ` +${it.sharpen}` : ''}`, ttk,
     });
   }
 }
-
-const XP_BREAKABLE = 2;
-
-/**
- * Hit text from the hero's side: the target is vulnerable to this weapon (green icon over it → more damage)
- * or resists it. Same wording on mobs and breakable props.
- */
-const tierLabel = (t: ResistTier) => (t === 'weak' ? 'Уязвим' : t === 'immune' ? 'Иммунитет' : 'Сопротивление') + ` ×${RESIST_MULT[t]}`;
 
 /** Map / name colours of special mobs (an elite uses its drop's quality colour). */
 const MARK_COLOR = { boss: '#ff3b3b', mini: '#ff9a2e', elite: '#ffffff' };

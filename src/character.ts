@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { HIT_FLASH, applyHitFlash } from './hitflash';
 import { assets } from './assets';
 import { attachWeapon } from './rig';
 import { PART_PREFIXES, type VisualPart } from './items';
-import type { AttackAnim } from './config';
+import { ATTACK_HIT, type AttackAnim } from './config';
 
 const shadowTex = (() => {
   const c = document.createElement('canvas');
@@ -72,6 +73,8 @@ export class Character {
   dead = false;
   facing = 0; // yaw, radians
   walkRate = 1;
+  /** Ground speed (m/s) of the walk clip at walkRate 1. */
+  readonly stride = 2.1;
   private spinT = 0;
   private spinDur = 0;
   private baseParts = new Map<VisualPart, THREE.Mesh[]>();
@@ -241,9 +244,12 @@ export class Character {
     this.spinDur = duration;
   }
 
+  /** Hit marker of the attack clip (s at natural speed). */
+  hitTime(anim: AttackAnim) { return ATTACK_HIT[anim]; }
+
   /** Starts an attack swing. `impactAt` (s) is when the damage frame should land. */
   attack(anim: AttackAnim, period: number, impactAt: number) {
-    const clipImpact = anim === 'SwordAttack' ? 0.6 : 0.83;
+    const clipImpact = ATTACK_HIT[anim];
     const a = this.attackU[anim];
     this.current = a;
     a.reset();
@@ -254,7 +260,7 @@ export class Character {
   }
 
   hit() {
-    this.flashT = 0.12;
+    this.flashT = HIT_FLASH;
     if (this.atkTimer <= 0 && !this.dead) {
       this.hitU.reset();
       this.hitU.timeScale = 1.6;
@@ -262,6 +268,9 @@ export class Character {
       this.hitW = 1;
     }
   }
+
+  /** The death clip has played to its end (it clamps on the last frame). */
+  get deathDone() { return this.dead && !this.death.isRunning(); }
 
   die() {
     this.dead = true;
@@ -290,8 +299,7 @@ export class Character {
     }
     if (this.flashT > 0) {
       this.flashT -= dt;
-      const k = this.flashT > 0 ? 2.6 : 1;
-      for (const m of this.materials) m.color.copy(this.baseColor).multiplyScalar(k);
+      applyHitFlash(this.materials, this.flashT);
     }
     if (!animate) return;
     if (!this.dead) {

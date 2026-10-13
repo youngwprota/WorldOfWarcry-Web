@@ -6,24 +6,26 @@ const tmp = new THREE.Vector3();
 
 /** Pooled DOM labels projected from world space (damage numbers, pickups, barks). */
 export class FloatingText {
-  private pool: { el: HTMLDivElement; pos: THREE.Vector3; t: number; life: number; vy: number; active: boolean }[] = [];
+  private pool: { el: HTMLDivElement; pos: THREE.Vector3; t: number; life: number; vy: number; lift: number; active: boolean }[] = [];
 
   constructor(layer: HTMLElement, private camera: THREE.Camera) {
     for (let i = 0; i < 60; i++) {
       const el = document.createElement('div');
       el.className = 'ftext';
       layer.appendChild(el);
-      this.pool.push({ el, pos: new THREE.Vector3(), t: 0, life: 1, vy: 0, active: false });
+      this.pool.push({ el, pos: new THREE.Vector3(), t: 0, life: 1, vy: 0, lift: 0, active: false });
     }
   }
 
-  spawn(pos: THREE.Vector3, text: string, cls: string, life = 0.8, opts: { html?: boolean; color?: string } = {}) {
+  /** `lift`: extra screen px upwards, to start above an over-head block (HP bar, reward chips). */
+  spawn(pos: THREE.Vector3, text: string, cls: string, life = 0.8, opts: { html?: boolean; color?: string; lift?: number } = {}) {
     let p = this.pool.find((x) => !x.active);
     if (!p) p = this.pool.reduce((a, b) => (a.t / a.life > b.t / b.life ? a : b));
     p.active = true;
     p.t = 0;
     p.life = life;
     p.vy = 1.6;
+    p.lift = opts.lift ?? 0;
     p.pos.copy(pos);
     p.pos.x += (Math.random() - 0.5) * 0.6;
     p.el.className = 'ftext show ' + cls;
@@ -41,7 +43,7 @@ export class FloatingText {
       tmp.copy(p.pos).project(this.camera);
       const k = p.t / p.life;
       const pop = k < 0.12 ? 0.6 + k * 5 : 1.2 - Math.min(0.2, (k - 0.12));
-      p.el.style.transform = `translate(${(tmp.x * 0.5 + 0.5) * w}px, ${(-tmp.y * 0.5 + 0.5) * h}px) translate(-50%,-50%) scale(${pop})`;
+      p.el.style.transform = `translate(${(tmp.x * 0.5 + 0.5) * w}px, ${(-tmp.y * 0.5 + 0.5) * h - p.lift}px) translate(-50%,-50%) scale(${pop})`;
       p.el.style.opacity = String(k > 0.7 ? (1 - k) / 0.3 : 1);
     }
   }
@@ -153,23 +155,21 @@ export class Telegraphs {
   }
 }
 
-export type PickupKind = OrbKind | 'gold' | 'item';
-interface Pickup { mesh: THREE.Mesh; kind: PickupKind; amount: number; vel: THREE.Vector3; t: number; active: boolean; item?: Item; }
+export type PickupKind = OrbKind | 'item';
+interface Pickup { mesh: THREE.Mesh; kind: PickupKind; vel: THREE.Vector3; t: number; active: boolean; item?: Item; }
 
-/** Power orbs and coins: burst out, then home in on the hero (GDD 4: "сами притягиваются"). */
+/** Stat orbs: burst out, then home in on the hero (GDD 4: "сами притягиваются"). */
 export class Pickups {
   private pool: Pickup[] = [];
   private orbGeo = new THREE.IcosahedronGeometry(0.2, 1);
-  private coinGeo = new THREE.CylinderGeometry(0.17, 0.17, 0.05, 12).rotateX(Math.PI / 2);
   private mats: Record<PickupKind, THREE.Material>;
-  onCollect: (kind: PickupKind, amount: number, pos: THREE.Vector3, item?: Item) => void = () => {};
+  onCollect: (kind: PickupKind, item?: Item) => void = () => {};
   private items: Pickup[] = [];
   private itemGeo = new THREE.OctahedronGeometry(0.32, 0);
   private beamGeo = new THREE.CylinderGeometry(0.08, 0.08, 3, 6, 1, true).translate(0, 1.5, 0);
 
   constructor(private scene: THREE.Scene) {
     this.mats = {
-      gold: new THREE.MeshLambertMaterial({ color: 0xffc83a, emissive: 0x7a4a00 }),
       item: new THREE.MeshBasicMaterial({ color: 0xffffff }),
       power: this.orbMat('power'), hp: this.orbMat('hp'), regen: this.orbMat('regen'), speed: this.orbMat('speed'),
     };
@@ -179,20 +179,19 @@ export class Pickups {
     return new THREE.MeshBasicMaterial({ color: ORBS[k].color });
   }
 
-  spawn(pos: THREE.Vector3, kind: PickupKind, amount = 1) {
+  spawn(pos: THREE.Vector3, kind: PickupKind) {
     let p = this.pool.find((x) => !x.active);
     if (!p) {
       if (this.pool.length > 220) return;
-      const mesh = new THREE.Mesh(this.orbGeo, this.mats.gold);
+      const mesh = new THREE.Mesh(this.orbGeo, this.mats.power);
       this.scene.add(mesh);
-      p = { mesh, kind, amount, vel: new THREE.Vector3(), t: 0, active: false };
+      p = { mesh, kind, vel: new THREE.Vector3(), t: 0, active: false };
       this.pool.push(p);
     }
     p.active = true;
     p.kind = kind;
-    p.amount = amount;
     p.t = 0;
-    p.mesh.geometry = kind === 'gold' ? this.coinGeo : this.orbGeo;
+    p.mesh.geometry = this.orbGeo;
     p.mesh.material = this.mats[kind];
     p.mesh.visible = true;
     p.mesh.position.copy(pos).setY(0.8);
@@ -211,7 +210,7 @@ export class Pickups {
     mesh.position.copy(pos).setY(0.8);
     this.scene.add(mesh);
     const a = Math.random() * Math.PI * 2;
-    this.items.push({ mesh, kind: 'item', amount: 1, vel: new THREE.Vector3(Math.cos(a) * 2, 6, Math.sin(a) * 2), t: 0, active: true, item });
+    this.items.push({ mesh, kind: 'item', vel: new THREE.Vector3(Math.cos(a) * 2, 6, Math.sin(a) * 2), t: 0, active: true, item });
   }
 
   update(dt: number, hero: THREE.Vector3, magnet: number) {
@@ -234,7 +233,7 @@ export class Pickups {
         if (d < 0.6) {
           this.scene.remove(m);
           this.items.splice(i, 1);
-          this.onCollect('item', 1, m.position, p.item);
+          this.onCollect('item', p.item);
         }
       }
     }
@@ -257,7 +256,7 @@ export class Pickups {
         if (d < 0.5) {
           p.active = false;
           m.visible = false;
-          this.onCollect(p.kind, p.amount, m.position);
+          this.onCollect(p.kind);
         }
       } else {
         m.position.y = 0.45 + Math.sin(p.t * 4) * 0.12;

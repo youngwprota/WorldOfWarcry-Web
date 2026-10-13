@@ -45,7 +45,6 @@ export interface BreakableDef {
   hits: number; // HP in "normal hits"
   color: number;
   scale: number;
-  gold: [number, number];
   /** Fixed power orbs, shown above the HP bar like on mobs — one stat only. */
   reward: OrbReward;
   /** Material resistances: wood is easy to chop, stone needs a hammer. */
@@ -60,17 +59,17 @@ const GRAVE_RISE: BreakEvent[] = [{ type: 'spawnMob', mob: 'skeleton_worker', ch
 const WOOD: BreakableDef['resist'] = { chop: 'weak', crush: 'resist' };
 const STONE: BreakableDef['resist'] = { slash: 'resist', chop: 'resist', crush: 'weak' };
 export const BREAKABLES: Record<string, BreakableDef> = {
-  barrel: { model: 'barrel', hits: 2, color: 0x8a5a2b, scale: 0.85, gold: [1, 3], reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
-  orc_barrel: { model: 'orc_barrel', hits: 2, color: 0x7a4a22, scale: 0.85, gold: [1, 3], reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
-  box: { model: 'box_small_1', hits: 1, color: 0xa87a45, scale: 0.9, gold: [0, 2], reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
-  box_large: { model: 'box_large_1', hits: 3, color: 0xa87a45, scale: 0.8, gold: [3, 6], reward: { power: 2 }, resist: WOOD, r: 0.7, respawn: 60 },
-  orc_box: { model: 'orc_box_small_1', hits: 1, color: 0x8a5a2b, scale: 0.9, gold: [0, 2], reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
-  bush: { model: null, hits: 1, color: 0x3f8f2f, scale: 1, gold: [0, 1], reward: { regen: 1 }, resist: { slash: 'weak', crush: 'resist' }, r: 0.6, respawn: 25 },
-  tomb1: { model: 'undead_tomb_stone_1', hits: 2, color: 0x77748a, scale: 0.75, gold: [1, 4], reward: { power: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb2: { model: 'undead_tomb_stone_2', hits: 2, color: 0x77748a, scale: 0.75, gold: [1, 4], reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb3: { model: 'undead_tomb_stone_3', hits: 2, color: 0x77748a, scale: 0.75, gold: [1, 4], reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb4: { model: 'undead_tomb_stone_4', hits: 2, color: 0x77748a, scale: 0.75, gold: [1, 4], reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  coffin: { model: 'undead_coffin', hits: 3, color: 0x5a3c2c, scale: 0.34, gold: [4, 8], reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
+  barrel: { model: 'barrel', hits: 2, color: 0x8a5a2b, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
+  orc_barrel: { model: 'orc_barrel', hits: 2, color: 0x7a4a22, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
+  box: { model: 'box_small_1', hits: 1, color: 0xa87a45, scale: 0.9, reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
+  box_large: { model: 'box_large_1', hits: 3, color: 0xa87a45, scale: 0.8, reward: { power: 2 }, resist: WOOD, r: 0.7, respawn: 60 },
+  orc_box: { model: 'orc_box_small_1', hits: 1, color: 0x8a5a2b, scale: 0.9, reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
+  bush: { model: null, hits: 1, color: 0x3f8f2f, scale: 1, reward: { regen: 1 }, resist: { slash: 'weak', crush: 'resist' }, r: 0.6, respawn: 25 },
+  tomb1: { model: 'undead_tomb_stone_1', hits: 2, color: 0x77748a, scale: 0.75, reward: { power: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb2: { model: 'undead_tomb_stone_2', hits: 2, color: 0x77748a, scale: 0.75, reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb3: { model: 'undead_tomb_stone_3', hits: 2, color: 0x77748a, scale: 0.75, reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb4: { model: 'undead_tomb_stone_4', hits: 2, color: 0x77748a, scale: 0.75, reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  coffin: { model: 'undead_coffin', hits: 3, color: 0x5a3c2c, scale: 0.34, reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
 };
 
 const bushGeo = new THREE.IcosahedronGeometry(0.55, 0);
