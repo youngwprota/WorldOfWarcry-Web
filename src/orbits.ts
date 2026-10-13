@@ -80,3 +80,37 @@ export class Orbits {
     for (let i = this.list.length - 1; i >= 0; i--) this.remove(i);
   }
 }
+
+interface Fall { obj: THREE.Object3D; t: number; dur: number; y0: number }
+
+/** Blades dropping from the sky (nagamaki + sword pair): stuck in the ground for a moment, then gone. */
+export class Falls {
+  private list: Fall[] = [];
+  constructor(private scene: THREE.Scene) {}
+
+  /** Lands at `at` in `dur` s. */
+  add(model: string, scale: number, at: THREE.Vector3, dur: number) {
+    const g = new THREE.Group();
+    const m = assets.clone(model);
+    m.scale.multiplyScalar(scale);
+    m.rotation.x = Math.PI; // point down
+    g.add(m);
+    g.position.copy(at);
+    this.scene.add(g);
+    this.list.push({ obj: g, t: 0, dur, y0: 7 });
+  }
+
+  update(dt: number) {
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const f = this.list[i];
+      f.t += dt;
+      const k = Math.min(1, f.t / f.dur);
+      // blade tip ends a little in the ground; its length is about 1.6 m at this scale
+      f.obj.position.y = f.y0 * (1 - k * k) + 1.3;
+      if (f.t > f.dur + 0.6) {
+        f.obj.removeFromParent();
+        this.list.splice(i, 1);
+      }
+    }
+  }
+}

@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { Character } from './character';
 import { Trail } from './swing';
-import { Orbits } from './orbits';
+import { Falls, Orbits } from './orbits';
+import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from './offhand';
 import { Creature } from './creature';
 import {
-  COMBOS, DUAL, FACTIONS, LEFT_SWING, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  COMBOS, DUAL, FACTIONS, LEFT_SWING, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
   mobRank, type ComboDef, type DamageType, type MobDef, type OrbKind, type WeaponDef, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -31,6 +32,7 @@ interface FightStat { t0: number; dealt: number; taken: number; hits: number; co
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
+const v3 = new THREE.Vector3();
 
 /** Respawn timer text: 45s, 4m05s, or 11h45m from an hour up (no seconds). */
 function fmtRespawn(sec: number) {
@@ -125,6 +127,10 @@ class Mob extends Unit {
   atkCd = 0;
   impact = -1;
   stun = 0;
+  /** Thrown up (nagamaki launch): seconds left in the air, total, and the damage it takes on landing. */
+  air = 0;
+  airDur = 0;
+  airDmg = 0;
   deadT = 0;
   wanderT = Math.random() * 3;
   wander = new THREE.Vector3();
@@ -296,8 +302,15 @@ export class Game {
   /** Attack state per hand (save.weapons[0] right, [1] left). */
   private hands: [Hand, Hand] = [newHand(0), newHand(1)];
   private comboShown = -1;
+  /** Sword pair of the equipped weapons (src/offhand.ts), refreshed with the gear. */
+  private pair: Pair | null = null;
+  /** Dagger pair: extra dagger attack speed from sword hits, and when it was last fed. */
+  private haste = 0;
+  private hasteAt = -99;
+  private lastReap = -99;
   private trails: [Trail, Trail] = [new Trail(), new Trail()];
   private orbits: Orbits;
+  private falls: Falls;
   /** Hit-stop / slow motion: game time runs at `slowK` for `slowT` more real seconds. */
   private slowT = 0;
   private slowK = 1;
@@ -400,6 +413,7 @@ export class Game {
     this.pickups.onCollect = (k, it) => this.collect(k, it);
     this.waves = new Shockwaves(this.scene);
     this.orbits = new Orbits(this.scene);
+    this.falls = new Falls(this.scene);
     this.camPos.copy(this.hero.position);
     this.refreshHud(true);
   }
@@ -455,6 +469,8 @@ export class Game {
   /** Both hands armed: each hand hits for DUAL.mul. */
   get dual() { return !!this.save.weapons[0] && !!this.save.weapons[1]; }
   handMul() { return this.dual ? DUAL.mul : 1; }
+  /** Hand multiplier of one weapon: the hidden blade carries the folded-in sword at full damage. */
+  handMulOf(it: Item) { return this.pair?.kind === 'hidden_blade' && it.def !== 'sword' ? 1 : this.handMul(); }
   powerMult() {
     let m = 1 + this.power / 100;
     if (this.faction === 'orc') m *= 1.1 * (1 + this.bloodlustMax * (1 - this.hp / this.maxHp));
@@ -464,13 +480,17 @@ export class Game {
   /** Both hands together; `resist` applies each hand's own damage type. */
   heroDps(resist?: Partial<Record<DamageType, string>>) {
     let dps = 0;
+    const blade = this.pair?.kind === 'hidden_blade';
     for (const it of this.save.weapons) {
       if (!it) continue;
       const w = WEAPONS[it.def];
+      if (w.guard && this.dual) continue;
+      if (blade && it.def === 'sword') continue;
       const r = resist ? RESIST_MULT[(resist[w.type] as 'weak') ?? 'normal'] : 1;
-      dps += this.itemDamage(it) * w.aps * r;
+      const k = blade ? SWORD_PAIRS.hidden_blade.dmg * SWORD_PAIRS.hidden_blade.aps : 1;
+      dps += this.itemDamage(it) * w.aps * r * k * this.handMulOf(it);
     }
-    return dps * this.powerMult() * this.handMul();
+    return dps * this.powerMult();
   }
 
   /** Model names of the right / left hand weapons. */
@@ -480,6 +500,7 @@ export class Game {
   }
 
   private equipVisual() {
+    this.pair = swordPair(this.save.weapons[0]?.def, this.save.weapons[1]?.def);
     this.hero.setWeapon(...this.handModels());
   }
 
@@ -510,6 +531,7 @@ export class Game {
     this.updateHero(dt);
     this.updateMobs(dt);
     this.updateOrbits(dt);
+    this.falls.update(dt);
     this.updateProps(dt);
     this.updateRespawns();
     this.telegraphs.update(dt);
@@ -709,8 +731,15 @@ export class Game {
     // beside a weapon the shield only answers blows (counterStrike); alone (or two shields) it bashes too
     const other = this.save.weapons[1 - h.i];
     if (w.guard && other && !WEAPONS[other.def].guard) { h.combo = 0; return; }
+    const pair = this.pair;
+    // blade pair: the sword only stabs along with the blade
+    if (pair?.kind === 'hidden_blade' && h.i === pair.sword) { h.combo = 0; return; }
     h.atkCd -= dt;
-    const period = 1 / w.aps;
+    let period = 1 / w.aps;
+    if (pair && h.i !== pair.sword) {
+      if (pair.kind === 'dagger' && this.time - this.hasteAt < SWORD_PAIRS.dagger.decay) period /= 1 + this.haste;
+      if (pair.kind === 'hidden_blade') period /= SWORD_PAIRS.hidden_blade.aps;
+    }
     const combo = COMBOS[it.def];
     // A pause or a whiff breaks the chain (GDD: combo = N uninterrupted attacks); the nagamaki's cycle never breaks.
     if (!w.cycle && h.combo > 0 && h.impact < 0 && this.time - h.lastSwing > period + combo.window) h.combo = 0;
@@ -727,21 +756,27 @@ export class Game {
       const impactAt = Math.min(0.42, period * 0.4);
       h.impactAt = impactAt;
       const kinds = w.swing ?? (h.i === 1 ? LEFT_SWING[w.anim] : null);
-      if (kinds) this.hero.swing(kinds[(h.combo - 1) % kinds.length], h.i, period, impactAt);
+      if (h.special) this.hero.swing(h.special === 'launch' ? 'uppercut' : h.special === 'fall' ? 'overhead' : 'thrust', h.i, period, impactAt);
+      else if (kinds) this.hero.swing(kinds[(h.combo - 1) % kinds.length], h.i, period, impactAt);
       else this.hero.attack(w.anim, period, impactAt);
+      if (pair?.kind === 'hidden_blade' && w.assassin) this.hero.swing('thrust', pair.sword, period, impactAt);
+      if (h.special === 'fall') this.dropBlade(impactAt);
       if (w.pull) this.reapPull(w.pull, h.finisher);
       h.impact = impactAt;
       h.atkCd = period;
     }
     if (h.impact >= 0) {
       h.impact -= dt;
-      if (h.impact < 0) this.heroStrike(h);
+      if (h.impact < 0) {
+        if (h.special) this.nagaSpecial(h);
+        else this.heroStrike(h);
+      }
     }
   }
 
   private damageFor(it: Item, resist: MobDef['resist'], mult = 1) {
     const tier = resist[WEAPONS[it.def].type] ?? 'normal';
-    const dmg = this.itemDamage(it) * this.handMul() * this.powerMult() * RESIST_MULT[tier] * mult * (0.9 + Math.random() * 0.2);
+    const dmg = this.itemDamage(it) * this.handMulOf(it) * this.powerMult() * RESIST_MULT[tier] * mult * (0.9 + Math.random() * 0.2);
     return { dmg: Math.max(1, Math.round(dmg)), tier };
   }
 
@@ -804,6 +839,9 @@ export class Game {
     const ring = w.ring && Math.random() < w.ring.chance ? w.ring.mult : 1;
     // the hidden blade stays on its one target even in the finisher
     const only = (!fin || w.assassin) && w.single ? focus : null;
+    const pair = this.pair;
+    const swordHit = !!pair && h.i === pair.sword;
+    const pairMul = pair?.kind === 'hidden_blade' && w.assassin ? SWORD_PAIRS.hidden_blade.dmg : 1;
     sfx.swing();
     for (const u of this.units) {
       if (only && u !== only) continue;
@@ -817,7 +855,14 @@ export class Game {
       const m = u as Mob;
       // daggers: +stack.add per stack on this mob, then one more stack
       const stackMul = w.stack ? 1 + w.stack.add * m.stacks : 1;
-      const { dmg, tier } = this.damageFor(it, m.def.resist, (fin ? fin.mult : 1) * stackMul * crowd * ring);
+      const r = this.damageFor(it, m.def.resist, (fin ? fin.mult : 1) * stackMul * crowd * ring * pairMul);
+      const { tier } = r;
+      let { dmg } = r;
+      // axe pair: the sword tears off a share of what the mob has left
+      if (swordHit && pair!.kind === 'axe') {
+        const a = SWORD_PAIRS.axe;
+        dmg += Math.round(m.hp * (mobRank(m.def) === 'normal' ? a.pct : a.boss));
+      }
       if (w.stack) m.setStacks(Math.min(w.stack.max, m.stacks + 1), this.time);
       const f = this.fightOf(m);
       f.hits++;
@@ -829,7 +874,17 @@ export class Game {
         if (fin?.stun) m.stun = Math.max(m.stun, fin.stun);
         else if (w.stun && Math.random() < w.stun) m.stun = 0.9;
       }
+      // shield pair: the cut provokes an immediate blow (and with it a chance of a counter)
+      if (swordHit && pair!.kind === 'shield' && m.alive && m.stun <= 0 && Math.random() < SWORD_PAIRS.shield.chance) m.atkCd = 0;
     }
+    if (swordHit && hits) {
+      if (pair!.kind === 'dagger') {
+        const d = SWORD_PAIRS.dagger;
+        this.haste = Math.min(d.max, (this.time - this.hasteAt < d.decay ? this.haste : 0) + d.aps);
+        this.hasteAt = this.time;
+      } else if (pair!.kind === 'reaper') this.reapExcess();
+    }
+    if (fin && pair?.kind === 'nagamaki' && w.cycle) h.special = NAGA_SPECIALS[Math.floor(Math.random() * NAGA_SPECIALS.length)];
     if (w.ahead && hits) {
       // the pan comes down on the heads in front
       const at = v1.copy(this.hero.position).addScaledVector(v2.set(Math.sin(yaw), 0, Math.cos(yaw)), ahead).setY(0.2);
@@ -855,6 +910,94 @@ export class Game {
     h.lastSwingHit = hits > 0;
     if (!hits && !w.cycle) h.combo = 0;
     return hits;
+  }
+
+  /** Reaper pair: more plain mobs around than the reaper's crowd limit — the extra ones (weakest) drop dead. */
+  private reapExcess() {
+    const r = SWORD_PAIRS.reaper;
+    if (this.time - this.lastReap < r.cd) return;
+    const crowd = this.mobs.filter((m) => m.hittable && mobRank(m.def) === 'normal' && m.pos.distanceTo(this.hero.position) - m.radius < r.radius);
+    const doomed = excess(crowd, r.limit);
+    if (!doomed.length) return;
+    this.lastReap = this.time;
+    for (const m of doomed) {
+      this.particles.burst(v2.copy(m.pos).setY(1), COMBOS.reaper.color, 8, 0.1, 5, 0.5);
+      this.damageMob(m, Math.ceil(m.hp), 'weak', 4);
+    }
+    this.fx.spawn(v1.copy(this.hero.position).setY(3), `Жатва ×${doomed.length}`, 'dmg weak', 1.1, { color: '#b49bff' });
+    this.waves.add(this.hero.position, r.radius, COMBOS.reaper.color, 0.4);
+    this.slowMo(0.08, 0.1);
+  }
+
+  /** Where the nagamaki pair's falling sword comes down: the target, or 2 m ahead. */
+  private fallPoint(out: THREE.Vector3) {
+    const p = this.hero.position;
+    if (this.target?.alive) return out.copy(this.target.pos).setY(0);
+    return out.set(p.x + Math.sin(this.hero.facing) * 2, 0, p.z + Math.cos(this.hero.facing) * 2);
+  }
+
+  /** Nagamaki pair, falling sword: the blade appears in the sky and lands on the impact. */
+  private dropBlade(impactAt: number) {
+    const sword = this.save.weapons[this.pair!.sword];
+    if (sword) this.falls.add(WEAPONS[sword.def].model[this.faction], 2.4, this.fallPoint(v1), impactAt);
+  }
+
+  /** Nagamaki pair: the 4th blow after the thrust. */
+  private nagaSpecial(h: Hand) {
+    const it = this.save.weapons[h.i];
+    const kind = h.special;
+    h.special = null;
+    h.combo = 0;
+    h.lastSwingHit = true;
+    if (!it) return;
+    const n = SWORD_PAIRS.nagamaki;
+    const color = COMBOS.nagamaki.color;
+    sfx.combo();
+    const cut = (m: Mob, mult: number, knock: number) => {
+      const { dmg, tier } = this.damageFor(it, m.def.resist, mult);
+      const f = this.fightOf(m);
+      f.hits++;
+      f.combos++;
+      this.damageMob(m, dmg, tier, knock);
+    };
+    if (kind === 'fall') {
+      const at = this.fallPoint(v3);
+      for (const m of this.mobs) if (m.hittable && m.pos.distanceTo(at) - m.radius < n.fall) cut(m, n.mult, 6);
+      this.waves.add(at, n.fall, color);
+      this.particles.burst(v2.copy(at).setY(0.3), 0x9a8a70, 16, 0.14, 7, 0.6);
+      this.shake = Math.max(this.shake, 0.45);
+      this.slowMo(0.08, 0.08);
+    } else if (kind === 'launch') {
+      // up they go; the damage lands with them (updateMobs)
+      for (const m of this.mobs) {
+        if (!m.hittable || !this.inShape(m.pos, m.radius, 'arc', 160, WEAPONS[it.def].range)) continue;
+        if (m.def.boss) { cut(m, n.mult, 0); continue; }
+        const { dmg } = this.damageFor(it, m.def.resist, n.mult);
+        m.air = m.airDur = 0.9;
+        m.airDmg = dmg;
+        m.stun = Math.max(m.stun, 1.2);
+        this.fightOf(m).combos++;
+      }
+      this.shake = Math.max(this.shake, 0.25);
+    } else {
+      // dash through: everything along the way is cut
+      const p = this.hero.position;
+      const from = v3.copy(p);
+      p.x += Math.sin(this.hero.facing) * n.dash;
+      p.z += Math.cos(this.hero.facing) * n.dash;
+      this.world.collide(p, HERO.radius);
+      const seg = v2.subVectors(p, from);
+      const len2 = Math.max(0.01, seg.lengthSq());
+      for (const m of this.mobs) {
+        if (!m.hittable) continue;
+        const t = Math.max(0, Math.min(1, ((m.pos.x - from.x) * seg.x + (m.pos.z - from.z) * seg.z) / len2));
+        const dx = m.pos.x - (from.x + seg.x * t), dz = m.pos.z - (from.z + seg.z * t);
+        if (dx * dx + dz * dz < (m.radius + 1.3) ** 2) cut(m, n.mult, 5);
+      }
+      this.hero.spin(0.3);
+      this.waves.add(p, 1.8, color, 0.3);
+      this.slowMo(0.06, 0.1);
+    }
   }
 
   /** Hidden blade on its victim: a sure stun, an execution under the threshold, a freeze-frame and a push-in. */
@@ -1121,6 +1264,18 @@ export class Game {
       const def = m.def;
       let moving = false;
       if (m.hp < m.maxHp && this.time - m.hurtAt > MOB_REGEN_DELAY) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * def.regen * dt);
+      if (m.air > 0) {
+        // nagamaki launch: up and down, the blow lands with the mob
+        m.air -= dt;
+        const k = 1 - Math.max(0, m.air) / m.airDur;
+        m.pos.y = 2.2 * Math.sin(Math.PI * k);
+        if (m.air <= 0) {
+          m.pos.y = 0;
+          this.damageMob(m, m.airDmg, 'weak', 1);
+          this.particles.burst(v2.copy(m.pos).setY(0.2), 0x9a8a70, 8, 0.12, 5, 0.5);
+          this.shake = Math.max(this.shake, 0.15);
+        }
+      }
       if (m.stun > 0) {
         m.stun -= dt;
       } else if (m.casting > 0) {
@@ -1575,7 +1730,7 @@ export class Game {
     for (const h of this.hands) {
       const it = this.save.weapons[h.i];
       Object.assign(h, newHand(h.i));
-      if (h.i === 1 && it && this.dual) h.atkCd = 0.5 / WEAPONS[it.def].aps;
+      if (h.i === 1 && it && this.dual && this.pair?.kind !== 'axe') h.atkCd = 0.5 / WEAPONS[it.def].aps;
     }
   }
 
@@ -1890,9 +2045,13 @@ function turn(cur: number, want: number, k: number) {
 
 
 /** Swing timer and combo chain of one hand. */
-interface Hand { i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean }
+interface Hand {
+  i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean;
+  /** Nagamaki pair: the next swing is this 4th blow. */
+  special: NagaSpecial | null;
+}
 function newHand(i: 0 | 1): Hand {
-  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false };
+  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false, special: null };
 }
 
 /** What a thrown scythe carries (Orbit.tag). */
