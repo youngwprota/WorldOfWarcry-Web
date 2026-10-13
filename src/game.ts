@@ -588,24 +588,27 @@ export class Game {
     }
     this.world.collide(p, HERO.radius);
 
-    // targeting: keep the current target while it lives and stays near (GDD 6.2)
+    // targeting (GDD 6.2): keep the current target while it can be struck; once it is out of the strike
+    // distance (or it is a prop and a mob came in) switch to the best unit that can. With nothing else to
+    // strike the old target is kept a bit further, only for facing.
     const w = this.weapon;
     const reach = w.range + HERO.acquireExtra;
     if (this.target) {
       const t = this.target;
-      if (!t.alive || t.pos.distanceTo(p) > reach + t.radius + 1) this.target = null;
+      if (!t.hittable || t.pos.distanceTo(p) > reach + t.radius + 1) this.target = null;
     }
-    if (!this.target) {
-      // the nearest unit in reach; any mob goes before props
+    const cur = this.target;
+    if (!cur || cur.kind === 'prop' || !this.inStrike(cur, w.range)) {
+      // the nearest unit in strike distance; any mob goes before props
       let best: Unit | null = null;
       let bd = Infinity;
       for (const u of this.units) {
-        if (!u.hittable) continue;
-        const d = u.pos.distanceTo(p) - u.radius;
-        const score = d + (u.kind === 'prop' ? 1000 : 0);
-        if (d < reach && score < bd) { bd = score; best = u; }
+        if (!u.hittable || !this.inStrike(u, w.range)) continue;
+        const score = u.pos.distanceTo(p) - u.radius + (u.kind === 'prop' ? 1000 : 0);
+        if (score < bd) { bd = score; best = u; }
       }
-      this.target = best;
+      // a prop being struck stays the target unless a mob came in
+      if (best && !(cur && cur.kind === 'prop' && best.kind === 'prop' && this.inStrike(cur, w.range))) this.target = best;
     }
 
     // facing
