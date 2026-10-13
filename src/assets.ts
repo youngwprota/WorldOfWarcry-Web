@@ -155,6 +155,7 @@ class Assets {
     const mat = this.material(textureFor(name));
     g.traverse((o) => {
       if (o.name === 'Character1_RightHand') o.name = 'hand_r';
+      else if (o.name === 'Character1_LeftHand') o.name = 'hand_l';
       const m = o as THREE.Mesh;
       if (m.isMesh) {
         m.material = Array.isArray(m.material) ? m.material.map(() => mat) : mat;

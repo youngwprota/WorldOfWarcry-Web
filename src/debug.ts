@@ -12,6 +12,23 @@ const SECTIONS: [string, Action[]][] = [
     ['Бессмертие', (g) => { g.god = !g.god; }, 'god'],
     ['Убить рядом', (g) => g.debugKillNearby(), 'wide'],
   ]],
+  ['Оружие в руку', [
+    ['Меч', (g) => g.debugGiveWeapon('sword')],
+    ['Топор', (g) => g.debugGiveWeapon('axe')],
+    ['Молот', (g) => g.debugGiveWeapon('hammer')],
+    ['Кинжалы', (g) => g.debugGiveWeapon('dagger')],
+    ['Жнец', (g) => g.debugGiveWeapon('reaper')],
+    ['Нагамаки', (g) => g.debugGiveWeapon('nagamaki')],
+    ['Коса', (g) => g.debugGiveWeapon('scythe')],
+    ['Сковорода', (g) => g.debugGiveWeapon('pan')],
+    ['Клинок', (g) => g.debugGiveWeapon('hidden_blade')],
+  ]],
+  ['Оружие в левую', [
+    ['Меч', (g) => g.debugGiveWeapon('sword', 1)],
+    ['Щит', (g) => g.debugGiveWeapon('shield', 1)],
+    ['Кинжалы', (g) => g.debugGiveWeapon('dagger', 1)],
+    ['Пусто', (g) => g.debugClearLeft(), 'wide'],
+  ]],
   ['Спавнеры', [
     ['Уничтожить всех', (g) => g.debugKillAll(), 'wide'],
     ['Сбросить таймеры', (g) => g.debugResetTimers(), 'wide'],

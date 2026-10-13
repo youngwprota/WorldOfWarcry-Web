@@ -64,6 +64,8 @@ for (const f of Object.values(FACTIONS)) {
   models.add(f.campfire);
 }
 for (const w of Object.values(WEAPONS)) Object.values(w.model).forEach((m) => models.add(m));
+models.add('sickle').add('kitchen_knife'); // sword stand-ins in sword pairs (src/offhand.ts)
+models.add('sword_undead_king'); // the Lich King's sword: prologue and the faction choice scene
 const creatures = new Set<string>();
 for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { (m.creature ? creatures : models).add(c); if (w) models.add(w); }
 for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);

@@ -26,7 +26,9 @@ const pairs: [string, string][] = [
   ['human_knight', 'sword_human_knight'], ['orc_grunt', 'axe_orc_grunt'], ['paladin', 'hammer_human_paladin'],
   ['peasant', 'axe'], ['soldier', 'sword_soldier'], ['orc_peon', 'axe_orc_peon'], ['orc_warrior', 'sword_orc_warrior'],
   ['orc_chieftain', 'axe_orc_chieftain'], ['undead_worker', ''], ['undead_warrior', 'spear_undead_warrior'],
-  ['undead_assassin', ''], ['undead_king', 'sword_undead_king'],
+  ['undead_assassin', ''], ['undead_king', 'sword_undead_king'], ['peasant', 'dagger'], ['orc_peon', 'reaper'],
+  ['human_knight', 'nagamaki'], ['human_knight', 'scythe'], ['human_knight', 'shield'], ['human_knight', 'pan'],
+  ['human_knight', 'hidden_blade'], ['human_knight', 'sickle'], ['human_knight', 'kitchen_knife'],
 ];
 const props = ['barrel', 'box_small_1', 'campfire', 'orc_barrel', 'undead_tomb_stone_1', 'undead_coffin', 'house_Lv1', 'orc_house_Lv1'];
 // ?models=a,b,c — gallery of arbitrary models in a grid (level-design lookup).
@@ -42,7 +44,8 @@ if (gallery) {
   camera.position.set(0, cols * 9, cols * 12);
   controls.target.set(0, 0, cols * 4);
 }
-const names = gallery ? [] : [...new Set([...pairs.flat().filter(Boolean), ...props])];
+const leftName = new URLSearchParams(location.search).get('left');
+const names = gallery ? [] : [...new Set([...pairs.flat().filter(Boolean), ...props, ...(leftName ? [leftName] : [])])];
 if (!gallery) await assets.loadAll(names, () => {});
 
 const mixers: THREE.AnimationMixer[] = [];
@@ -53,6 +56,9 @@ pairs.forEach(([c, w], i) => {
   if (solo === null) g.position.set((i % 6) * 1.6 - 4, 0, -Math.floor(i / 6) * 2.5);
   scene.add(g);
   if (w) attachWeapon(g, w);
+  // ?left=model — the same or another weapon in the left hand too (dual wield grip check)
+  const left = new URLSearchParams(location.search).get('left');
+  if (left) attachWeapon(g, left, true);
   const m = new THREE.AnimationMixer(g);
   m.clipAction(assets.clips.full.Idle).play();
   mixers.push(m);

@@ -64,10 +64,12 @@ const TIER_NAME: Record<ResistTier, string> = { weak: 'слабость', normal
 
 /** Icons of weapons the mob is weak (green) or resistant (orange) / immune (red) to. */
 export function resistIcons(def: Target, size = 19) {
-  return Object.values(WEAPONS).map((w) => {
-    const tier = def.resist[w.type] ?? 'normal';
+  // one icon per damage type: several weapons share a type (sword, daggers, reaper — slash)
+  return (Object.keys(DAMAGE_TYPE_ICON) as DamageType[]).map((type) => {
+    const tier = def.resist[type] ?? 'normal';
     if (tier === 'normal') return '';
-    return `<span class="ri ${tier}" title="${w.name}: ${TIER_NAME[tier]} ×${RESIST_MULT[tier]}">${weaponSvg(w.id, TIER_COLOR[tier], size)}</span>`;
+    const names = Object.values(WEAPONS).filter((w) => w.type === type).map((w) => w.name).join(', ');
+    return `<span class="ri ${tier}" title="${names}: ${TIER_NAME[tier]} ×${RESIST_MULT[tier]}">${weaponSvg(DAMAGE_TYPE_ICON[type], TIER_COLOR[tier], size)}</span>`;
   }).join('');
 }
 

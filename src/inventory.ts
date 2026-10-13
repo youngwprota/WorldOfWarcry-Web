@@ -10,6 +10,7 @@ import { DAMAGE_TYPE_ICON, fmtK, icon } from './icons';
 import { art } from './art';
 import type { Game } from './game';
 import type { UI } from './ui';
+import { pairText } from './offhand';
 
 /** Rotatable 3D hero for the character sheet (own small renderer, disposed on close). */
 class HeroPreview {
@@ -57,8 +58,8 @@ class HeroPreview {
     this.loop();
   }
 
-  setGear(weapon: string | null, outfit: Partial<Record<VisualPart, string>>) {
-    this.ch.setWeapon(weapon);
+  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>) {
+    this.ch.setWeapon(weapon, left);
     this.ch.setOutfit(outfit);
   }
 
@@ -96,6 +97,9 @@ type BagFilter = 'all' | 'weapon' | 'armor';
 type Source = { at: 'bag'; index: number } | { at: 'armor'; slot: ArmorSlot } | { at: 'weapon'; slot: 0 | 1 };
 
 /** Inventory window: paper doll, stats and the bag in one sheet. */
+/** Weapon slot captions: save.weapons[0] is the right hand. */
+const HAND_NAME = ['правая', 'левая'];
+
 export class Inventory {
   private preview: HeroPreview | null = null;
   private opened = false;
@@ -131,9 +135,9 @@ export class Inventory {
   private renderStats() {
     const g = this.game;
     const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
-    const hit = g.itemDamage(g.weaponItem) * g.powerMult();
+    const hit = g.itemDamage(g.weaponItem) * g.handMul() * g.powerMult();
     const big = (ic: string, v: string, label: string) => `<div>${art(ic, 46)}<b>${v}</b><span>${label}</span></div>`;
-    q('#i-big').innerHTML = big('sword', fmtK(hit * g.weapon.aps), 'DPS') + big('heart', fmtK(g.maxHp), 'HP') +
+    q('#i-big').innerHTML = big('sword', fmtK(g.heroDps()), 'DPS') + big('heart', fmtK(g.maxHp), 'HP') +
       big('regen', fmtK(g.regen), 'Реген');
     const combo = COMBOS[g.weaponItem.def];
     const chip = (ic: string, v: string, title: string) => `<div class="chip" title="${title}">${art(ic, 28)}<b>${v}</b></div>`;
@@ -194,10 +198,10 @@ export class Inventory {
     q('#i-right').innerHTML = side('right');
     // Weapon slots 1 and 2 on the left and right of the hero, in the middle of the preview.
     for (const i of [0, 1] as const) {
-      const tag = `<span class="wtag ${s.active === i ? 'on' : ''}">${s.active === i ? 'в руке' : `слот ${i + 1}`}</span>`;
-      q(`#i-w${i}`).innerHTML = this.cell(s.weapons[i], `data-weapon="${i}"`, 'sword', tag, s.active === i ? 'active' : '');
+      const tag = `<span class="wtag ${s.weapons[i] ? 'on' : ''}">${HAND_NAME[i]}</span>`;
+      q(`#i-w${i}`).innerHTML = this.cell(s.weapons[i], `data-weapon="${i}"`, 'sword', tag, s.weapons[i] ? 'active' : '');
     }
-    this.preview?.setGear(g.weapon.model[g.faction], g.outfit());
+    this.preview?.setGear(...g.handModels(), g.outfit());
     g.newItems = 0;
   }
 
@@ -284,6 +288,16 @@ export class Inventory {
     if (it.kind === 'weapon') {
       const c = COMBOS[it.def];
       ability = `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
+      const w = WEAPONS[it.def];
+      if (w.stack) ability = `<div class="ab-title">Порезы</div><p>Каждый удар по врагу добавляет <b>+${Math.round(w.stack.add * 100)}%</b> урона по нему, до <b>+${Math.round(w.stack.add * w.stack.max * 100)}%</b>. Через <b>${w.stack.decay} с</b> без ударов бонус сгорает.</p>` + ability;
+      if (w.pull) ability = `<div class="ab-title">Жатва душ</div><p>Взмах стягивает врагов в радиусе <b>${w.pull.radius} м</b> перед героем (боссов — нет). Каждый задетый враг сверх первого даёт <b>+${Math.round(w.pull.perEnemy * 100)}%</b> урона, до <b>×${w.pull.max}</b>.</p>` + ability;
+      if (w.cycle) ability = `<div class="ab-title">Цикл</div><p>Без остановки: взмах справа, взмах слева (широко, слабее) и узкий сильный <b>укол</b>. Цикл не сбрасывается.</p>` + ability;
+      if (w.orbit) ability = `<div class="ab-title">Бросок</div><p>Коса летит вокруг героя <b>${w.orbit.time} с</b> и режет всех на пути, потом возвращается в руку.</p>` + ability;
+      if (w.ring) ability = `<div class="ab-title">Бонк</div><p>Бьёт по головам в круге перед героем. Оглушает с шансом <b>${Math.round((w.stun ?? 0) * 100)}%</b>, в <b>${Math.round(w.ring.chance * 100)}%</b> случаев — звонкий удар <b>×${w.ring.mult}</b>.</p>` + ability;
+      if (w.assassin) ability = `<div class="ab-title">Убийца</div><p>Рывок к ближайшему врагу и удар только по нему. Всегда оглушает на <b>${w.assassin.stun} с</b>, обычных врагов ниже <b>${Math.round(w.assassin.execute * 100)}%</b> HP казнит.</p>` + ability;
+      if (w.guard) ability = `<div class="ab-title">Защита</div><p>−${Math.round(w.guard.reduce * 100)}% входящего урона. Удар по герою с шансом <b>${Math.round(w.guard.counter.normal * 100)}–${Math.round(w.guard.counter.boss * 100)}%</b> (чем сильнее враг, тем выше) вызывает контратаку оружием в другой руке. Рядом с оружием сам не бьёт.</p>` + ability;
+      const pt = pairText(it.def);
+      if (pt) ability += `<div class="ab-title">С мечом в другой руке</div><p>${pt}</p>`;
     } else {
       ability = `<div class="ab-title">Комплект</div><p>${it.rarity > 0 || rest.length ? 'Бонус к стату действует, пока предмет надет.' : 'У обычных предметов нет бонуса. Ищи <b>необычные</b> и выше.'}</p>`;
     }
@@ -292,13 +306,12 @@ export class Inventory {
     if (src.at === 'bag') {
       actions = btn('discard', 'Выбросить');
       if (it.kind === 'weapon') {
-        actions += btn('eq0', s.active === 0 ? 'В руку' : 'Слот 1', 'primary') + btn('eq1', s.active === 1 ? 'В руку' : 'Слот 2', 'primary');
+        actions += btn('eq0', 'В правую', 'primary') + btn('eq1', 'В левую', 'primary');
       } else actions += btn('equip', 'Экипировать', 'primary');
     } else if (src.at === 'armor') {
       actions = btn('unequip', 'Снять', 'red');
     } else {
       if (s.weapons[1 - src.slot]) actions += btn('unequip', 'Снять', 'red');
-      if (s.active !== src.slot) actions += btn('active', 'В руку', 'primary');
     }
     const type = slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
     tip.innerHTML = `<div class="card-head">${cellHtml(it, 'disabled', '', '', 'big')}
@@ -329,8 +342,6 @@ export class Inventory {
       else if (action === 'discard') g.discardFromBag(src.index);
     } else if (src.at === 'armor') {
       ok = g.unequipArmor(src.slot);
-    } else if (action === 'active') {
-      g.setActiveWeapon(src.slot);
     } else if (action === 'unequip') {
       ok = g.unequipWeapon(src.slot);
     }

@@ -81,7 +81,7 @@ ARMOR.ring_swift = { id: 'ring_swift', slot: 'ring', name: { human: 'Кольц�
 ARMOR.amulet_life = { id: 'amulet_life', slot: 'amulet', name: { human: 'Амулет жизни', orc: 'Клык предков' }, defense: 2, bonus: { stat: 'hp', value: 20 }, alwaysBonus: true };
 ARMOR.amulet_spring = { id: 'amulet_spring', slot: 'amulet', name: { human: 'Амулет родника', orc: 'Тотем крови' }, defense: 2, bonus: { stat: 'regen', value: 1 }, alwaysBonus: true };
 
-export const BAG_SIZE = 24;
+export const BAG_SIZE = 128;
 
 /** Armour: each extra copy adds 30% of the piece's stats. */
 export const lvlMult = (lvl: number) => 1 + 0.3 * (lvl - 1);
