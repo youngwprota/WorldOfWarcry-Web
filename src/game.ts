@@ -16,7 +16,6 @@ import { writeSave, type SaveData } from './save';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type BreakableSpot } from './world';
 import { UI } from './ui';
 import { resistIcons, rewardChips } from './icons';
-import { seeThrough } from './seethrough';
 import { heroDeaths, logFight, logSnap } from './balancelog';
 import {
   MAX_LEVEL, RESIST_CAP, SKILL_SLOTS, STAT_CAP, TIER_LEVELS, TREES, canLearn, tierOf, tierOpen, freePoints, passiveTotals, rankValues, resetCost, spentPoints,
@@ -226,8 +225,8 @@ export class Game {
     const f = FACTIONS[save.faction];
     this.camera = new THREE.PerspectiveCamera(46, 9 / 16, 0.5, 70);
     this.scene.fog = new THREE.FogExp2(0xbfe0f5, 0.015);
-    this.hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 1.7);
-    this.sun = new THREE.DirectionalLight(0xfff0d8, 2.0);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 2.0);
+    this.sun = new THREE.DirectionalLight(0xfff2d0, 2.6);
     this.sun.position.set(-6, 12, 5);
     // Real-time shadows in a box that follows the camera.
     this.sun.castShadow = true;
@@ -427,8 +426,6 @@ export class Game {
       this.camPos.z + 12.5 + (Math.random() - 0.5) * sh,
     );
     this.camera.lookAt(this.camPos.x, 0.6, this.camPos.z - 1.2);
-    seeThrough.hero.value.set(hp.x, 1.0, hp.z);
-    seeThrough.cam.value.copy(this.camera.position);
     this.world.envAt(hp.z, this.env);
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.copy(this.env.fog);

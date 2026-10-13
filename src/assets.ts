@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { applySeeThrough } from './seethrough';
 
 const BASE = import.meta.env.BASE_URL + 'assets/';
 
@@ -103,10 +102,8 @@ class Assets {
     return t;
   }
 
-  /** seeThrough: level kit (buildings, props, elf foliage) fades out between the camera and the hero. */
-  material(texName: string, seeThrough: boolean): THREE.Material {
-    const key = seeThrough ? texName + '#see' : texName;
-    let m = this.materials.get(key);
+  material(texName: string): THREE.Material {
+    let m = this.materials.get(texName);
     if (!m) {
       const emissive = EMISSIVE_OF[texName];
       m = new THREE.MeshLambertMaterial({
@@ -115,8 +112,7 @@ class Assets {
         emissiveMap: emissive ? this.texture(emissive) : null,
       });
       m.name = texName;
-      if (seeThrough) applySeeThrough(m);
-      this.materials.set(key, m);
+      this.materials.set(texName, m);
     }
     return m;
   }
@@ -156,8 +152,7 @@ class Assets {
     g.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(g);
     if (box.max.y - box.min.y > 20) g.scale.setScalar(0.01);
-    // Characters and weapons (some share the level kit's texture) never fade
-    const mat = this.material(textureFor(name), !(name in TEXTURE_OF) && textureFor(name).startsWith('proto_'));
+    const mat = this.material(textureFor(name));
     g.traverse((o) => {
       if (o.name === 'Character1_RightHand') o.name = 'hand_r';
       const m = o as THREE.Mesh;

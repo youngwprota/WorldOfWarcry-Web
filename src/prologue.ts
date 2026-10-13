@@ -8,7 +8,6 @@ import { Character } from './character';
 import { HERO, MOBS, ORBS, fmtOrb, mobImpact, type OrbKind } from './config';
 import { FloatingText, Particles, Pickups } from './fx';
 import type { Input } from './input';
-import { seeThrough } from './seethrough';
 import { art } from './art';
 import { STAT_ICON, type DialogueLine, type UI } from './ui';
 
@@ -90,11 +89,11 @@ export class Prologue {
 
   constructor(private ui: UI, private input: Input, labels: HTMLElement, private onChoose: (gains: Gains) => void) {
     // Grey, cold world of the dead (GDD 7.1: «обесцвеченная поляна»).
-    const sky = new THREE.Color(0x3d3a4e);
+    const sky = new THREE.Color(0x5e58a4);
     this.scene.background = sky;
-    this.scene.fog = new THREE.FogExp2(0x3d3a4e, 0.032);
-    this.scene.add(new THREE.HemisphereLight(0xc9c4e8, 0x2a2734, 1.9));
-    this.sun = new THREE.DirectionalLight(0xd8e0ff, 1.5);
+    this.scene.fog = new THREE.FogExp2(0x5e58a4, 0.022);
+    this.scene.add(new THREE.HemisphereLight(0xe0dcff, 0x40396e, 2.3));
+    this.sun = new THREE.DirectionalLight(0xe6ecff, 2.1);
     this.sun.position.set(-8, 20, 10);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -178,12 +177,12 @@ export class Prologue {
   private buildArena() {
     const ground = new THREE.Mesh(
       new THREE.CircleGeometry(60, 64).rotateX(-Math.PI / 2),
-      new THREE.MeshLambertMaterial({ color: 0x55526a }),
+      new THREE.MeshLambertMaterial({ color: 0x6c68a0 }),
     );
     ground.receiveShadow = true;
     this.scene.add(ground);
     // Darker, worn circle around the throne
-    const dais = new THREE.Mesh(new THREE.CircleGeometry(6.5, 48).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x45425a }));
+    const dais = new THREE.Mesh(new THREE.CircleGeometry(6.5, 48).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x5a5490 }));
     dais.position.set(LICH.x, 0.01, LICH.z + 1);
     dais.receiveShadow = true;
     this.scene.add(dais);
@@ -412,8 +411,6 @@ export class Prologue {
     this.camera.lookAt(this.camLook);
     this.sun.target.position.set(h.x, 0, h.z - 3);
     this.sun.position.set(h.x - 8, 20, h.z + 10);
-    seeThrough.hero.value.set(h.x, 1, h.z);
-    seeThrough.cam.value.copy(this.camera.position);
   }
 
   private updateHero(dt: number) {

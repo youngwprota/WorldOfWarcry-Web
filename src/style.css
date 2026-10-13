@@ -861,6 +861,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .divider b.ok { color: #8cf26a; }
 .tier-lock { margin: -4px 0 6px; text-align: center; font-size: 14px; font-weight: 900; color: #ffb3a0; text-shadow: var(--stroke-s); }
 
+/* Clean main screen: no stats, boss respawn list, zone name or quest tracker (data still updates for the hero window). */
+#stats, #bosses, #zone-label, #goal { display: none !important; }
+
 /* ---------- small screens: UI layers are laid out for UI_BASE (src/config.ts) and scaled down as a whole ---------- */
 /* --ui = min(1, w / UI_BASE.w, h / UI_BASE.h), set by UI.fit(); a layer is 1/--ui of #app in size, then scaled back */
 #hud, #pro-hud, #modal, .ad-overlay { right: auto; bottom: auto; width: calc(100% / var(--ui, 1)); height: calc(100% / var(--ui, 1)); transform: scale(var(--ui, 1)); transform-origin: 0 0; }

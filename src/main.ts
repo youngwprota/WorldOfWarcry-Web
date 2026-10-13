@@ -2,6 +2,7 @@ import '@fontsource/rubik/600.css';
 import '@fontsource/rubik/700.css';
 import '@fontsource/rubik/900.css';
 import * as THREE from 'three';
+import './grade';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
@@ -172,13 +173,13 @@ function prologue() {
 // ---------- faction select: each race's champion on a small stage, the Lich King behind ----------
 function factionScreen(gains: Gains) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x48445c);
-  scene.fog = new THREE.Fog(0x48445c, 9, 24);
-  scene.add(new THREE.HemisphereLight(0xe8e4ff, 0x3a3348, 2));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+  scene.background = new THREE.Color(0x6a62b8);
+  scene.fog = new THREE.Fog(0x6a62b8, 10, 26);
+  scene.add(new THREE.HemisphereLight(0xf2eeff, 0x4c4680, 2.3));
+  const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
   sun.position.set(2, 5, 4);
   scene.add(sun);
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(10, 48).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x5d5872 }));
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(10, 48).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x7c74b8 }));
   scene.add(ground);
   const cam = new THREE.PerspectiveCamera(50, app.clientWidth / app.clientHeight, 0.1, 50);
   // Cards cover the lower half of the screen: keep the champions in the upper half.
