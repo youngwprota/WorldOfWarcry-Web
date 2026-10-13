@@ -124,14 +124,14 @@ export const WEAPONS: Record<string, WeaponDef> = {
     pull: { radius: 5, ahead: 1.5, force: 0.85, perEnemy: 0.15, max: 2 },
   },
   nagamaki: {
-    id: 'nagamaki', name: 'Нагамаки', type: 'slash', dmgMul: 0.75, aps: 1.3, shape: 'arc', arc: 200, range: 2.6,
+    id: 'nagamaki', name: 'Нагамаки', type: 'slash', dmgMul: 0.95, aps: 1.3, shape: 'arc', arc: 200, range: 2.6,
     anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️', cycle: true,
     swing: ['slashRL', 'slashLR', 'thrust'],
   },
   scythe: {
-    id: 'scythe', name: 'Коса', type: 'slash', dmgMul: 0.9, aps: 0.4, shape: 'circle', arc: 360, range: 3,
+    id: 'scythe', name: 'Коса', type: 'slash', dmgMul: 1.0, aps: 0.4, shape: 'circle', arc: 360, range: 3,
     anim: 'AxeAttack', model: { human: 'scythe', orc: 'scythe' }, icon: '🌀',
-    orbit: { time: 2.4, radius: 2.8, turns: 2, rehit: 0.45 },
+    orbit: { time: 2.4, radius: 2.2, turns: 2, rehit: 0.45 },
     swing: ['throw'],
   },
   pan: {
@@ -140,7 +140,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     swing: ['overhead'],
   },
   hidden_blade: {
-    id: 'hidden_blade', name: 'Скрытый клинок', type: 'slash', dmgMul: 3.2, aps: 0.45, shape: 'arc', arc: 120, range: 2.0,
+    id: 'hidden_blade', name: 'Скрытый клинок', type: 'slash', dmgMul: 2.4, aps: 0.45, shape: 'arc', arc: 120, range: 2.0,
     anim: 'SwordAttack', model: { human: 'hidden_blade', orc: 'hidden_blade' }, icon: '🗡', single: true,
     assassin: { stun: 1.2, execute: 0.25, dash: 1.2 },
     swing: ['assassin'],
@@ -170,7 +170,7 @@ export const SWORD_PAIRS = {
   /** Sword hit: `chance` the mob attacks right away (feeds the shield's counters). */
   shield: { chance: 0.15 },
   /** The sword stabs along with the blade: blade damage × `dmg`, attack speed × `aps`; no swings of its own. */
-  hidden_blade: { dmg: 1.6, aps: 0.85 },
+  hidden_blade: { dmg: 1.45, aps: 0.85 },
   /** After the thrust a 4th blow, one of: falling sword, launch, dash — × `mult`. */
   nagamaki: { mult: 1.8, fall: 2.4, dash: 3.5 },
   /** Scythe cut: `chance` a sword starts circling that mob for `time` s, cutting it (×`mult`) every `rehit` s; it may

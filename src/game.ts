@@ -478,7 +478,12 @@ export class Game {
   get dual() { return !!this.save.weapons[0] && !!this.save.weapons[1]; }
   handMul() { return this.dual ? DUAL.mul : 1; }
   /** Hand multiplier of one weapon: the hidden blade carries the folded-in sword at full damage. */
-  handMulOf(it: Item) { return this.pair?.kind === 'hidden_blade' && it.def !== 'sword' ? 1 : this.handMul(); }
+  handMulOf(it: Item) {
+    if (this.pair?.kind === 'hidden_blade' && it.def !== 'sword') return 1;
+    // beside a shield the weapon is the only one that swings
+    const other = this.save.weapons[this.save.weapons[0] === it ? 1 : 0];
+    return other && WEAPONS[other.def].guard && !WEAPONS[it.def].guard ? 1 : this.handMul();
+  }
   powerMult() {
     let m = 1 + this.power / 100;
     if (this.faction === 'orc') m *= 1.1 * (1 + this.bloodlustMax * (1 - this.hp / this.maxHp));
@@ -1063,7 +1068,7 @@ export class Game {
       for (const u of this.units) {
         if (!u.hittable) continue;
         const dx = u.pos.x - pos.x, dz = u.pos.z - pos.z;
-        const r = u.radius + 0.9;
+        const r = u.radius + 1.1;
         if (dx * dx + dz * dz > r * r) continue;
         const last = o.last.get(u) ?? -99;
         if (this.time - last < o.rehit) continue;
