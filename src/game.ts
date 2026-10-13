@@ -1172,28 +1172,34 @@ export class Game {
   }
 
   // ---------- items / inventory ----------
-  private lootItem(item: Item) {
+  /** Gives an item to the hero; returns where it went (text for the gacha result). */
+  lootItem(item: Item) {
     const color = RARITY[item.rarity].color;
     const name = itemName(item, this.faction);
     const head = v1.copy(this.hero.position).setY(2.4);
     sfx.levelUp();
+    let where = '';
     // A weapon goes straight into a free weapon slot (e.g. the hammer from the first boss).
     const free = this.save.weapons.findIndex((x) => !x);
     if (item.kind === 'weapon' && free >= 0) {
       this.save.weapons[free] = item;
       this.fx.spawn(head, `${name} → слот ${free + 1}`, 'loot', 1.4, { color });
       this.ui.toast(`${name}: второй слот оружия. Переключай кнопкой ⇄`);
+      where = 'Во второй слот оружия';
     } else if (this.save.bag.length < BAG_SIZE) {
       this.save.bag.push(item);
       this.newItems++;
       this.fx.spawn(head, `+ ${name}`, 'loot', 1.4, { color });
+      where = 'Положено в сумку';
     } else {
       const g = scrapValue(item);
       this.save.gold += g;
       this.fx.spawn(head, `Сумка полна: ${name} → +${g} 🪙`, 'loot', 1.6, { color });
+      where = `Сумка полна: разобрано на ${g} золота`;
     }
     this.refreshHud(true);
     this.persist();
+    return where;
   }
 
   /** Equip an item from the bag; whatever was in that slot goes back into the bag. */

@@ -79,5 +79,17 @@ export const sfx = {
   levelUp() { [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.18, 'triangle', 0.18, 1, i * 0.09)); },
   combo() { noise(0.35, 0.6, 700, 0.5); [330, 494, 659].forEach((f, i) => tone(f, 0.22, 'sawtooth', 0.1, 1.2, i * 0.05)); },
   click() { tone(900, 0.05, 'square', 0.06); },
+  /** Gacha forge: hammer on the anvil, brighter ring for a higher rarity stage. */
+  anvil(stage: number) {
+    noise(0.18, 0.55, 2400, 0.9);
+    tone(1400 + stage * 260, 0.5 + stage * 0.15, 'triangle', 0.14, 0.98);
+    tone(2100 + stage * 390, 0.35, 'sine', 0.08, 0.99);
+    tone(110, 0.18, 'square', 0.12, 0.5);
+  },
+  reveal(rarity: number) {
+    const base = [392, 440, 523, 587][rarity];
+    [1, 1.25, 1.5, 2].slice(0, 2 + Math.min(rarity, 2)).forEach((k, i) => tone(base * k, 0.4 + rarity * 0.25, 'triangle', 0.16, 1, i * 0.08));
+    if (rarity >= 3) { noise(0.8, 0.5, 500, 0.4); tone(65, 1, 'sine', 0.35, 0.6); }
+  },
   barrier() { [392, 523, 659, 784].forEach((f, i) => tone(f, 0.5, 'sine', 0.2, 1, i * 0.12)); },
 };
