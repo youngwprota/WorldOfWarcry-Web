@@ -281,6 +281,9 @@ export class Inventory {
     if (it.kind === 'weapon') {
       const c = COMBOS[it.def];
       ability = `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
+      const w = WEAPONS[it.def];
+      if (w.stack) ability = `<div class="ab-title">Порезы</div><p>Каждый удар по врагу добавляет <b>+${Math.round(w.stack.add * 100)}%</b> урона по нему, до <b>+${Math.round(w.stack.add * w.stack.max * 100)}%</b>. Через <b>${w.stack.decay} с</b> без ударов бонус сгорает; добивание считает его дважды.</p>` + ability;
+      if (w.pull) ability = `<div class="ab-title">Жатва душ</div><p>Взмах стягивает врагов в радиусе <b>${w.pull.radius} м</b> перед героем (боссов — нет). Каждый задетый враг сверх первого даёт <b>+${Math.round(w.pull.perEnemy * 100)}%</b> урона, до <b>×${w.pull.max}</b>.</p>` + ability;
     } else {
       ability = `<div class="ab-title">Комплект</div><p>${it.rarity > 0 || rest.length ? 'Бонус к стату действует, пока предмет надет.' : 'У обычных предметов нет бонуса. Ищи <b>необычные</b> и выше.'}</p>`;
     }

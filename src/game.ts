@@ -1504,6 +1504,14 @@ export class Game {
   /** Debug: the hero cannot die (HP stops at 1). */
   god = false;
 
+  /** Debug: a rare weapon of this type straight into the active hand; the old one goes to the bag if it fits. */
+  debugGiveWeapon(def: string) {
+    const old = this.save.weapons[this.save.active];
+    this.save.weapons[this.save.active] = dropItem({ kind: 'weapon', def, rarity: 2 });
+    if (old && this.save.bag.length < BAG_SIZE) this.save.bag.push(old);
+    this.afterGearChange();
+  }
+
   debugSetHp(frac: number) {
     this.hp = Math.max(1, this.maxHp * frac);
   }

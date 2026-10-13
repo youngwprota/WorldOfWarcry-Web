@@ -349,7 +349,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
     anim: 'SwordAttack', hp: 640, dmg: 20, aps: 1.1, range: 1.5, speed: 4.5, aggro: 6.2, regen: 0.03, scale: 1.3,
     ...foes('cemetery'), reward: { speed: 5 }, respawn: 600,
-    drop: { kind: 'weapon', def: 'sword', rarity: 2 },
+    drop: { kind: 'weapon', def: 'dagger', rarity: 2 },
   },
   gravedigger: {
     id: 'gravedigger', name: 'Могильщик', rank: 'mini',
@@ -360,10 +360,10 @@ export const MOBS: Record<string, MobDef> = {
   },
   death: {
     id: 'death', name: 'Смерть',
-    model: { human: ['undead_king', 'sword_undead_king'], orc: ['undead_king', 'sword_undead_king'] },
+    model: { human: ['undead_king', 'reaper'], orc: ['undead_king', 'reaper'] },
     anim: 'SwordAttack', hp: 4500, dmg: 19, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
     ...foes('cemetery'), reward: { power: 18 }, respawn: 300,
-    drop: { kind: 'weapon', def: 'hammer', rarity: 3 },
+    drop: { kind: 'weapon', def: 'reaper', rarity: 3 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['forest-peaks', 'cemetery-peaks'],
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
