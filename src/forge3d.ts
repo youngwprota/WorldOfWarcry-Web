@@ -545,5 +545,6 @@ export class Forge3D {
     for (const x of this.own) x.dispose();
     this.composer?.dispose();
     this.renderer.dispose();
+    this.renderer.forceContextLoss(); // free the context now, see HeroPreview.dispose()
   }
 }
