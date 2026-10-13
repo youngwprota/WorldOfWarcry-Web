@@ -5,7 +5,7 @@ import { Orbits } from './orbits';
 import { Creature } from './creature';
 import {
   COMBOS, DUAL, FACTIONS, LEFT_SWING, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
-  type ComboDef, type DamageType, type MobDef, type OrbKind, type WeaponDef, type ZoneDef,
+  mobRank, type ComboDef, type DamageType, type MobDef, type OrbKind, type WeaponDef, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
@@ -706,6 +706,9 @@ export class Game {
     const it = this.save.weapons[h.i];
     if (!it) { h.combo = 0; h.impact = -1; return; }
     const w = WEAPONS[it.def];
+    // beside a weapon the shield only answers blows (counterStrike); alone (or two shields) it bashes too
+    const other = this.save.weapons[1 - h.i];
+    if (w.guard && other && !WEAPONS[other.def].guard) { h.combo = 0; return; }
     h.atkCd -= dt;
     const period = 1 / w.aps;
     const combo = COMBOS[it.def];
@@ -778,7 +781,7 @@ export class Game {
    * The blow of one hand lands. `yaw`: strike direction (shield counters strike back at the attacker, see
    * counterStrike); returns the number of units hit.
    */
-  private heroStrike(h: Hand, yaw = this.hero.facing) {
+  private heroStrike(h: Hand, yaw = this.hero.facing, focus: Unit | null = this.target) {
     const it = this.save.weapons[h.i];
     if (!it) return 0;
     const w = WEAPONS[it.def];
@@ -800,7 +803,7 @@ export class Game {
     // pan: one roll per swing, every head under it rings
     const ring = w.ring && Math.random() < w.ring.chance ? w.ring.mult : 1;
     // the hidden blade stays on its one target even in the finisher
-    const only = (!fin || w.assassin) && w.single ? this.target : null;
+    const only = (!fin || w.assassin) && w.single ? focus : null;
     sfx.swing();
     for (const u of this.units) {
       if (only && u !== only) continue;
@@ -856,7 +859,7 @@ export class Game {
 
   /** Hidden blade on its victim: a sure stun, an execution under the threshold, a freeze-frame and a push-in. */
   private assassinate(m: Mob, a: NonNullable<WeaponDef['assassin']>) {
-    const plain = !m.def.boss && !m.def.drop && !m.def.bonus;
+    const plain = mobRank(m.def) === 'normal';
     if (m.alive && plain && m.hp < m.maxHp * a.execute) {
       this.fx.spawn(this.unitTextAt(m, v1).setY(m.barY + 0.6), 'КАЗНЬ', 'dmg weak', 1);
       this.damageMob(m, Math.ceil(m.hp), 'weak', 1);
@@ -1316,8 +1319,9 @@ export class Game {
   private hurtHero(raw: number, from: THREE.Vector3, src?: Mob) {
     if (this.dead) return;
     // GDD 10.5: reduction = defense / (defense + 100).
-    let dmg = Math.max(1, Math.round(raw * (100 / (100 + this.defense)) * (0.9 + Math.random() * 0.2)));
+    let dmg = Math.max(1, Math.round(raw * (100 / (100 + this.defense)) * this.guardMul() * (0.9 + Math.random() * 0.2)));
     this.lastHurt = this.time;
+    if (src) this.tryCounter(src);
     if (src) this.fightOf(src).taken += Math.min(dmg, this.hp + this.shield);
     if (this.shield > 0) {
       const absorbed = Math.min(this.shield, dmg);
@@ -1346,6 +1350,46 @@ export class Game {
       sfx.die();
       this.input.reset();
     }
+  }
+
+  /** Incoming damage multiplier from the shields in hand. */
+  private guardMul() {
+    let k = 1;
+    for (const it of this.save.weapons) if (it && WEAPONS[it.def].guard) k *= 1 - WEAPONS[it.def].guard!.reduce;
+    return k;
+  }
+
+  private lastCounter = -99;
+  private counterHand = newHand(0);
+
+  /** Shield: a blow taken may be answered at once by the other hand (with all its effects) towards the attacker. */
+  private tryCounter(m: Mob) {
+    const items = this.save.weapons;
+    const s = items.findIndex((it) => it && WEAPONS[it.def].guard);
+    if (s < 0 || !m.alive || this.dead) return;
+    const g = WEAPONS[items[s]!.def].guard!;
+    if (this.time - this.lastCounter < g.cd || Math.random() >= g.counter[mobRank(m.def)]) return;
+    this.lastCounter = this.time;
+    const other = (1 - s) as 0 | 1;
+    const striker = items[other] && !WEAPONS[items[other]!.def].guard ? other : (s as 0 | 1);
+    this.counterStrike(m, striker, s as 0 | 1);
+  }
+
+  /** Strike back at `m` with hand `striker` (shield bash when both hands hold shields); `shieldHand` blocks. */
+  private counterStrike(m: Mob, striker: 0 | 1, shieldHand: 0 | 1) {
+    const it = this.save.weapons[striker]!;
+    const w = WEAPONS[it.def];
+    const yaw = Math.atan2(m.pos.x - this.hero.position.x, m.pos.z - this.hero.position.z);
+    this.hero.facing = yaw;
+    this.hero.swing('bash', shieldHand, 0.5, 0.12);
+    if (striker !== shieldHand) this.hero.swing(w.swing?.[0] ?? (striker ? LEFT_SWING[w.anim][0] : 'slashRL'), striker, 0.6, 0.15);
+    // a throwaway hand state: a counter neither spends nor builds the combo chain
+    const h = Object.assign(this.counterHand, newHand(striker));
+    const hits = w.orbit ? 0 : this.heroStrike(h, yaw, m);
+    if (w.orbit && !this.orbits.list.some((o) => (o.tag as ScytheTag).hand === striker)) this.heroStrike(h, yaw, m);
+    const at = v1.copy(this.hero.position).setY(1.2);
+    this.particles.burst(at, 0x9fd0ff, 10, 0.1, 6, 0.4);
+    this.fx.spawn(at.setY(2.9), hits ? 'Контратака!' : 'Блок', 'dmg weak', 0.7, { color: '#9fd0ff' });
   }
 
   private respawnInCamp() {

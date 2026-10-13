@@ -89,7 +89,16 @@ export interface WeaponDef {
    * mob it passes (once per `rehit` s each); the hand waits for it to come back.
    */
   orbit?: { time: number; radius: number; turns: number; rehit: number };
+  /**
+   * Shield: never swings by itself; incoming damage × (1 − `reduce`); a hit taken may trigger a counter-strike of
+   * the other hand at the attacker (`counter` chance by its rank), not more often than every `cd` s. Two shields
+   * bash back with the shield.
+   */
+  guard?: { reduce: number; counter: Record<MobRank, number>; cd: number };
 }
+
+export type MobRank = 'normal' | 'elite' | 'mini' | 'boss';
+export const mobRank = (d: MobDef): MobRank => (d.boss ? 'boss' : d.rank ?? 'normal');
 
 export const WEAPONS: Record<string, WeaponDef> = {
   sword: {
@@ -139,6 +148,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   shield: {
     id: 'shield', name: 'Щит', type: 'crush', dmgMul: 0.5, aps: 0.8, shape: 'arc', arc: 120, range: 1.8,
     anim: 'AxeAttack', model: { human: 'shield', orc: 'shield' }, icon: '🛡️',
+    guard: { reduce: 0.15, counter: { normal: 0.2, elite: 0.3, mini: 0.4, boss: 0.5 }, cd: 0.4 },
     swing: ['bash'],
   },
 };
