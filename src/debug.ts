@@ -29,6 +29,9 @@ const SECTIONS: [string, Action[]][] = [
     ['Кинжалы', (g) => g.debugGiveWeapon('dagger', 1)],
     ['Пусто', (g) => g.debugClearLeft(), 'wide'],
   ]],
+  ['Горнило', [
+    ['+5 круток', (g) => g.debugAddPulls(5), 'wide'],
+  ]],
   ['Спавнеры', [
     ['Уничтожить всех', (g) => g.debugKillAll(), 'wide'],
     ['Сбросить таймеры', (g) => g.debugResetTimers(), 'wide'],

@@ -245,6 +245,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #goal { max-width: 150px; font-size: 12px; font-weight: 700; color: #f6e7cc; background: #1d120bb3; border: 2px solid #00000080; padding: 5px 8px; border-radius: 10px; text-align: right; text-shadow: 0 1px 0 #000; }
 #goal:empty { display: none; }
 #goal b { color: #ffd23f; }
+#btn-gacha[data-badge]:not([data-badge=""])::after,
 #btn-bag[data-badge]:not([data-badge=""])::after { content: attr(data-badge); position: absolute; top: -8px; right: -8px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; background: linear-gradient(#ff7d93, #e8335a); border: 2px solid var(--ink); font-size: 12px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); display: flex; align-items: center; justify-content: center; }
 #zone-banner { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-weight: 900; font-size: 30px; color: #fff; text-shadow: var(--stroke), 0 4px 0 var(--ink); opacity: 0; transform: scale(0.9); transition: opacity 0.4s, transform 0.4s; text-transform: uppercase; }
 #zone-banner small { display: table; margin: 8px auto 0; font-size: 13px; font-weight: 900; color: #fff; padding: 4px 12px; border-radius: 10px; background: linear-gradient(#ffd04d, #ff8418); border: 2px solid var(--ink); text-shadow: var(--stroke-s); text-transform: none; }
@@ -361,6 +362,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #minimap, #bigmap { width: 140px; height: 140px; }
 #zone-label { font-size: 19px; max-width: 170px; }
 #goal { font-size: 14px; max-width: 170px; padding: 7px 10px; border-radius: 12px; }
+#btn-gacha[data-badge]:not([data-badge=""])::after,
 #btn-bag[data-badge]:not([data-badge=""])::after { min-width: 28px; height: 28px; font-size: 15px; border-radius: 14px; top: -10px; right: -10px; }
 #bosses { left: 6px; top: 34%; gap: 18px; }
 .bw { width: 104px; }
@@ -813,6 +815,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .g-pity { font-size: 14px; font-weight: 700; color: #f0dcc0; text-shadow: 0 1px 0 #0008; }
 .g-pity b { color: #ffc93a; }
 .g-pull { flex: none; width: 100%; max-width: 300px; min-height: 60px; font-size: 22px; }
+.g-pull:disabled { filter: grayscale(0.9) brightness(0.7); }
+.g-pull .g-have { font-size: 15px; opacity: 0.85; }
 .g-hint { position: absolute; bottom: calc(22px + env(safe-area-inset-bottom)); font-size: 13px; font-weight: 700; color: #f0dcc0aa; animation: pulse 1s ease-in-out infinite alternate; }
 .g-result .g-tag { background: var(--rc); }
 .g-result .g-name { color: var(--rc); font-size: 28px; }

@@ -619,6 +619,8 @@ export const GACHA = {
   tiers: [0, 2, 3, 4],
   rates: [0.7, 0.22, 0.074, 0.006],
   pity: 60,
+  /** Chance a kill gives one pull, by mob rank (tuned with `npm run sim` to ~1 pull per 5 min of play). */
+  token: { normal: 0.03, elite: 0.25, mini: 0.5, boss: 1 } as Record<MobRank, number>,
   banner: { def: 'hammer', name: 'Молот Короля-лича', subtitle: 'Выкован из костей павших королей. Шанс повышен!' },
   /** Hammer blows per pull; the rarity colour can climb after each, legendary only on the last one. */
   strikes: 5,

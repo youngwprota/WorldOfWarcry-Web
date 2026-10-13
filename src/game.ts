@@ -6,7 +6,7 @@ import { HELPER_SEEK, Helpers, type Helper } from './helpers';
 import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from './offhand';
 import { Creature } from './creature';
 import {
-  COMBOS, DUAL, FACTIONS, LEFT_SWING, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  COMBOS, DUAL, FACTIONS, GACHA, LEFT_SWING, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
   mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type WeaponDef, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -1216,7 +1216,17 @@ export class Game {
     for (const it of m.loot) this.pickups.spawnItem(m.pos, it);
     m.loot = [];
     if (m.def.bonus) this.grantBonus(m);
+    if (Math.random() < GACHA.token[mobRank(m.def)]) this.grantPull(m);
     if (m.def.boss) this.persist();
+  }
+
+  /** A kill dropped a gacha pull. */
+  private grantPull(m: Mob) {
+    this.save.pulls = (this.save.pulls ?? 0) + 1;
+    this.fx.spawn(v1.copy(m.pos).setY(2.6), '+1 крутка', 'loot', 1.6, { color: '#ffb347' });
+    this.ui.gachaBadge(this.save.pulls);
+    sfx.levelUp();
+    this.persist();
   }
 
   /** Micro-boss kill: permanent stats straight onto the hero. */
@@ -1945,6 +1955,7 @@ export class Game {
     if (full) {
       this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it) * this.handMul(), this.save.equip);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
+      this.ui.gachaBadge(this.save.pulls ?? 0);
     }
     this.ui.minimap(this.hero.position, this.hero.facing, this.mapDots(45), this.world, this.mapMarks(45));
     this.ui.edgeArrow(g.at && g.at.alive ? g.at.pos : null, this.camera);
@@ -1961,6 +1972,12 @@ export class Game {
   god = false;
 
   /** Debug: a rare weapon of this type straight into a hand; the old one goes to the bag if it fits. */
+  debugAddPulls(n: number) {
+    this.save.pulls = (this.save.pulls ?? 0) + n;
+    this.refreshHud(true);
+    this.persist();
+  }
+
   debugGiveWeapon(def: string, slot: 0 | 1 = 0) {
     const old = this.save.weapons[slot];
     this.save.weapons[slot] = dropItem({ kind: 'weapon', def, rarity: 2 });

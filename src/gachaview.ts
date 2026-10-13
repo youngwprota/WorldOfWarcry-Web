@@ -59,6 +59,7 @@ export class GachaView {
     this.q('#g-3d').classList.add('hidden');
     const it = bannerItem(1);
     const left = GACHA.pity - this.game.save.gachaPity;
+    const pulls = this.game.save.pulls ?? 0;
     const rates = GACHA.rates.map((r, i) => `<span style="color:${RARITY[GACHA.tiers[i]].color}">${RARITY[GACHA.tiers[i]].name} ${+(r * 100).toFixed(1)}%</span>`).join('');
     this.q('#g-body').className = 'g-body';
     this.q('#g-body').innerHTML = `
@@ -72,13 +73,16 @@ export class GachaView {
       </div>
       <div class="g-rates">${rates}</div>
       <div class="g-pity">Легендарка гарантирована через <b>${left}</b> ${plural(left, 'крутку', 'крутки', 'круток')}</div>
-      <button class="btn primary g-pull" id="g-pull">Ковать</button>`;
+      <button class="btn primary g-pull" id="g-pull"${pulls ? '' : ' disabled'}>Ковать <span class="g-have">· ${pulls ? `крутки: ${pulls}` : 'нет круток'}</span></button>
+      ${pulls ? '' : '<div class="g-pity">Крутки выпадают с врагов: элитки, мини-боссы и боссы — чаще</div>'}`;
     this.ui.on('#g-pull', () => this.forge());
   }
 
   /** Pull right away (the item is granted even if the window is closed mid-animation), then play the forge. */
   private forge() {
     const s = this.game.save;
+    if (!s.pulls) return;
+    s.pulls--;
     const res = pull(s.gachaPity, 1);
     s.gachaPity = res.pity;
     this.item = res.item;
@@ -107,7 +111,7 @@ export class GachaView {
         <div class="g-name">${itemName(it, this.game.faction)}</div>
         <div class="g-got">${cellHtml(it, 'disabled')}${linesHtml(it)}</div>
         <div class="g-where">${this.where}</div>
-        <div class="g-btns"><button class="btn" id="g-back">Назад</button><button class="btn primary" id="g-again">Ещё раз</button></div>
+        <div class="g-btns"><button class="btn" id="g-back">Назад</button><button class="btn primary" id="g-again"${this.game.save.pulls ? '' : ' disabled'}>Ещё раз${this.game.save.pulls ? ` · ${this.game.save.pulls}` : ''}</button></div>
       </div>`;
     this.ui.on('#g-back', () => this.renderBanner());
     this.ui.on('#g-again', () => this.forge());

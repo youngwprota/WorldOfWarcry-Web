@@ -3,7 +3,7 @@
 // Run: npm run sim -- [--faction human|orc] [--weapon sword] [--left dagger] [--runs 20] [--until 45]
 //                     [--dodge 0.6] [--uptime 0.8] [--combo 0.85] [--seed 1] [--keep] [--log] [--mobs]
 import {
-  ATTACK_HIT, BREAKABLES, COMBOS, FACTIONS, HERO, MOBS, ORBS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, SWORD_PAIRS,
+  ATTACK_HIT, BREAKABLES, COMBOS, FACTIONS, GACHA, HERO, MOBS, ORBS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, SWORD_PAIRS,
   WEAPONS, depthMul, mobImpact, mobRank, type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type ZoneId,
 } from '../src/config';
 import { armorMul, guardMul, handMulOf, heroStats, powerMult, type HeroBuild } from '../src/balance';
@@ -294,6 +294,7 @@ function lootItem(h: Hero, it: Item) {
   else h.bag.push(it);
   if (!OPT.keep) regear(h);
 }
+const dpsCache = new Map<string, number>();
 function regear(h: Hero) {
   const all = [...h.weapons, ...h.bag].filter((x): x is Item => !!x && x.kind === 'weapon');
   let best: [Item | null, Item | null] = h.weapons;
@@ -301,7 +302,9 @@ function regear(h: Hero) {
   const zone: ZoneId = h.spot.s > GATE.s ? 'cemetery' : 'forest';
   for (const a of all) for (const b of [null, ...all]) {
     if (b === a) continue;
-    const dps = dummyDps(h, [a, b], zone);
+    const key = `${zone}|${wname(a)}|${wname(b)}`;
+    let dps = dpsCache.get(key);
+    if (dps === undefined) dpsCache.set(key, (dps = dummyDps(h, [a, b], zone)));
     if (dps > bestDps) { bestDps = dps; best = [a, b]; }
   }
   const used = new Set(best.filter(Boolean));
@@ -330,7 +333,7 @@ function dummyDps(h: Hero, weapons: [Item | null, Item | null], zone: ZoneId) {
 
 // ---------- the bot ----------
 /** Gacha pulls a kill gives on average (filled in by the pull drops, GACHA.token). */
-const tokenChance = (_u: Unit) => 0;
+const tokenChance = (u: Unit) => (u.kind === 'mob' ? GACHA.token[mobRank(MOBS[u.def])] : 0);
 
 interface Snap { t: number; zone: string; power: number; maxHp: number; regen: number; defense: number; weapons: string; kills: number; deaths: number; pulls: number; win: Record<string, number> }
 interface FightRec { def: string; depth: number; dur: number; swings: number; taken: number; maxHp: number; win: boolean }
@@ -350,6 +353,7 @@ function run(seed: number): RunOut {
   h.hp = stats(h).maxHp;
   const units = buildUnits();
   const out: RunOut = { snaps: [], bossAt: {}, bossDur: {}, fights: [], pulls: [], deaths: 0 };
+  dpsCache.clear();
   const open = new Set<ZoneId>(['forest']);
   const camp: Spot = { s: sCamp, off: 0 };
   let t = 0;
