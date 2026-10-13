@@ -5,7 +5,8 @@ export interface FightRec {
   t: number; // play time at the end, s
   mob: string;
   boss: boolean;
-  kite: string; // anti-kite variant at the time
+  /** Old logs only: anti-kite variant (mechanic removed). */
+  kite?: string;
   result: 'kill' | 'reset' | 'death';
   dur: number; // s from the first hit (either side)
   dealt: number;
@@ -30,7 +31,7 @@ export interface SnapRec {
   kills: number;
   deaths: number;
   weapon: string;
-  kite: string;
+  kite?: string;
   /** Paper TTK (s) of each boss with the current weapon, as the name colour sees it. */
   ttk: Record<string, number>;
 }
@@ -77,16 +78,16 @@ const pct = (a: number, b: number) => `${Math.round((100 * a) / Math.max(1, b))}
 
 /** Plain-text report: per-minute curve, per-mob averages, every boss fight. */
 export function report(): string {
-  const out: string[] = ['== Минуты: время зона | сила HP реген золото | убийств смертей | оружие | анти-кайт | TTK боссов'];
+  const out: string[] = ['== Минуты: время зона | сила HP реген золото | убийств смертей | оружие | TTK боссов'];
   for (const s of log.snaps) {
     const ttk = Object.entries(s.ttk).map(([k, v]) => `${k} ${Math.round(v)}с`).join(', ');
-    out.push(`${mmss(s.t)} ${s.zone} | ${Math.round(s.power)} ${s.maxHp} ${s.regen.toFixed(2)} ${s.gold} | ${s.kills} ${s.deaths} | ${s.weapon} | ${s.kite} | ${ttk}`);
+    out.push(`${mmss(s.t)} ${s.zone} | ${Math.round(s.power)} ${s.maxHp} ${s.regen.toFixed(2)} ${s.gold} | ${s.kills} ${s.deaths} | ${s.weapon} | ${ttk}`);
   }
-  out.push('', '== Мобы (кроме боссов) [анти-кайт]: боёв | ср. длительность | ср. получено % HP | убито/сброс/смерть');
+  out.push('', '== Мобы (кроме боссов): боёв | ср. длительность | ср. получено % HP | убито/сброс/смерть');
   const by = new Map<string, FightRec[]>();
   for (const f of log.fights) {
     if (f.boss) continue;
-    const key = `${f.mob} [${f.kite ?? '?'}]`;
+    const key = f.mob;
     by.set(key, [...(by.get(key) ?? []), f]);
   }
   for (const [mob, fs] of by) {
@@ -98,7 +99,7 @@ export function report(): string {
   }
   out.push('', '== Боссы: время | босс итог | длит. | нанесено получено | удары комбо | слэмы попало | HP героя | сила');
   for (const f of log.fights.filter((x) => x.boss)) {
-    out.push(`${mmss(f.t)} | ${f.mob} [${f.kite ?? '?'}] ${f.result} | ${f.dur.toFixed(0)}с | ${f.dealt} ${f.taken} (${pct(f.taken, f.maxHp)}) | ${f.hits} ${f.combos} | ${f.slams} ${f.slamHits} | ${Math.round(f.hpStart)}→${Math.round(f.hpEnd)}/${f.maxHp} | ${Math.round(f.power)}`);
+    out.push(`${mmss(f.t)} | ${f.mob} ${f.result} | ${f.dur.toFixed(0)}с | ${f.dealt} ${f.taken} (${pct(f.taken, f.maxHp)}) | ${f.hits} ${f.combos} | ${f.slams} ${f.slamHits} | ${Math.round(f.hpStart)}→${Math.round(f.hpEnd)}/${f.maxHp} | ${Math.round(f.power)}`);
   }
   return out.join('\n');
 }

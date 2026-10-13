@@ -127,6 +127,8 @@ export interface MobDef {
   range: number;
   speed: number;
   aggro: number;
+  /** HP fraction per second once nobody has hit the mob for MOB_REGEN_DELAY s. */
+  regen: number;
   scale: number;
   resist: Partial<Record<DamageType, ResistTier>>;
   /** Fixed power orbs dropped on death (shown above the HP bar). */
@@ -156,32 +158,32 @@ export interface BossDef {
   chaseDelay: number;
   chaseGap: number; // s between blasts
   chaseRange: number; // blasts only when the hero is this close, m
-  regen: number; // HP fraction per second when nobody hits the boss
-  regenDelay: number; // s without damage before regen starts
 }
 const BOSS_BASE = {
   slamMul: 2.2, slamDelay: 1.25, cd: 6.5, cdPhase2: 4.2, phase2At: 0.5, phase2Dmg: 1.2,
   chance: 0.55, chaseCount: 3, chaseRadius: 2.3, chaseMul: 1.4, chaseDelay: 1.0, chaseGap: 0.45, chaseRange: 11,
-  regen: 0.03, regenDelay: 4,
 };
+
+/** Seconds without taking damage before a mob (bosses too) starts regenerating `MobDef.regen`. */
+export const MOB_REGEN_DELAY = 5;
 
 export const MOBS: Record<string, MobDef> = {
   bandit_thug: {
     id: 'bandit_thug', name: 'Разбойник',
     model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['peasant', 'axe'] },
-    anim: 'AxeAttack', hp: 110, dmg: 9, aps: 0.7, range: 1.5, speed: 3.0, aggro: 7, scale: 1,
+    anim: 'AxeAttack', hp: 110, dmg: 9, aps: 0.7, range: 1.5, speed: 3.0, aggro: 4.5, regen: 0.04, scale: 1,
     resist: { slash: 'weak' }, reward: { hp: 1, power: 1 }, gold: [1, 3], xp: 10, respawn: 45,
   },
   bandit_fighter: {
     id: 'bandit_fighter', name: 'Головорез',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 220, dmg: 16, aps: 0.8, range: 1.6, speed: 3.4, aggro: 7.5, scale: 1.08,
+    anim: 'SwordAttack', hp: 220, dmg: 16, aps: 0.8, range: 1.6, speed: 3.4, aggro: 5, regen: 0.03, scale: 1.08,
     resist: { slash: 'weak' }, reward: { power: 2, hp: 1 }, gold: [2, 5], xp: 16, respawn: 60,
   },
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
-    anim: 'AxeAttack', hp: 5200, dmg: 30, aps: 0.6, range: 2.4, speed: 3.6, aggro: 9, scale: 1.9,
+    anim: 'AxeAttack', hp: 5200, dmg: 30, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
     resist: { slash: 'weak' }, reward: { power: 5, hp: 4, regen: 2, speed: 2 }, gold: [60, 90], xp: 300, respawn: 180,
     boss: {
       ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest',
@@ -191,25 +193,25 @@ export const MOBS: Record<string, MobDef> = {
   skeleton_worker: {
     id: 'skeleton_worker', name: 'Мертвяк',
     model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
-    anim: 'SwordAttack', hp: 140, dmg: 8, aps: 0.8, range: 1.4, speed: 2.8, aggro: 7, scale: 1,
+    anim: 'SwordAttack', hp: 140, dmg: 8, aps: 0.8, range: 1.4, speed: 2.8, aggro: 4.5, regen: 0.03, scale: 1,
     resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { regen: 1, hp: 1, power: 1 }, gold: [3, 6], xp: 22, respawn: 50,
   },
   skeleton_warrior: {
     id: 'skeleton_warrior', name: 'Скелет-копейщик',
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
-    anim: 'SwordAttack', hp: 260, dmg: 15, aps: 0.75, range: 2.0, speed: 3.0, aggro: 8, scale: 1.08,
+    anim: 'SwordAttack', hp: 260, dmg: 15, aps: 0.75, range: 2.0, speed: 3.0, aggro: 5, regen: 0.025, scale: 1.08,
     resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { power: 2, hp: 1 }, gold: [4, 8], xp: 28, respawn: 70,
   },
   ghost: {
     id: 'ghost', name: 'Призрак',
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
-    anim: 'SwordAttack', hp: 130, dmg: 14, aps: 1.0, range: 1.4, speed: 4.3, aggro: 9, scale: 1,
+    anim: 'SwordAttack', hp: 130, dmg: 14, aps: 1.0, range: 1.4, speed: 4.3, aggro: 6, regen: 0.05, scale: 1,
     resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { speed: 2, power: 1 }, gold: [4, 7], xp: 26, respawn: 60,
   },
   death: {
     id: 'death', name: 'Смерть',
     model: { human: ['undead_king', 'sword_undead_king'], orc: ['undead_king', 'sword_undead_king'] },
-    anim: 'SwordAttack', hp: 4500, dmg: 19, aps: 0.6, range: 2.6, speed: 3.4, aggro: 10, scale: 2.1,
+    anim: 'SwordAttack', hp: 4500, dmg: 19, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
     resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { power: 8, hp: 6, regen: 3, speed: 3 }, gold: [150, 220], xp: 800, respawn: 300,
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery',
@@ -230,6 +232,8 @@ export const fmtOrb = (k: OrbKind, n = 1) => `+${+(ORBS[k].value * n).toFixed(2)
 export const HERO = {
   power: 10, hp: 100, regen: 1, speed: 5,
   regenCap: 5, speedCap: 7.5, outOfCombatRegen: 3, outOfCombatDelay: 3,
+  /** Final run speed multiplier (applies to old saves too): base 5 → 4 m/s, cap 7.5 → 6. Mobs run 2.8–4.3. */
+  speedMul: 0.8,
   radius: 0.45, acquireExtra: 0.4, campfireRegen: 4, campfireRadius: 6,
 };
 
@@ -271,14 +275,6 @@ export function depthMul(zone: ZoneId, z: number) {
   const k = (v: number) => 1 + (v - 1) * t;
   return { hp: d ? k(d.hp) : 1, dmg: d ? k(d.dmg) : 1, reward: d ? k(d.reward) : 1, scale: d ? k(d.scale) : 1 };
 }
-
-/**
- * Anti-kite (debug toggle in ⚙): the hero runs slower for a moment after each swing, so hitting while
- * backing off lets mobs catch up.
- */
-export type AntiKite = 'off' | 'slow';
-export const ANTI_KITE_NAMES: Record<AntiKite, string> = { off: 'выкл', slow: 'замедление' };
-export const ANTI_KITE = { slowMul: 0.55, slowTime: 0.5 }; // speed × slowMul for slowTime s after a swing starts
 
 export const RESPAWN_MIN_DIST = 10;
 export const LEASH = 15;
