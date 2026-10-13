@@ -12,7 +12,7 @@ import { swordPair, type Pair } from '../src/offhand';
 import { pull } from '../src/gacha';
 import { ARENA, FORT, GATE, SPAWN, pathAt, progressAt } from '../src/island';
 
-declare const process: { argv: string[] };
+declare const process: { argv: string[]; exit(code?: number): never };
 // ---------- options ----------
 const argv = process.argv.slice(2);
 const arg = (k: string, d: string) => { const i = argv.indexOf(`--${k}`); return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : d; };
@@ -31,6 +31,7 @@ const OPT = {
   keep: flag('keep'), // never change weapons
   log: flag('log'), // per-minute table of the first run
   mobs: flag('mobs'), // per-mob fight table
+  bench: flag('bench'), // single-target kill time of every weapon and sword pair, then exit
 };
 
 // ---------- deterministic RNG (the game code calls Math.random) ----------
@@ -496,11 +497,34 @@ function run(seed: number): RunOut {
   return out;
 }
 
+// ---------- weapon bench ----------
+if (OPT.bench) {
+  OPT.uptime = 1;
+  OPT.combo = 1;
+  const def: MobDef = { ...MOBS.bandit_thug, resist: {}, dmg: 0, rank: 'elite' };
+  const ttk = (a: string, b: string | null, n = 20) => {
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      rs = i + 1;
+      const h: Hero = {
+        faction: 'human', stats: { power: 0, hp: 1e6, regen: 0, speed: 100 }, equip: {}, hp: 1e6, bag: [], pulls: 0, pity: 0, spot: { s: 0, off: 0 },
+        weapons: [makeItem('weapon', a, 2, 1), b ? makeItem('weapon', b, 2, 1) : null],
+      };
+      sum += fight(h, { def, hp: 4000, dmg: 0 }, false, 600).dur;
+    }
+    return (sum / n).toFixed(0).padStart(4);
+  };
+  console.log('== Стенд: время убийства цели 4000 HP (редкое ур.1, сила 0, без резистов), с — одно / в паре с мечом');
+  for (const w of Object.keys(WEAPONS)) console.log(`${w.padEnd(13)} ${w === 'shield' ? '   —' : ttk(w, null)} / ${ttk(w, 'sword')}`);
+  console.log(`axe+shield    ${ttk('axe', 'shield')}`);
+  process.exit(0);
+}
+
 // ---------- report ----------
 const mmss = (t: number | undefined) => (t === undefined ? '  —  ' : `${String(Math.floor(t / 60)).padStart(2)}:${String(Math.floor(t % 60)).padStart(2, '0')}`);
 const pct = (a: number[], q: number) => { if (!a.length) return undefined; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(q * s.length))]; };
 const t0 = Date.now();
-const runs = Array.from({ length: OPT.runs }, (_, i) => run(OPT.seed + i));
+const runs: RunOut[] = Array.from({ length: OPT.runs }, (_, i) => run(OPT.seed + i));
 const lines: string[] = [];
 const say = (s = '') => lines.push(s);
 say(`== Сим: ${OPT.faction}, ${OPT.weapon || FACTIONS[OPT.faction].startWeapon}${OPT.left ? '+' + OPT.left : ''}, прогонов ${OPT.runs}, до ${OPT.until / 60} мин; увороты ${OPT.dodge}, uptime ${OPT.uptime}, комбо ${OPT.combo}`);
