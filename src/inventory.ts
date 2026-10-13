@@ -86,6 +86,9 @@ class HeroPreview {
   dispose() {
     cancelAnimationFrame(this.raf);
     this.renderer.dispose();
+    // dispose() keeps the WebGL context alive until GC; past the browser's limit the oldest one,
+    // the game's own, is lost and the world goes blank. Release it now.
+    this.renderer.forceContextLoss();
   }
 }
 

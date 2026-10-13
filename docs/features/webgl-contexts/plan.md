@@ -28,7 +28,7 @@
 ## Шаги
 - [x] 1. Воспроизвести на ПК: `npm run dev`, 20 раз открыть/закрыть инвентарь — в консоли
       «Too many active WebGL contexts», мир пропадает. Записать результат в handoff.
-- [ ] 2. inventory.ts: HeroPreview.dispose() → `renderer.dispose(); renderer.forceContextLoss()`.
+- [x] 2. inventory.ts: HeroPreview.dispose() → `renderer.dispose(); renderer.forceContextLoss()`.
 - [ ] 3. forge3d.ts: то же в Forge3D.dispose() (после composer.dispose()).
 - [ ] 4. main.ts: обработчики потери/восстановления контекста + reload по таймауту, console.warn.
 - [ ] 5. Повторить шаг 1 (инвентарь и Горнило по 20+ раз) — предупреждений нет, мир на месте.
