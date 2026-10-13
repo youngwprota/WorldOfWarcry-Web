@@ -6,24 +6,26 @@ const tmp = new THREE.Vector3();
 
 /** Pooled DOM labels projected from world space (damage numbers, pickups, barks). */
 export class FloatingText {
-  private pool: { el: HTMLDivElement; pos: THREE.Vector3; t: number; life: number; vy: number; active: boolean }[] = [];
+  private pool: { el: HTMLDivElement; pos: THREE.Vector3; t: number; life: number; vy: number; lift: number; active: boolean }[] = [];
 
   constructor(layer: HTMLElement, private camera: THREE.Camera) {
     for (let i = 0; i < 60; i++) {
       const el = document.createElement('div');
       el.className = 'ftext';
       layer.appendChild(el);
-      this.pool.push({ el, pos: new THREE.Vector3(), t: 0, life: 1, vy: 0, active: false });
+      this.pool.push({ el, pos: new THREE.Vector3(), t: 0, life: 1, vy: 0, lift: 0, active: false });
     }
   }
 
-  spawn(pos: THREE.Vector3, text: string, cls: string, life = 0.8, opts: { html?: boolean; color?: string } = {}) {
+  /** `lift`: extra screen px upwards, to start above an over-head block (HP bar, reward chips). */
+  spawn(pos: THREE.Vector3, text: string, cls: string, life = 0.8, opts: { html?: boolean; color?: string; lift?: number } = {}) {
     let p = this.pool.find((x) => !x.active);
     if (!p) p = this.pool.reduce((a, b) => (a.t / a.life > b.t / b.life ? a : b));
     p.active = true;
     p.t = 0;
     p.life = life;
     p.vy = 1.6;
+    p.lift = opts.lift ?? 0;
     p.pos.copy(pos);
     p.pos.x += (Math.random() - 0.5) * 0.6;
     p.el.className = 'ftext show ' + cls;
@@ -41,7 +43,7 @@ export class FloatingText {
       tmp.copy(p.pos).project(this.camera);
       const k = p.t / p.life;
       const pop = k < 0.12 ? 0.6 + k * 5 : 1.2 - Math.min(0.2, (k - 0.12));
-      p.el.style.transform = `translate(${(tmp.x * 0.5 + 0.5) * w}px, ${(-tmp.y * 0.5 + 0.5) * h}px) translate(-50%,-50%) scale(${pop})`;
+      p.el.style.transform = `translate(${(tmp.x * 0.5 + 0.5) * w}px, ${(-tmp.y * 0.5 + 0.5) * h - p.lift}px) translate(-50%,-50%) scale(${pop})`;
       p.el.style.opacity = String(k > 0.7 ? (1 - k) / 0.3 : 1);
     }
   }

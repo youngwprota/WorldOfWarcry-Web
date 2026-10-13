@@ -1,3 +1,4 @@
+import { STAT_ICON, mini } from './art';
 import { ORBS, RESIST_MULT, WEAPONS, fmtOrb, type DamageType, type OrbKind, type ResistTier } from './config';
 
 /** Anything with resistances and a fixed reward: mobs and breakable props. */
@@ -60,7 +61,7 @@ export function resistIcons(def: Target, size = 19) {
 /** "+2 +6" chips in orb colours: permanent stats granted by the kill. */
 export function rewardChips(def: Target) {
   return (Object.entries(def.reward) as [OrbKind, number][])
-    .map(([k, n]) => `<span class="rw" style="color:${ORBS[k].css}" title="${ORBS[k].label}"><i style="background:${ORBS[k].css}"></i>${fmtOrb(k, n)}</span>`)
+    .map(([k, n]) => `<span class="rw" title="${ORBS[k].label}">${mini(STAT_ICON[k])}${fmtOrb(k, n)}</span>`)
     .join('');
 }
 

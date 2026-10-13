@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { Character } from './character';
+import { Creature } from './creature';
 import {
-  COMBOS, FACTIONS, HERO, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
+  COMBOS, FACTIONS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
   type DamageType, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -22,6 +23,13 @@ import {
   type ActiveDef, type TalentStat,
 } from './talents';
 
+/** Debris colour of hits and kills: bone dust for skeletons and spirits, blood for the rest. */
+const bloodColor = (m: Mob) => m.def.id.startsWith('skel') || m.def.id === 'ghost' || m.def.id === 'death' ? 0xd8d4c8 : 0xc0392b;
+/** White-yellow sparks of a non-lethal hit (blood is for the kill). */
+const HIT_SPARK = 0xfff3a8;
+/** Height of the hero's over-head HP bar; damage taken pops out above it. */
+const HERO_BAR_Y = 2.45;
+
 /** Running counters of one fight with a mob (balance log). */
 interface FightStat { t0: number; dealt: number; taken: number; hits: number; combos: number; slams: number; slamHits: number; hpStart: number }
 
@@ -31,7 +39,7 @@ const v2 = new THREE.Vector3();
 interface Target { kind: 'mob' | 'prop'; ref: Mob | Breakable; }
 
 class Mob {
-  ch: Character;
+  ch: Character | Creature;
   hp: number;
   maxHp: number;
   state: 'idle' | 'chase' | 'return' | 'dead' = 'idle';
@@ -43,9 +51,18 @@ class Mob {
   wanderT = Math.random() * 3;
   wander = new THREE.Vector3();
   knock = new THREE.Vector3();
+  /** Knockback applied once the death freeze (KILL_FX) is over. */
+  deathKnock = new THREE.Vector3();
+  /** XP, orbs, gold and items wait for the death clip to finish. */
+  rewardsDue = false;
+  loot: Item[] = [];
+  firstKillXp = false;
+  /** deadT when the rewards were paid; the corpse sinks after that. */
+  paidAt = 0;
   radius: number;
   hpEl: HTMLDivElement;
   hpFill: HTMLDivElement;
+  hpText: HTMLSpanElement;
   respawnEl: HTMLDivElement;
   respawnTotal = 0;
   /** Spawned by a prop (grave): no respawn, removed after death. */
@@ -73,7 +90,7 @@ class Mob {
     const [model, weapon] = def.model[faction];
     this.dmgType = !weapon || weapon.includes('hammer') ? 'crush' : weapon.includes('spear') ? 'pierce' : 'slash';
     const scale = def.scale * mul.scale;
-    this.ch = new Character(model, weapon, scale);
+    this.ch = def.creature ? new Creature(model, scale) : new Character(model, weapon, scale);
     this.dmg = def.dmg * mul.dmg;
     this.reward = {};
     for (const [k, n] of Object.entries(def.reward) as [OrbKind, number][]) this.reward[k] = Math.round(n * mul.reward);
@@ -81,16 +98,17 @@ class Mob {
     this.ch.position.copy(spawn);
     this.ch.facing = Math.random() * Math.PI * 2;
     this.maxHp = this.hp = Math.round(def.hp * mul.hp);
-    this.radius = 0.45 * scale;
+    this.radius = (def.creature ? 0.7 : 0.45) * scale;
     this.wander.copy(spawn);
-    // Above the head: stats granted by the kill, weakness/resistance icons, HP bar.
+    // Above the head: stats granted by the kill and weakness/resistance icons in one row, HP bar under them.
     // Bosses get a bigger version with their name (coloured by difficulty) and HP numbers.
     this.hpEl = document.createElement('div');
     this.hpEl.className = def.boss ? 'mobui boss' : 'mobui';
     this.hpEl.innerHTML = (def.boss ? `<div class="bname">${def.boss.titles[faction]}</div>` : '') +
-      `<div class="rws">${rewardChips({ resist: def.resist, reward: this.reward })}</div><div class="ris">${resistIcons(def, def.boss ? 22 : 19)}</div>` +
-      `<div class="mobhp"><div></div>${def.boss ? '<span></span>' : ''}</div>`;
+      `<div class="mside"><div class="rws">${rewardChips({ resist: def.resist, reward: this.reward })}</div><div class="ris">${resistIcons(def, def.boss ? 27 : 24)}</div></div>` +
+      '<div class="mobhp"><div></div><span></span></div>';
     this.hpFill = this.hpEl.querySelector('.mobhp > div')!;
+    this.hpText = this.hpEl.querySelector('.mobhp span')!;
     layer.appendChild(this.hpEl);
     // Respawn loader shown at the (invisible) spawn point while the mob is dead.
     this.respawnEl = document.createElement('div');
@@ -127,7 +145,7 @@ class Breakable {
     this.def = BREAKABLES[spot.kind];
     this.uiEl = document.createElement('div');
     this.uiEl.className = 'mobui prop';
-    this.uiEl.innerHTML = `<div class="rws">${rewardChips(this.def)}</div><div class="ris">${resistIcons(this.def, 16)}</div><div class="mobhp"><div></div></div>`;
+    this.uiEl.innerHTML = `<div class="mside"><div class="rws">${rewardChips(this.def)}</div><div class="ris">${resistIcons(this.def, 20)}</div></div><div class="mobhp"><div></div></div>`;
     this.hpFill = this.uiEl.querySelector('.mobhp > div')!;
     layer.appendChild(this.uiEl);
     // Same respawn loader as mobs, shown where the prop stood.
@@ -184,6 +202,8 @@ export class Game {
   private hp: number;
   private shield = 0;
   private lastHurt = -99;
+  /** Shove from mob hits (MobDef.push), decays like mob knockback. */
+  private heroKnock = new THREE.Vector3();
   private lastFight = -99;
   private atkCd = 0;
   private impact = -1;
@@ -435,7 +455,7 @@ export class Game {
     const { w, h } = this.ui.size();
     this.fx.update(dt, w, h);
     // hero HP bar above the head
-    v1.copy(hp).setY(2.45).project(this.camera);
+    v1.copy(hp).setY(HERO_BAR_Y).project(this.camera);
     const hb = this.heroBar;
     hb.el.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
     hb.el.classList.toggle('dead', this.dead);
@@ -465,6 +485,10 @@ export class Game {
     if (moving) {
       p.addScaledVector(this.moveDir, this.speed * dt);
       ch.walkRate = Math.min(2.4, (this.speed * this.moveDir.length()) / 2.1);
+    }
+    if (this.heroKnock.lengthSq() > 0.001) {
+      p.addScaledVector(this.heroKnock, dt);
+      this.heroKnock.multiplyScalar(Math.max(0, 1 - dt * 9));
     }
     // soft push from living mobs
     for (const m of this.mobs) {
@@ -541,7 +565,7 @@ export class Game {
     }
     if (this.comboShown !== this.combo) {
       this.comboShown = this.combo;
-      this.ui.combo(this.combo, combo.hits, combo.name);
+      this.ui.combo(this.combo, combo.hits);
     }
 
     // regen
@@ -612,7 +636,7 @@ export class Game {
     for (const b of this.props) {
       if (only && b !== only) continue;
       if (!b.alive || !this.inShape(b.pos, b.radius, shape, arc, range)) continue;
-      this.hitProp(b, (fin ? 3 : 1) * RESIST_MULT[b.def.resist[w.type] ?? 'normal'], b.def.resist[w.type] ?? 'normal');
+      this.hitProp(b, (fin ? 3 : 1) * RESIST_MULT[b.def.resist[w.type] ?? 'normal']);
       hits++;
     }
     if (w.shape === 'circle' && hits) {
@@ -625,7 +649,6 @@ export class Game {
       this.waves.add(this.hero.position, range + 0.5, fin.color);
       if (fin.spin) this.hero.spin(0.35);
       this.shake = Math.max(this.shake, 0.35);
-      this.fx.spawn(v1.copy(this.hero.position).setY(2.6), `${fin.name}!`, 'combo', 0.9);
       sfx.combo();
     }
     this.lastSwingHit = hits > 0;
@@ -645,17 +668,20 @@ export class Game {
     m.ch.hit();
     m.state = m.state === 'return' ? 'return' : 'chase';
     if (!m.def.boss) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
-    const head = v1.copy(m.pos).setY(1.9 * m.def.scale);
-    if (crit) { this.fx.spawn(head, `${dmg}<small>Крит!</small>`, 'dmg crit', 0.9, { html: true }); sfx.hit(true); }
-    else if (tier === 'weak') { this.fx.spawn(head, String(dmg), 'dmg weak'); sfx.hit(true); }
-    else if (tier === 'resist' || tier === 'immune') {
-      this.fx.spawn(head, `${dmg}<small>Сопротивление</small>`, 'dmg resist', 0.8, { html: true });
-      sfx.resist();
-    } else { this.fx.spawn(head, String(dmg), 'dmg'); sfx.hit(); }
-    this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), m.def.id.startsWith('skel') || m.def.id === 'ghost' || m.def.id === 'death' ? 0xd8d4c8 : 0xc0392b, 4, 0.08, 4, 0.45);
+    const head = this.mobTextAt(m);
+    const lift = m.hpEl.offsetHeight;
+    if (crit) { this.fx.spawn(head, `-${dmg}`, 'dmg crit', 0.9, { lift }); sfx.hit(true); }
+    else if (tier === 'weak') { this.fx.spawn(head, `-${dmg}`, 'dmg weak', 0.8, { lift }); sfx.hit(true); }
+    else if (tier === 'resist' || tier === 'immune') { this.fx.spawn(head, `-${dmg}`, 'dmg resist', 0.8, { lift }); sfx.resist(); }
+    else { this.fx.spawn(head, `-${dmg}`, 'dmg', 0.8, { lift }); sfx.hit(); }
+    this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), HIT_SPARK, 2, 0.06, 5, 0.3);
     if (m.hp <= 0) this.killMob(m);
   }
 
+  /** World point the over-head block (HP bar + chips) is anchored to; damage numbers start there plus its height. */
+  private mobTextAt(m: Mob, out = v1) { return out.copy(m.pos).setY(2.15 * m.def.scale); }
+
+  /** Lethal hit: death clip, blood, shake and the knockback are queued here; rewards come in grantKillRewards. */
   private killMob(m: Mob) {
     m.state = 'dead';
     m.hp = 0;
@@ -663,22 +689,39 @@ export class Game {
     m.ch.die();
     m.hpEl.classList.remove('show');
     m.respawnTotal = m.def.respawn;
+    m.deathKnock.copy(m.knock).multiplyScalar(KILL_FX.knockMul);
+    m.knock.set(0, 0, 0);
+    this.shake = Math.max(this.shake, KILL_FX.shake);
+    this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), bloodColor(m), KILL_FX.blood, 0.12, 6, 0.7);
     this.save.kills++;
     this.endFight(m, 'kill');
     if (this.target?.ref === m) this.target = null;
     const d = m.def;
-    // Bosses give double XP on the first kill.
-    this.addXp(d.xp * (d.boss && !this.save.bosses[d.id]?.firstKill ? 2 : 1), m.pos);
     if (this.t('killHeal') > 0) this.hp = Math.min(this.maxHp, this.hp + this.maxHp * this.t('killHeal') / 100);
     this.fireSkills('kill');
-    for (const [k, n] of Object.entries(m.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(m.pos, k);
-    this.dropGold(m.pos, m.gold);
+    m.rewardsDue = true;
+    m.loot = [];
     if (d.boss) this.killBoss(m);
     else if (m.temp) m.respawnAt = Infinity;
     else {
       m.respawnAt = this.time + d.respawn;
-      if (Math.random() < 0.07) this.pickups.spawnItem(m.pos, rollItem(this.zoneLevel(m.pos.z)));
+      if (Math.random() < 0.07) m.loot.push(rollItem(this.zoneLevel(m.pos.z)));
     }
+  }
+
+  /** Once the death clip has finished: XP, stat orbs, gold and item drops. */
+  private grantKillRewards(m: Mob) {
+    m.rewardsDue = false;
+    m.paidAt = m.deadT;
+    const d = m.def;
+    // Bosses give double XP on the first kill.
+    this.addXp(d.xp * (m.firstKillXp ? 2 : 1));
+    m.firstKillXp = false;
+    for (const [k, n] of Object.entries(m.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(m.pos, k);
+    this.dropGold(m.pos, m.gold);
+    for (const it of m.loot) this.pickups.spawnItem(m.pos, it);
+    m.loot = [];
+    if (d.boss) this.persist();
   }
 
   private zoneLevel(z: number) { return this.world.zoneAt(z).id === 'cemetery' ? 2 : 1; }
@@ -695,6 +738,7 @@ export class Game {
     const drops: Item[] = [];
     if (!rec.firstKill) {
       rec.firstKill = true;
+      m.firstKillXp = true;
       // Guaranteed first-kill rewards (GDD 7.3).
       drops.push(d.boss!.zone === 'forest'
         ? makeItem('weapon', 'hammer', 1, 1)
@@ -708,7 +752,7 @@ export class Game {
     } else {
       drops.push(rollItem(lvl, 0.3), rollItem(lvl, 0.15));
     }
-    for (const it of drops) this.pickups.spawnItem(m.pos, it);
+    m.loot.push(...drops);
     this.persist();
   }
 
@@ -745,8 +789,7 @@ export class Game {
       case 'regen': s.regen = Math.min(HERO.regenCap, +(s.regen + ORBS.regen.value).toFixed(2)); break;
       case 'speed': s.speed = Math.min(HERO.speedCap, +(s.speed + ORBS.speed.value).toFixed(2)); break;
     }
-    const o = ORBS[kind as OrbKind];
-    this.fx.spawn(head, `${fmtOrb(kind as OrbKind)} ${o.label}`, 'orb', 0.7, { color: o.css });
+    this.ui.gain(kind as OrbKind, this.time);
     this.ui.popStat(kind as OrbKind);
     void pos;
   }
@@ -771,11 +814,22 @@ export class Game {
       m.awake = dHero < 40;
       m.ch.root.visible = m.state !== 'dead' ? dHero < 34 : m.ch.root.visible && dHero < 34;
       if (m.state === 'dead') {
+        const holdEnd = KILL_FX.holdAt + KILL_FX.freeze;
+        const held = m.deadT < holdEnd;
         m.deadT += dt;
-        m.ch.update(dt, false, m.deadT < 3 && dHero < 34);
-        if (m.deadT > 2.2) m.ch.position.y = -(m.deadT - 2.2) * 0.8;
-        if (m.deadT > 4) m.ch.root.visible = false;
-        if (m.temp && m.deadT > 4.5) { this.removeMob(m); removed = true; continue; }
+        if (held && m.deadT >= holdEnd) m.knock.copy(m.deathKnock);
+        const holding = m.deadT > KILL_FX.holdAt && m.deadT < holdEnd;
+        m.ch.update(dt, false, !holding && m.rewardsDue && dHero < 34);
+        if (m.knock.lengthSq() > 0.001) {
+          m.pos.addScaledVector(m.knock, dt);
+          m.knock.multiplyScalar(Math.max(0, 1 - dt * 9));
+        }
+        // Off-screen corpses do not animate, so their clip never finishes: pay out right after the freeze.
+        if (m.rewardsDue && m.deadT >= holdEnd && (m.ch.deathDone || dHero >= 34)) this.grantKillRewards(m);
+        const gone = m.rewardsDue ? 0 : m.deadT - m.paidAt;
+        if (gone > 0.4) m.ch.position.y = -(gone - 0.4) * 0.8;
+        if (gone > 2.2) m.ch.root.visible = false;
+        if (m.temp && gone > 2.7) { this.removeMob(m); removed = true; continue; }
         if (this.time >= m.respawnAt && m.spawn.distanceTo(hp) > RESPAWN_MIN_DIST) this.respawnMob(m);
         continue;
       }
@@ -815,12 +869,16 @@ export class Game {
               this.bossLogic(m, dt, dHero);
             }
             if (m.casting <= 0) {
-              if (dHero > reach * 0.85) moving = this.stepTo(m, hp, def.speed, dt);
+              const back = m.ch instanceof Creature ? m.ch.backstep() : 0;
+              if (back > 0) {
+                m.pos.x -= Math.sin(m.ch.facing) * back;
+                m.pos.z -= Math.cos(m.ch.facing) * back;
+              } else if (dHero > reach * 0.85) moving = this.stepTo(m, hp, def.speed, dt);
               m.ch.facing = turn(m.ch.facing, Math.atan2(hp.x - m.pos.x, hp.z - m.pos.z), dt * 8);
               m.atkCd -= dt;
               if (dHero < reach && m.atkCd <= 0 && m.impact < 0) {
                 const period = 1 / def.aps;
-                const impactAt = Math.min(0.55, period * 0.45);
+                const impactAt = mobImpact(m.ch.hitTime(def.anim), period);
                 m.ch.attack(def.anim, period, impactAt);
                 m.impact = impactAt;
                 m.atkCd = period;
@@ -841,7 +899,13 @@ export class Game {
         m.impact -= dt;
         if (m.impact < 0 && !this.dead && m.stun <= 0) {
           const reach = def.range + m.radius * 0.5 + HERO.radius + 0.5;
-          if (m.pos.distanceTo(hp) < reach) this.hurtHero(m.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos, m.dmgType, m);
+          if (m.pos.distanceTo(hp) < reach) {
+            this.hurtHero(m.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos, m.dmgType, m);
+            if (def.push) {
+              this.heroKnock.set(hp.x - m.pos.x, 0, hp.z - m.pos.z).normalize().multiplyScalar(def.push);
+              this.shake = Math.max(this.shake, 0.25);
+            }
+          }
         }
       }
       // knockback
@@ -914,7 +978,7 @@ export class Game {
     v1.multiplyScalar(Math.min(d, speed * dt) / d);
     m.pos.add(v1);
     m.ch.facing = turn(m.ch.facing, Math.atan2(v1.x, v1.z), dt * 8);
-    m.ch.walkRate = speed / 2.1;
+    m.ch.walkRate = speed / m.ch.stride;
     return true;
   }
 
@@ -996,7 +1060,7 @@ export class Game {
     if (src && src.alive && this.t('thorns') > 0) {
       const back = Math.max(1, Math.round(dmg * this.t('thorns') / 100));
       src.hp -= back;
-      this.fx.spawn(v2.copy(src.pos).setY(1.9 * src.def.scale), String(back), 'dmg resist small', 0.6);
+      this.fx.spawn(this.mobTextAt(src, v2), `-${back}`, 'dmg resist small', 0.6, { lift: src.hpEl.offsetHeight });
       if (src.hp <= 0) this.killMob(src);
     }
     if (this.absorb > 0 && this.time < this.absorbUntil) {
@@ -1013,8 +1077,9 @@ export class Game {
     this.hero.hit();
     sfx.hurt();
     // Fully absorbed by the human shield: show it in shield blue instead of "-0".
-    if (dmg > 0) this.fx.spawn(v1.copy(this.hero.position).setY(2), `-${dmg}`, 'hurt', 0.7);
-    else this.fx.spawn(v1.copy(this.hero.position).setY(2), '🛡', 'hurt', 0.5, { color: '#6cc6ff' });
+    const lift = this.heroBar.el.offsetHeight + 14;
+    if (dmg > 0) this.fx.spawn(v1.copy(this.hero.position).setY(HERO_BAR_Y), `-${dmg}`, 'hurt', 0.7, { lift });
+    else this.fx.spawn(v1.copy(this.hero.position).setY(HERO_BAR_Y), '🛡', 'hurt', 0.5, { color: '#6cc6ff', lift });
     void from;
     this.ui.hurtFlash();
     if (this.hp <= 0 && this.fireSkills('lethal')) return;
@@ -1065,10 +1130,8 @@ export class Game {
   }
 
   // ---------- breakables ----------
-  private hitProp(b: Breakable, dmg: number, tier: string) {
+  private hitProp(b: Breakable, dmg: number) {
     b.hp = +(b.hp - dmg).toFixed(2);
-    if (tier === 'weak') this.fx.spawn(v2.copy(b.pos).setY(1.4), 'Слабость', 'dmg weak small', 0.6);
-    else if (tier !== 'normal') this.fx.spawn(v2.copy(b.pos).setY(1.4), 'Сопротивление', 'dmg resist small', 0.6);
     b.shake = 0.2;
     b.flash = 0.1;
     sfx.hit();
@@ -1082,7 +1145,7 @@ export class Game {
     this.particles.burst(v1.copy(b.pos).setY(0.6), b.def.color, 10, 0.22, 6, 1.1);
     for (const [k, n] of Object.entries(b.def.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(b.pos, k);
     this.dropGold(b.pos, b.def.gold);
-    this.addXp(XP_BREAKABLE, b.pos);
+    this.addXp(XP_BREAKABLE);
     this.runBreakEvents(b);
     if (Math.random() < 0.025) this.pickups.spawnItem(b.pos, rollItem(this.zoneLevel(b.pos.z)));
   }
@@ -1141,18 +1204,19 @@ export class Game {
       const show = m.alive && m.ch.root.visible && m.pos.distanceTo(hp) < (m.def.boss ? 24 : 16);
       if (!show) { if (m.hpEl.classList.contains('show')) m.hpEl.classList.remove('show'); }
       else {
-        v1.copy(m.pos).setY(2.15 * m.def.scale).project(this.camera);
+        this.mobTextAt(m).project(this.camera);
         m.hpEl.classList.add('show');
         m.hpEl.classList.toggle('hurt', m.hp < m.maxHp);
         m.hpEl.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
         m.hpFill.style.width = `${(m.hp / m.maxHp) * 100}%`;
+        const t = m.def.boss ? `${Math.ceil(m.hp)} / ${m.maxHp}` : `${Math.ceil(m.hp)}`;
+        if (m.hpText.textContent !== t) m.hpText.textContent = t;
         if (m.def.boss) {
-          (m.hpEl.querySelector('.mobhp span') as HTMLElement).textContent = `${Math.ceil(m.hp)} / ${m.maxHp}`;
           (m.hpEl.querySelector('.bname') as HTMLElement).style.color = this.bossColor(m);
         }
       }
       // Respawn loader at the spawn point (appears once the corpse has gone).
-      const dead = m.state === 'dead' && !m.temp && (m.deadT > 2.5 || m.def.boss) && m.spawn.distanceTo(hp) < 30;
+      const dead = m.state === 'dead' && !m.temp && ((!m.rewardsDue && m.deadT - m.paidAt > 2.2) || m.def.boss) && m.spawn.distanceTo(hp) < 30;
       if (!dead) { if (m.respawnEl.classList.contains('show')) m.respawnEl.classList.remove('show'); continue; }
       v1.copy(m.spawn).setY(0.6).project(this.camera);
       if (Math.abs(v1.x) > 1.1 || Math.abs(v1.y) > 1.1) { m.respawnEl.classList.remove('show'); continue; }
@@ -1352,6 +1416,7 @@ export class Game {
         left: m.alive ? 0 : Math.max(1, Math.ceil(m.respawnAt - this.time)),
       })),
     });
+    this.ui.tickGains(this.time);
     this.ui.progress(this.save.level, this.save.xp, this.save.level >= MAX_LEVEL ? 0 : xpToNext(this.save.level), freePoints(this.save));
     this.ui.skills(this.skillHud());
     if (full) {
@@ -1369,12 +1434,12 @@ export class Game {
   }
 
   // ---------- level & experience ----------
-  addXp(amount: number, at?: THREE.Vector3) {
+  addXp(amount: number) {
     const s = this.save;
     if (s.level >= MAX_LEVEL || amount <= 0) return;
     amount = Math.round(amount * (1 + this.t('xpPct') / 100));
     s.xp += amount;
-    if (at) this.fx.spawn(v2.copy(at).setY(2.4), `+${amount} XP`, 'xp', 0.8);
+    this.ui.xpGain(amount);
     let up = 0;
     while (s.level < MAX_LEVEL && s.xp >= xpToNext(s.level)) {
       s.xp -= xpToNext(s.level);

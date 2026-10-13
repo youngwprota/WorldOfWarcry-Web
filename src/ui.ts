@@ -1,18 +1,22 @@
 import * as THREE from 'three';
 import {
-  DAMAGE_TYPE_NAME, FACTIONS, SHARPEN, UI_BASE, WEAPONS, WORLD, ZONES,
+  DAMAGE_TYPE_NAME, FACTIONS, fmtOrb, SHARPEN, UI_REF, WEAPONS, WORLD, ZONES,
   type FactionId, type OrbKind, type ZoneDef,
 } from './config';
 import { ARMOR_SLOTS, cellHtml, scrapValue, type ArmorSlot, type Item } from './items';
 import { DAMAGE_TYPE_ICON, fmtK, icon, resistIcons, rewardChips } from './icons';
-import { art } from './art';
+import { STAT_ICON, art, mini } from './art';
 import type { MobDef } from './config';
 import { sfx } from './audio';
 import type { World } from './world';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toString();
-export const STAT_ICON: Record<OrbKind, string> = { power: 'sword', hp: 'heart', regen: 'regen', speed: 'boot' };
+/** Bottom bar sides (the inventory paper doll keeps its own ARMOR_SLOTS.side layout). */
+const BAR_LEFT: ArmorSlot[] = ['head', 'chest', 'legs'];
+const BAR_RIGHT: ArmorSlot[] = ['arms', 'ring', 'amulet'];
+/** Seconds a "+N stat" line stays under the buffs after the last orb of that stat. */
+const GAIN_SHOW = 2.5;
 
 export interface HudState {
   hp: number; maxHp: number; shield: number; shieldMax: number; gold: number;
@@ -50,13 +54,13 @@ export class UI {
   private lastHud = '';
   onSmith: () => void = () => {};
   onSettings: () => void = () => {};
-  onCharacter: () => void = () => {};
   onBag: () => void = () => {};
   onMap: () => void = () => {};
   onArmor: () => void = () => {};
   onTalents: () => void = () => {};
   onDebug: () => void = () => {};
   private lastProgress = '';
+  private gains = new Map<OrbKind, { el: HTMLDivElement; n: number; until: number }>();
   private lastSkills = '';
   private swapCb: () => void = () => {};
   private mm = $<HTMLCanvasElement>('minimap').getContext('2d')!;
@@ -64,17 +68,15 @@ export class UI {
   constructor() {
     $('btn-smith').addEventListener('click', () => { sfx.click(); this.onSmith(); });
     $('btn-settings').addEventListener('click', () => { sfx.click(); this.onSettings(); });
-    $('btn-char').addEventListener('click', () => { sfx.click(); this.onCharacter(); });
     $('btn-bag').addEventListener('click', () => { sfx.click(); this.onBag(); });
     $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('bosses').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('btn-settings').innerHTML = art('gear', 40);
     $('lvl').addEventListener('click', () => { sfx.click(); this.onTalents(); });
-    $('btn-char').insertAdjacentHTML('afterbegin', art('hero', 46));
     $('btn-bag').insertAdjacentHTML('afterbegin', art('bag', 48));
     $('btn-smith').insertAdjacentHTML('afterbegin', art('anvil', 32) + ' ');
     $('gold').querySelector('i')!.outerHTML = art('coin', 28);
-    $('armorbar').addEventListener('click', (e) => {
+    $('equipbar').addEventListener('click', (e) => {
       if (!(e.target as HTMLElement).closest('[data-armor]')) return;
       sfx.click();
       this.onArmor();
@@ -86,12 +88,26 @@ export class UI {
   }
 
   size() { return { w: this.app.clientWidth, h: this.app.clientHeight }; }
-  /** UI scale for small screens: #hud, #modal and friends are scale(--ui), their px are virtual (screen px / scale). */
+  /** HUD scale: #hud / #pro-hud are a UI_REF.hud rectangle centred on the screen and scaled by --hs (windows: --ms). */
   scale = 1;
   fit() {
     const { w, h } = this.size();
-    this.scale = Math.min(1, w / UI_BASE.w, h / UI_BASE.h);
-    this.app.style.setProperty('--ui', String(this.scale));
+    const { hud, modal } = UI_REF;
+    this.scale = Math.min(w / hud.w, h / hud.h);
+    const st = this.app.style;
+    st.setProperty('--hs', String(this.scale));
+    st.setProperty('--ms', String(Math.min(w / modal.w, h / modal.h)));
+    st.setProperty('--hw', `${hud.w}px`);
+    st.setProperty('--hh', `${hud.h}px`);
+    st.setProperty('--mw', `${modal.w}px`);
+    st.setProperty('--mh', `${modal.h}px`);
+  }
+
+  /** Screen px of #app → px inside the centred, scaled HUD rectangle. */
+  toHud(x: number, y: number) {
+    const { w, h } = this.size();
+    const s = this.scale;
+    return { x: (x - (w - UI_REF.hud.w * s) / 2) / s, y: (y - (h - UI_REF.hud.h * s) / 2) / s };
   }
   get modalOpen() { return this.modal.classList.contains('show'); }
 
@@ -175,10 +191,40 @@ export class UI {
 
   bindWeapons(swap: () => void) { this.swapCb = swap; }
 
-  combo(n: number, max: number, name: string) {
+  combo(n: number, max: number) {
     const el = $('combo');
-    el.innerHTML = `<span>${name}</span>` + Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
+    el.innerHTML = Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
     el.classList.toggle('live', n > 0);
+  }
+
+  xpGain(n: number) {
+    const el = $('xpgain');
+    el.textContent = `+${fmtK(n)}`;
+    el.classList.remove('pop');
+    void el.offsetWidth; // restart the fade
+    el.classList.add('pop');
+  }
+
+  /** Kill rewards under the buffs: one line per stat, summing orbs picked up in a row. */
+  gain(k: OrbKind, now: number) {
+    let g = this.gains.get(k);
+    if (!g) {
+      const el = document.createElement('div');
+      el.className = 'gain';
+      $('gains').appendChild(el);
+      g = { el, n: 0, until: 0 };
+      this.gains.set(k, g);
+    }
+    g.n++;
+    g.until = now + GAIN_SHOW;
+    g.el.innerHTML = `${mini(STAT_ICON[k], 22)}${fmtOrb(k, g.n)}`;
+    g.el.classList.remove('pop');
+    void g.el.offsetWidth; // restart the pop animation
+    g.el.classList.add('pop');
+  }
+
+  tickGains(now: number) {
+    for (const [k, g] of this.gains) if (now > g.until) { g.el.remove(); this.gains.delete(k); }
   }
 
   bagBadge(n: number, full: boolean) {
@@ -186,7 +232,7 @@ export class UI {
     b.dataset.badge = full ? '!' : n > 0 ? String(n) : '';
   }
 
-  /** Bottom "equipped" bar: two weapons (tap the other one to swap) and the six armour slots. */
+  /** Bottom "equipped" bar: armour left, the two weapons in the centre (tap the other one to swap), gloves and jewellery right. */
   weapons(items: (Item | null)[], active: number, dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>) {
     const box = $('weapons');
     box.innerHTML = [0, 1].map((i) => {
@@ -199,7 +245,12 @@ export class UI {
     box.querySelectorAll<HTMLElement>('[data-w]').forEach((b) => {
       if (+b.dataset.w! !== active && items[+b.dataset.w!]) b.addEventListener('click', () => this.swapCb());
     });
-    $('armorbar').innerHTML = ARMOR_SLOTS.map((x) => cellHtml(equip[x.id], `data-armor="${x.id}" title="${x.name}"`, x.icon)).join('');
+    const side = (ids: ArmorSlot[]) => ids.map((id) => {
+      const x = ARMOR_SLOTS.find((s) => s.id === id)!;
+      return cellHtml(equip[id], `data-armor="${id}" title="${x.name}"`, x.icon);
+    }).join('');
+    $('armor-l').innerHTML = side(BAR_LEFT);
+    $('armor-r').innerHTML = side(BAR_RIGHT);
   }
 
   zoneBanner(z: ZoneDef) {
@@ -513,9 +564,7 @@ export class UI {
     const m = Math.max(Math.abs(x) / 0.85, y > 0 ? y / 0.55 : -y / 0.62);
     x /= m;
     y /= m;
-    // #hud is scaled by --ui: its px are screen px / scale
-    const px = ((x * 0.5 + 0.5) * w) / this.scale;
-    const py = ((-y * 0.5 + 0.5) * h) / this.scale;
+    const { x: px, y: py } = this.toHud((x * 0.5 + 0.5) * w, (-y * 0.5 + 0.5) * h);
     el.style.display = 'block';
     el.style.transform = `translate(${px - 13}px, ${py - 13}px) rotate(${Math.atan2(-y, x)}rad)`;
   }

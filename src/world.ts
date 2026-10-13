@@ -424,11 +424,19 @@ export class World {
       [14, -84, ['bandit_thug', 'bandit_fighter', 'bandit_thug']],
       [-14, -90, ['bandit_fighter', 'bandit_thug', 'bandit_thug']],
       [11, -92, ['bandit_fighter', 'bandit_fighter']],
+      [18, -30, ['boar', 'boar', 'boar']],
+      [-11, -70, ['boar', 'boar', 'boar']],
+      [2, -100, ['boar', 'boar', 'boar']],
     ];
     for (const [x, z, mobs] of packs) {
       this.packCenters.push([x, z]);
       mobs.forEach((mob, i) => this.spawns.push({ x: x + Math.cos(i * 2.2) * 1.8, z: z + Math.sin(i * 2.2) * 1.8, mob, zone: 'forest' }));
     }
+    // murloc guards on the road just outside the camp gate, two on each side
+    for (const z of [-25, -28.5]) {
+      for (const side of [-1, 1]) this.spawns.push({ x: pathX(z) + side * 2.2, z, mob: 'murloc', zone: 'forest' });
+    }
+    this.packCenters.push([pathX(-26.75), -26.75]);
 
     // Lumber camp (east)
     this.place('woodcutter_building', 27, -44, 0.55, -Math.PI / 2);
@@ -628,6 +636,8 @@ export class World {
       [15, -178, ['skeleton_warrior', 'skeleton_worker', 'skeleton_worker']],
       [-16, -186, ['skeleton_warrior', 'ghost', 'skeleton_worker']],
       [5, -190, ['skeleton_warrior', 'skeleton_warrior']],
+      [-18, -170, ['undead_boar', 'undead_boar', 'undead_boar']],
+      [1, -180, ['undead_boar', 'undead_boar', 'undead_boar']],
     ];
     for (const [x, z, mobs] of packs) {
       this.packCenters.push([x, z]);

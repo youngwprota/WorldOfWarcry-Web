@@ -5,9 +5,22 @@ export type ResistTier = 'weak' | 'normal' | 'resist' | 'immune';
 export type FactionId = 'human' | 'orc';
 export type ZoneId = 'camp' | 'forest' | 'cemetery';
 export type AttackAnim = 'SwordAttack' | 'AxeAttack';
+/**
+ * Hit markers: seconds into each attack clip at natural speed where the blow connects. Mob damage lands on this
+ * frame if the hero is still in reach. Humanoid FBX clips by name, GLB creatures as `<model>:attack`.
+ */
+export const ATTACK_HIT: Record<string, number> = {
+  SwordAttack: 0.6, AxeAttack: 0.83,
+  'orc_boar:attack': 9 / 24, 'undead_boar:attack': 9 / 24, 'human_murloc:attack': 0.6 / 1.3,
+};
+/** When a mob's damage lands: on the clip's hit marker, sped up only if the attack period is too short for it. */
+export function mobImpact(hit: number, period: number) { return Math.min(hit, period * 0.8); }
 
-/** HUD and windows are laid out in px for this screen; on a smaller screen they shrink as a whole (src/ui.ts fit). */
-export const UI_BASE = { w: 470, h: 840 };
+/**
+ * Design rectangles (virtual px, 9:16): the HUD and the windows are laid out at these sizes and scaled as a whole to fit
+ * the screen, centred (src/ui.ts fit), so they look the same on every phone; outside the rectangle only the scene shows.
+ */
+export const UI_REF = { hud: { w: 540, h: 960 }, modal: { w: 760, h: 1351 } };
 
 export const RESIST_MULT: Record<ResistTier, number> = { weak: 1.5, normal: 1, resist: 0.5, immune: 0.25 };
 export const DAMAGE_TYPE_NAME: Record<DamageType, string> = {
@@ -131,13 +144,17 @@ export interface MobDef {
   regen: number;
   scale: number;
   resist: Partial<Record<DamageType, ResistTier>>;
-  /** Fixed power orbs dropped on death (shown above the HP bar). */
+  /** Fixed power orbs dropped on death (shown above the HP bar). Regular mobs give one stat, bosses several. */
   reward: Partial<Record<OrbKind, number>>;
   gold: [number, number];
   /** Experience for the kill (bosses: x2 on the first kill). */
   xp: number;
   respawn: number; // seconds
   boss?: BossDef;
+  /** GLB animal (Creature): `model` names a .glb with its own rig and clips, weapon is always null. */
+  creature?: boolean;
+  /** Speed (m/s) the hit shoves the hero back with. */
+  push?: number;
 }
 
 /** Boss fight tunables (bossLogic in game.ts). Damage multipliers apply to the boss's `dmg`. */
@@ -172,13 +189,13 @@ export const MOBS: Record<string, MobDef> = {
     id: 'bandit_thug', name: 'Разбойник',
     model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['peasant', 'axe'] },
     anim: 'AxeAttack', hp: 110, dmg: 9, aps: 0.7, range: 1.5, speed: 3.0, aggro: 4.5, regen: 0.04, scale: 1,
-    resist: { slash: 'weak' }, reward: { hp: 1, power: 1 }, gold: [1, 3], xp: 10, respawn: 45,
+    resist: { slash: 'weak' }, reward: { hp: 1 }, gold: [1, 3], xp: 10, respawn: 45,
   },
   bandit_fighter: {
     id: 'bandit_fighter', name: 'Головорез',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
     anim: 'SwordAttack', hp: 220, dmg: 16, aps: 0.8, range: 1.6, speed: 3.4, aggro: 5, regen: 0.03, scale: 1.08,
-    resist: { slash: 'weak' }, reward: { power: 2, hp: 1 }, gold: [2, 5], xp: 16, respawn: 60,
+    resist: { slash: 'weak' }, reward: { power: 2 }, gold: [2, 5], xp: 16, respawn: 60,
   },
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
@@ -190,23 +207,41 @@ export const MOBS: Record<string, MobDef> = {
       slamRadius: 4.2, slamMul: 2.4, chaseMul: 1.4, phase2Dmg: 1.2,
     },
   },
+  boar: {
+    id: 'boar', name: 'Вепрь', creature: true, push: 5,
+    model: { human: ['orc_boar', null], orc: ['orc_boar', null] },
+    anim: 'AxeAttack', hp: 90, dmg: 8, aps: 0.9, range: 1.6, speed: 2.1, aggro: 4, regen: 0.04, scale: 1.5,
+    resist: { slash: 'weak' }, reward: { speed: 1 }, gold: [0, 2], xp: 10, respawn: 40,
+  },
+  undead_boar: {
+    id: 'undead_boar', name: 'Нежить-вепрь', creature: true, push: 5,
+    model: { human: ['undead_boar', null], orc: ['undead_boar', null] },
+    anim: 'AxeAttack', hp: 150, dmg: 9, aps: 0.85, range: 1.6, speed: 1.9, aggro: 4.5, regen: 0.03, scale: 1.5,
+    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { hp: 1 }, gold: [3, 6], xp: 24, respawn: 50,
+  },
+  murloc: {
+    id: 'murloc', name: 'Мурлок', creature: true,
+    model: { human: ['human_murloc', null], orc: ['human_murloc', null] },
+    anim: 'SwordAttack', hp: 1000, dmg: 2, aps: 0.85, range: 1.5, speed: 3.4, aggro: 4.5, regen: 0.04, scale: 1.1,
+    resist: { slash: 'weak' }, reward: { power: 1 }, gold: [1, 3], xp: 12, respawn: 45,
+  },
   skeleton_worker: {
     id: 'skeleton_worker', name: 'Мертвяк',
     model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
     anim: 'SwordAttack', hp: 140, dmg: 8, aps: 0.8, range: 1.4, speed: 2.8, aggro: 4.5, regen: 0.03, scale: 1,
-    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { regen: 1, hp: 1, power: 1 }, gold: [3, 6], xp: 22, respawn: 50,
+    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { regen: 1 }, gold: [3, 6], xp: 22, respawn: 50,
   },
   skeleton_warrior: {
     id: 'skeleton_warrior', name: 'Скелет-копейщик',
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
     anim: 'SwordAttack', hp: 260, dmg: 15, aps: 0.75, range: 2.0, speed: 3.0, aggro: 5, regen: 0.025, scale: 1.08,
-    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { power: 2, hp: 1 }, gold: [4, 8], xp: 28, respawn: 70,
+    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { power: 2 }, gold: [4, 8], xp: 28, respawn: 70,
   },
   ghost: {
     id: 'ghost', name: 'Призрак',
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
     anim: 'SwordAttack', hp: 130, dmg: 14, aps: 1.0, range: 1.4, speed: 4.3, aggro: 6, regen: 0.05, scale: 1,
-    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { speed: 2, power: 1 }, gold: [4, 7], xp: 26, respawn: 60,
+    resist: { slash: 'resist', crush: 'weak', pierce: 'immune' }, reward: { speed: 2 }, gold: [4, 7], xp: 26, respawn: 60,
   },
   death: {
     id: 'death', name: 'Смерть',
@@ -227,7 +262,11 @@ export const ORBS: Record<OrbKind, { color: number; css: string; label: string; 
   regen: { color: 0x3cc8ff, css: '#4fd2ff', label: 'Реген', value: 0.02, unit: '%/с' },
   speed: { color: 0xffd23c, css: '#ffd84d', label: 'Скорость', value: 0.05, unit: ' м/с' },
 };
-export const fmtOrb = (k: OrbKind, n = 1) => `+${+(ORBS[k].value * n).toFixed(2)}`;
+/** Power and HP are shown as whole points (rounded up), regen and speed as is. */
+export const fmtOrb = (k: OrbKind, n = 1) => {
+  const v = ORBS[k].value * n;
+  return `+${k === 'power' || k === 'hp' ? Math.ceil(v - 1e-9) : +v.toFixed(2)}`;
+};
 
 export const HERO = {
   power: 10, hp: 100, regen: 1, speed: 5,
@@ -277,4 +316,7 @@ export function depthMul(zone: ZoneId, z: number) {
 }
 
 export const RESPAWN_MIN_DIST = 10;
+
+/** Kill feel: the death clip starts on the lethal hit, holds `holdAt` s into the fall for `freeze` s (hit-stop), then the corpse is thrown back harder than a normal hit. */
+export const KILL_FX = { holdAt: 0.1, freeze: 0.1, knockMul: 2, shake: 0.31, blood: 14 };
 export const LEASH = 15;

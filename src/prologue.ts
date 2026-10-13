@@ -5,11 +5,11 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { sfx } from './audio';
 import { Character } from './character';
-import { HERO, MOBS, ORBS, fmtOrb, type OrbKind } from './config';
+import { HERO, MOBS, ORBS, fmtOrb, mobImpact, type OrbKind } from './config';
 import { FloatingText, Particles, Pickups } from './fx';
 import type { Input } from './input';
-import { art } from './art';
-import { STAT_ICON, type DialogueLine, type UI } from './ui';
+import { STAT_ICON, art } from './art';
+import type { DialogueLine, UI } from './ui';
 
 /** Power orbs picked up in the prologue; they carry over to the new hero. */
 export type Gains = Record<OrbKind, number>;
@@ -568,7 +568,7 @@ export class Prologue {
           s.atkCd -= dt;
           if (dHero < reach && s.atkCd <= 0 && s.impact < 0) {
             const period = 1 / SKEL.aps;
-            const impactAt = Math.min(0.55, period * 0.45);
+            const impactAt = mobImpact(s.ch.hitTime('SwordAttack'), period);
             s.ch.attack('SwordAttack', period, impactAt);
             s.impact = impactAt;
             s.atkCd = period;
@@ -683,7 +683,7 @@ export class Prologue {
     x /= m;
     y /= m;
     arrow.style.display = 'block';
-    const s = this.ui.scale; // #pro-hud is scaled by --ui
-    arrow.style.transform = `translate(${((x * 0.5 + 0.5) * w) / s - 13}px, ${((-y * 0.5 + 0.5) * h) / s - 13}px) rotate(${Math.atan2(-y, x)}rad)`;
+    const p = this.ui.toHud((x * 0.5 + 0.5) * w, (-y * 0.5 + 0.5) * h); // #pro-hud is the scaled HUD rectangle
+    arrow.style.transform = `translate(${p.x - 13}px, ${p.y - 13}px) rotate(${Math.atan2(-y, x)}rad)`;
   }
 }

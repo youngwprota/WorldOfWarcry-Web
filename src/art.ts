@@ -1,3 +1,5 @@
+import type { OrbKind } from './config';
+
 // Coloured cartoon icons in the Butcher Hero manner: flat fills, a shade side, a white highlight and a thick ink outline.
 // Drawn on a 64×64 grid. Outlined parts use P(), unoutlined shading/details use N(), highlights use H().
 
@@ -6,6 +8,7 @@ const STEEL = '#dde5ee', STEEL_D = '#9eacbc', STEEL_DD = '#6f7d8e';
 const GOLD = '#ffc93a', GOLD_D = '#e0962a', GOLD_L = '#ffe68a';
 const WOOD = '#b5733f', WOOD_D = '#82492a';
 const LEATHER = '#c07a43', LEATHER_D = '#8a4f2b';
+const SKIN = '#f2c29b', SKIN_D = '#d99a6e';
 const RED = '#e8414f', BLUE = '#3d7be0', BLUE_D = '#2c5fb5';
 
 const P = (d: string, fill: string, extra = '') => `<path d="${d}" fill="${fill}"${extra}/>`;
@@ -19,6 +22,13 @@ const HEART = 'M32 58C14 45 5 35 5 22C5 13 12 7 20 7C26 7 30 10 32 14C34 10 38 7
 const HEART_SHADE = 'M9 31C15 41 23 48 32 54C41 48 49 41 55 31C49 39 41 45 32 49C23 45 15 39 9 31Z';
 
 const ART: Record<string, string> = {
+  fist: `${P(rect(21, 44, 24, 18, 3), '#e3a97d')}
+    ${[14, 24, 34, 44].map((x) => P(rect(x, 9, 10, 24, 5), SKIN)).join('')}
+    ${P(rect(14, 22, 40, 26, 7), SKIN)}${N('M44 24H52V40C52 44 50 46 46 46H30C38 44 44 38 44 24Z', SKIN_D, ' opacity=".7"')}
+    ${P(rect(9, 29, 27, 10, 5), SKIN, ' transform="rotate(-12 22 34)"')}${H('M18 13V20M28 13V20', 2.5)}`,
+  run: `${P('M42 3L55 8L46 34C50 38 50 44 46 48L14 54C8 55 6 50 10 46L30 38Z', '#fff')}
+    ${N('M55 8L46 34C50 38 50 44 46 48L20 53L44 44C46 40 44 36 40 34Z', '#c9d2dc')}
+    <path d="M52 50l9 2M48 57l9 3M58 40l5 1" fill="none" stroke-width="3.5" stroke-linecap="round"/>`,
   sword: `<g transform="rotate(45 32 32) translate(0 -1)">
     ${P('M32 2L38 10L37 41H27L26 10Z', STEEL)}${N('M32 2L38 10L37 41H32Z', STEEL_D)}${N(rect(31, 13, 2, 25), STEEL_DD)}${H('M29.3 12L28.8 36', 2)}
     ${P(rect(17, 39, 30, 7, 3.5), GOLD)}${N(rect(19, 43, 26, 2), GOLD_D)}
@@ -110,6 +120,30 @@ const ART: Record<string, string> = {
   flame: `${P('M32 3C36 15 50 22 50 40C50 52 42 61 32 61C22 61 14 52 14 40C14 30 20 25 24 18C26 26 28 28 31 29C30 20 31 11 32 3Z', '#ff7a2a')}
     ${N('M32 33C36 38 41 42 41 49C41 55 37 59 32 59C27 59 23 55 23 49C23 44 27 41 32 33Z', '#ffd23f')}${H('M20 38C20 32 23 27 26 23', 2.5)}`,
 };
+
+/** Sprite of each stat: HUD stats panel and kill-reward chips. */
+export const STAT_ICON: Record<OrbKind, string> = { power: 'fist', hp: 'heart', regen: 'regen', speed: 'run' };
+
+/**
+ * Simplified stat sprites for the small over-head chips: one flat silhouette, outlined in a darker shade of its own
+ * colour (not ink). Shapes are stroked first and filled on top, so overlaps merge into one outline.
+ */
+const MINI: Record<string, { fill: string; line: string; shapes: string; detail?: string }> = {
+  heart: { fill: '#ef3e5c', line: '#8e1f33', shapes: `<path d="${HEART}"/>` },
+  regen: { fill: '#41cf62', line: '#1d6e35', shapes: `<path d="${HEART}"/>`, detail: '<path d="M28 18H36V26H44V34H36V42H28V34H20V26H28Z" fill="#fff"/>' },
+  fist: {
+    fill: SKIN, line: '#8a5634',
+    shapes: `<path d="${rect(21, 44, 24, 16, 3)}"/>${[14, 24, 34, 44].map((x) => `<path d="${rect(x, 9, 10, 24, 5)}"/>`).join('')}<path d="${rect(14, 22, 40, 26, 7)}"/>`,
+  },
+  run: { fill: '#fff', line: '#6b7685', shapes: '<path d="M42 3L55 8L46 34C50 38 50 44 46 48L14 54C8 55 6 50 10 46L30 38Z"/>' },
+};
+
+export function mini(id: string, size = 14) {
+  const m = MINI[id];
+  if (!m) return '';
+  return `<svg class="svgi mini" width="${size}" height="${size}" viewBox="0 0 64 64" stroke-linejoin="round">` +
+    `<g fill="${m.line}" stroke="${m.line}" stroke-width="10">${m.shapes}</g><g fill="${m.fill}">${m.shapes}</g>${m.detail ?? ''}</svg>`;
+}
 
 /** Coloured icon; falls back to nothing for unknown ids. */
 export function art(id: string, size = 24, cls = '') {
