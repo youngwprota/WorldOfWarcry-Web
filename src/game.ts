@@ -681,6 +681,8 @@ export class Game {
     }
   }
 
+  /** Item level of loot where the hero stands (gacha pulls). */
+  get itemLevel() { return this.zoneLevel(this.hero.position.z); }
   private zoneLevel(z: number) { return this.world.zoneAt(z).id === 'cemetery' ? 2 : 1; }
 
   private killBoss(m: Mob) {
