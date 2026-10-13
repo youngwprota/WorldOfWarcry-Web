@@ -338,6 +338,13 @@ export class Character {
     if (!this.dead) this.swinger.apply(dt);
   }
 
+  /** Removes the character; its materials are its own (the geometry and the weapon are shared clones). */
+  dispose() {
+    this.mixer.stopAllAction();
+    this.root.removeFromParent();
+    for (const m of this.materials) m.dispose();
+  }
+
   setTint(c: THREE.ColorRepresentation, opacity = 1) {
     this.baseColor.set(c);
     for (const m of this.materials) {

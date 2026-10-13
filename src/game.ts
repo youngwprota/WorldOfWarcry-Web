@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { Character } from './character';
 import { Trail } from './swing';
-import { Falls, Orbits } from './orbits';
+import { Falls, Orbits, type Orbit } from './orbits';
+import { HELPER_SEEK, Helpers, type Helper } from './helpers';
 import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from './offhand';
 import { Creature } from './creature';
 import {
@@ -33,6 +34,7 @@ interface FightStat { t0: number; dealt: number; taken: number; hits: number; co
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
 const v3 = new THREE.Vector3();
+const vFlee = new THREE.Vector3();
 
 /** Respawn timer text: 45s, 4m05s, or 11h45m from an hour up (no seconds). */
 function fmtRespawn(sec: number) {
@@ -131,6 +133,8 @@ class Mob extends Unit {
   air = 0;
   airDur = 0;
   airDmg = 0;
+  /** Pan + knife pair: seconds left running away from the hero. */
+  fear = 0;
   deadT = 0;
   wanderT = Math.random() * 3;
   wander = new THREE.Vector3();
@@ -311,6 +315,9 @@ export class Game {
   private trails: [Trail, Trail] = [new Trail(), new Trail()];
   private orbits: Orbits;
   private falls: Falls;
+  private helpers: Helpers;
+  /** Pan pair: next time the fear aura is refreshed. */
+  private fearT = 0;
   /** Hit-stop / slow motion: game time runs at `slowK` for `slowT` more real seconds. */
   private slowT = 0;
   private slowK = 1;
@@ -414,6 +421,7 @@ export class Game {
     this.waves = new Shockwaves(this.scene);
     this.orbits = new Orbits(this.scene);
     this.falls = new Falls(this.scene);
+    this.helpers = new Helpers(this.scene);
     this.camPos.copy(this.hero.position);
     this.refreshHud(true);
   }
@@ -495,8 +503,11 @@ export class Game {
 
   /** Model names of the right / left hand weapons. */
   handModels(): [string | null, string | null] {
-    const m = (it: Item | null) => (it ? WEAPONS[it.def].model[this.faction] : null);
-    return [m(this.save.weapons[0]), m(this.save.weapons[1])];
+    const pair = swordPair(this.save.weapons[0]?.def, this.save.weapons[1]?.def);
+    // the sword turns into a sickle beside the hammer, into a kitchen knife beside the pan
+    const stand = pair?.kind === 'hammer' ? 'sickle' : pair?.kind === 'pan' ? 'kitchen_knife' : null;
+    const m = (it: Item | null, i: number) => (!it ? null : stand && pair!.sword === i ? stand : WEAPONS[it.def].model[this.faction]);
+    return [m(this.save.weapons[0], 0), m(this.save.weapons[1], 1)];
   }
 
   private equipVisual() {
@@ -532,6 +543,8 @@ export class Game {
     this.updateMobs(dt);
     this.updateOrbits(dt);
     this.falls.update(dt);
+    this.updateHelpers(dt);
+    if (this.pair?.kind === 'pan') this.fearAura(dt);
     this.updateProps(dt);
     this.updateRespawns();
     this.telegraphs.update(dt);
@@ -841,11 +854,14 @@ export class Game {
     const only = (!fin || w.assassin) && w.single ? focus : null;
     const pair = this.pair;
     const swordHit = !!pair && h.i === pair.sword;
-    const pairMul = pair?.kind === 'hidden_blade' && w.assassin ? SWORD_PAIRS.hidden_blade.dmg : 1;
+    const pairMul = pair?.kind === 'hidden_blade' && w.assassin ? SWORD_PAIRS.hidden_blade.dmg
+      : pair?.kind === 'pan' ? SWORD_PAIRS.pan.dmg : 1;
+    const hammerPair = pair?.kind === 'hammer' && !swordHit;
     sfx.swing();
     for (const u of this.units) {
       if (only && u !== only) continue;
       if (!u.hittable || !this.inShape(u.pos, u.radius, shape, arc, range, ahead, yaw)) continue;
+      if (u instanceof Prop && pair?.kind === 'pan') continue; // the kitchen pair leaves the crates alone
       hits++;
       if (u instanceof Prop) {
         const tier = u.def.resist[w.type] ?? 'normal';
@@ -855,7 +871,9 @@ export class Game {
       const m = u as Mob;
       // daggers: +stack.add per stack on this mob, then one more stack
       const stackMul = w.stack ? 1 + w.stack.add * m.stacks : 1;
-      const r = this.damageFor(it, m.def.resist, (fin ? fin.mult : 1) * stackMul * crowd * ring * pairMul);
+      // hammer pair: no knockback, the closer to the centre of the blow, the harder
+      const center = hammerPair ? 1 + SWORD_PAIRS.hammer.center * Math.max(0, 1 - m.pos.distanceTo(this.hero.position) / (range + 0.35)) : 1;
+      const r = this.damageFor(it, m.def.resist, (fin ? fin.mult : 1) * stackMul * crowd * ring * pairMul * center);
       const { tier } = r;
       let { dmg } = r;
       // axe pair: the sword tears off a share of what the mob has left
@@ -868,7 +886,8 @@ export class Game {
       f.hits++;
       if (fin) f.combos++;
       // the reaper keeps the pulled crowd together, the pan and the blade knock heads, not bodies
-      this.damageMob(m, dmg, tier, fin ? fin.knock : w.pull ? 0.5 : w.ahead || w.assassin ? 1 : 3.5);
+      this.damageMob(m, dmg, tier, hammerPair ? 0 : fin ? fin.knock : w.pull ? 0.5 : w.ahead || w.assassin ? 1 : 3.5);
+      if (swordHit && pair!.kind === 'hammer' && Math.random() < SWORD_PAIRS.hammer.chance) this.spawnHelper(m.pos);
       if (w.assassin) this.assassinate(m, w.assassin);
       else if (m.alive && !m.def.boss) {
         if (fin?.stun) m.stun = Math.max(m.stun, fin.stun);
@@ -1018,9 +1037,10 @@ export class Game {
     const o = WEAPONS[it.def].orbit!;
     const radius = o.radius + (fin ? fin.rangeAdd : 0);
     const turns = o.turns * (fin ? 1.5 : 1);
+    const tag: ScytheTag = { kind: 'scythe', hand: h.i, item: it, mult: fin ? fin.mult : 1, fin: !!fin };
     this.orbits.add(WEAPONS[it.def].model[this.faction], 1.3, {
       center: this.hero.position, radius, time: o.time, speed: (turns * Math.PI * 2) / o.time,
-      angle: this.hero.facing, y: 1, rehit: o.rehit, tag: { hand: h.i, item: it, mult: fin ? fin.mult : 1, fin: !!fin },
+      angle: this.hero.facing, y: 1, rehit: o.rehit, tag,
     });
     const held = h.i ? this.hero.weaponL : this.hero.weapon;
     if (held) held.visible = false;
@@ -1038,7 +1058,8 @@ export class Game {
 
   private updateOrbits(dt: number) {
     this.orbits.update(dt, (o, pos) => {
-      const tag = o.tag as ScytheTag;
+      const tag = o.tag as OrbitTag;
+      if (tag.kind === 'sword') { this.swordOrbitCut(o, tag); return; }
       for (const u of this.units) {
         if (!u.hittable) continue;
         const dx = u.pos.x - pos.x, dz = u.pos.z - pos.z;
@@ -1054,13 +1075,104 @@ export class Game {
         f.hits++;
         if (tag.fin) f.combos++;
         this.damageMob(m, dmg, tier, 2);
+        // scythe pair: a sword may start circling the cut mob
+        if (this.pair?.kind === 'scythe' && m.alive && Math.random() < SWORD_PAIRS.scythe.chance) this.spawnSwordOrbit(m);
       }
     }, (o) => {
-      const tag = o.tag as ScytheTag;
+      const tag = o.tag as OrbitTag;
+      if (tag.kind !== 'scythe') return;
       const held = tag.hand ? this.hero.weaponL : this.hero.weapon;
       if (held) held.visible = true;
     });
   }
+
+  /** Scythe pair: a sword circles mob `m` and cuts it (if there is room for one more and `m` has none yet). */
+  private spawnSwordOrbit(m: Mob) {
+    const p = SWORD_PAIRS.scythe;
+    const pair = this.pair;
+    const sword = pair && this.save.weapons[pair.sword];
+    if (!sword) return;
+    let n = 0;
+    for (const o of this.orbits.list) {
+      const t = o.tag as OrbitTag;
+      if (t.kind !== 'sword') continue;
+      if (t.mob === m) return;
+      n++;
+    }
+    if (n >= p.max) return;
+    const tag: SwordTag = { kind: 'sword', mob: m, item: sword };
+    this.orbits.add(WEAPONS[sword.def].model[this.faction], 1.2, {
+      center: m.pos, radius: m.radius + 0.7, time: p.time, speed: 7, angle: Math.random() * 6.28, y: 1.1, rehit: p.rehit, tag,
+    });
+  }
+
+  /** A circling sword cuts its mob every `rehit` s and may jump to a neighbour; it falls away when the mob dies. */
+  private swordOrbitCut(o: Orbit, tag: SwordTag) {
+    const m = tag.mob;
+    if (!m.alive) { o.t = o.time; return; }
+    const last = o.last.get(m) ?? this.time;
+    if (!o.last.has(m)) o.last.set(m, this.time);
+    if (this.time - last < o.rehit) return;
+    o.last.set(m, this.time);
+    const p = SWORD_PAIRS.scythe;
+    const { dmg, tier } = this.damageFor(tag.item, m.def.resist, p.mult);
+    this.fightOf(m).hits++;
+    this.damageMob(m, dmg, tier, 0.5);
+    if (Math.random() < p.jump) {
+      const next = this.mobs.find((x) => x !== m && x.hittable && x.pos.distanceTo(m.pos) < p.jumpR);
+      if (next) this.spawnSwordOrbit(next);
+    }
+  }
+
+  /** Hammer pair: a little helper with a sickle or a hammer joins the hero for a while. */
+  private spawnHelper(at: THREE.Vector3, kind: 'sickle' | 'hammer' = Math.random() < 0.5 ? 'sickle' : 'hammer') {
+    const p = SWORD_PAIRS.hammer;
+    if (this.helpers.list.length >= p.max) return;
+    const weapon = kind === 'sickle' ? 'sickle' : WEAPONS.hammer.model[this.faction];
+    v3.copy(at).lerp(this.hero.position, 0.5).setY(0);
+    this.helpers.spawn(FACTIONS[this.faction].hero, weapon, kind, v3, p.time);
+    this.particles.burst(v3.setY(0.5), 0xff4040, 10, 0.1, 5, 0.5);
+    this.fx.spawn(v3.setY(2), kind === 'sickle' ? 'Товарищ!' : 'Рабочий!', 'dmg weak', 0.8, { color: '#ff6060' });
+  }
+
+  private updateHelpers(dt: number) {
+    if (!this.helpers.list.length) return;
+    const p = SWORD_PAIRS.hammer;
+    this.helpers.update(dt, this.hero.position, (pos) => {
+      let best: Mob | null = null;
+      let bd = HELPER_SEEK;
+      for (const m of this.mobs) {
+        if (!m.hittable || m.state === 'idle') continue;
+        const d = m.pos.distanceTo(pos);
+        if (d < bd) { bd = d; best = m; }
+      }
+      return best;
+    }, (h: Helper, foe) => {
+      const m = foe as Mob;
+      const pair = this.pair;
+      const sword = pair && this.save.weapons[pair.sword];
+      const it = sword ?? this.weaponItem;
+      const { dmg, tier } = this.damageFor(it, m.def.resist, p.dmg * (h.kind === 'hammer' ? 1.4 : 1));
+      this.fightOf(m).hits++;
+      this.damageMob(m, dmg, tier, h.kind === 'hammer' ? 2 : 1);
+      if (h.kind === 'sickle' && Math.random() < p.chain) this.spawnHelper(m.pos);
+    });
+  }
+
+  /** Pan + knife pair: plain mobs and elites near the hero panic and run (bosses are not impressed). */
+  private fearAura(dt: number) {
+    this.fearT -= dt;
+    if (this.fearT > 0) return;
+    this.fearT = 0.5;
+    const p = SWORD_PAIRS.pan;
+    for (const m of this.mobs) {
+      if (!m.alive || m.def.boss || m.pos.distanceTo(this.hero.position) > p.radius) continue;
+      if (m.fear <= 0) this.fx.spawn(this.unitTextAt(m, v1).setY(m.barY + 0.4), '😱', 'dmg', 0.8);
+      m.fear = p.time;
+      if (m.state === 'idle') m.state = 'chase';
+    }
+  }
+
 
   private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5) {
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
@@ -1280,6 +1392,14 @@ export class Game {
         m.stun -= dt;
       } else if (m.casting > 0) {
         m.casting -= dt;
+      } else if (m.fear > 0) {
+        // pan + knife: run for your life, with a little panicky hop
+        m.fear -= dt;
+        vFlee.set(m.pos.x * 2 - hp.x, 0, m.pos.z * 2 - hp.z);
+        moving = this.stepTo(m, vFlee, def.speed * 1.15, dt);
+        m.pos.y = 0.25 * Math.abs(Math.sin(this.time * 16 + m.wanderT));
+        if (m.fear <= 0) m.pos.y = 0;
+        m.impact = -1;
       } else {
         const dSpawn = m.pos.distanceTo(m.spawn);
         const leash = def.boss ? 16 : LEASH;
@@ -2055,4 +2175,7 @@ function newHand(i: 0 | 1): Hand {
 }
 
 /** What a thrown scythe carries (Orbit.tag). */
-interface ScytheTag { hand: 0 | 1; item: Item; mult: number; fin: boolean }
+interface ScytheTag { kind: 'scythe'; hand: 0 | 1; item: Item; mult: number; fin: boolean }
+/** Scythe pair: a sword circling one mob. */
+interface SwordTag { kind: 'sword'; mob: Mob; item: Item }
+type OrbitTag = ScytheTag | SwordTag;
