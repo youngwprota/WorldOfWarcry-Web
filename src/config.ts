@@ -320,7 +320,7 @@ export const MOB_REGEN_DELAY = 5;
  */
 export interface ZoneFoes { attack: DamageType; weak: DamageType[]; resist?: DamageType[] }
 export const ZONE_FOES: Partial<Record<ZoneId, ZoneFoes>> = {
-  forest: { attack: 'chop', weak: ['slash'] },
+  forest: { attack: 'chop', weak: ['slash', 'chop'] },
   cemetery: { attack: 'slash', weak: ['crush'], resist: ['slash', 'chop'] },
 };
 function foes(zone: ZoneId): Pick<MobDef, 'attack' | 'resist'> {
@@ -348,7 +348,7 @@ export const MOBS: Record<string, MobDef> = {
   bandit_fighter: {
     id: 'bandit_fighter', name: 'Головорез',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 440, dmg: 10, aps: 0.8, range: 1.6, speed: 3.4, aggro: 5, regen: 0.03, scale: 1.08,
+    anim: 'SwordAttack', hp: 360, dmg: 10, aps: 0.8, range: 1.6, speed: 3.4, aggro: 5, regen: 0.03, scale: 1.08,
     ...foes('forest'), reward: { power: 3 }, respawn: 60,
   },
   bandit_veteran: {
@@ -377,13 +377,13 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
     anim: 'AxeAttack', hp: 4500, dmg: 16, aps: 0.65, range: 2.1, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.55,
     ...foes('forest'), reward: { hp: 6 }, respawn: 900,
-    bonus: { hp: 500 },
+    bonus: { hp: 60 },
   },
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
-    anim: 'AxeAttack', hp: 10400, dmg: 18, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
-    ...foes('forest'), reward: { power: 12 }, respawn: 180,
+    anim: 'AxeAttack', hp: 4600, dmg: 12, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
+    ...foes('forest'), reward: { power: 12 }, respawn: 900,
     drop: { kind: 'weapon', def: 'hammer', rarity: 2 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest', unlocks: ['forest-cemetery'],
@@ -401,31 +401,31 @@ export const MOBS: Record<string, MobDef> = {
   murloc: {
     id: 'murloc', name: 'Мурлок', creature: true,
     model: { human: ['human_murloc', null], orc: ['human_murloc', null] },
-    anim: 'SwordAttack', hp: 2000, dmg: 1, aps: 0.85, range: 1.5, speed: 3.4, aggro: 4.5, regen: 0.04, scale: 1.1,
+    anim: 'SwordAttack', hp: 1200, dmg: 1, aps: 0.85, range: 1.5, speed: 3.4, aggro: 4.5, regen: 0.04, scale: 1.1,
     ...foes('forest'), reward: { power: 1 }, respawn: 45,
   },
   undead_boar: {
     id: 'undead_boar', name: 'Нежить-вепрь', creature: true, push: 5,
     model: { human: ['undead_boar', null], orc: ['undead_boar', null] },
-    anim: 'AxeAttack', hp: 300, dmg: 5, aps: 0.85, range: 1.6, speed: 1.9, aggro: 4.5, regen: 0.03, scale: 1.5,
+    anim: 'AxeAttack', hp: 520, dmg: 10, aps: 0.85, range: 1.6, speed: 1.9, aggro: 4.5, regen: 0.03, scale: 1.5,
     ...foes('cemetery'), reward: { hp: 1 }, respawn: 50,
   },
   skeleton_worker: {
     id: 'skeleton_worker', name: 'Мертвяк',
     model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
-    anim: 'SwordAttack', hp: 280, dmg: 5, aps: 0.8, range: 1.4, speed: 2.8, aggro: 4.5, regen: 0.03, scale: 1,
-    ...foes('cemetery'), reward: { regen: 1 }, respawn: 50,
+    anim: 'SwordAttack', hp: 500, dmg: 10, aps: 0.8, range: 1.4, speed: 2.8, aggro: 4.5, regen: 0.03, scale: 1,
+    ...foes('cemetery'), reward: { hp: 2 }, respawn: 50,
   },
   skeleton_warrior: {
     id: 'skeleton_warrior', name: 'Скелет-копейщик',
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
-    anim: 'SwordAttack', hp: 520, dmg: 9, aps: 0.75, range: 2.0, speed: 3.0, aggro: 5, regen: 0.025, scale: 1.08,
+    anim: 'SwordAttack', hp: 800, dmg: 16, aps: 0.75, range: 2.0, speed: 3.0, aggro: 5, regen: 0.025, scale: 1.08,
     ...foes('cemetery'), reward: { power: 3 }, respawn: 70,
   },
   ghost: {
     id: 'ghost', name: 'Призрак',
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
-    anim: 'SwordAttack', hp: 260, dmg: 8, aps: 1.0, range: 1.4, speed: 4.3, aggro: 6, regen: 0.05, scale: 1,
+    anim: 'SwordAttack', hp: 560, dmg: 14, aps: 1.0, range: 1.4, speed: 4.3, aggro: 6, regen: 0.05, scale: 1,
     ...foes('cemetery'), reward: { speed: 3 }, respawn: 60,
   },
   bone_guard: {
@@ -447,13 +447,13 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
     anim: 'SwordAttack', hp: 3640, dmg: 16, aps: 0.8, range: 1.9, speed: 3.0, aggro: 5.9, regen: 0.03, scale: 1.75,
     ...foes('cemetery'), reward: { regen: 2 }, respawn: 1800,
-    bonus: { regen: 25 },
+    bonus: { regen: 5 },
   },
   death: {
     id: 'death', name: 'Смерть',
     model: { human: ['undead_king', 'reaper'], orc: ['undead_king', 'reaper'] },
-    anim: 'SwordAttack', hp: 9000, dmg: 11, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
-    ...foes('cemetery'), reward: { power: 18 }, respawn: 300,
+    anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
+    ...foes('cemetery'), reward: { power: 18 }, respawn: 1200,
     drop: { kind: 'weapon', def: 'reaper', rarity: 3 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['forest-peaks', 'cemetery-peaks'],
@@ -604,7 +604,7 @@ const props = (kinds: string[], n: number, charges?: number[]): SpawnerDef[] =>
 const GRAVES = ['tomb1', 'tomb2', 'tomb3', 'tomb4', 'tomb1', 'tomb2', 'coffin'];
 export const PROP_SPAWNERS: Record<'camp' | 'forest' | 'cemetery' | 'cemeteryField', SpawnerDef[]> = {
   camp: props(['barrel', 'box', 'box', 'barrel'], 4, FOREST_CHARGES),
-  forest: props(['barrel', 'box', 'bush', 'box_large', 'orc_barrel', 'bush', 'orc_box'], 24, FOREST_CHARGES),
+  forest: props(['barrel', 'box', 'bush', 'box_large', 'orc_barrel', 'box', 'orc_box'], 24, FOREST_CHARGES),
   cemetery: props(GRAVES, 18),
   cemeteryField: props(GRAVES, 6),
 };
@@ -620,7 +620,7 @@ export const GACHA = {
   rates: [0.7, 0.22, 0.074, 0.006],
   pity: 60,
   /** Chance a kill gives one pull, by mob rank (tuned with `npm run sim` to ~1 pull per 5 min of play). */
-  token: { normal: 0.03, elite: 0.25, mini: 0.5, boss: 1 } as Record<MobRank, number>,
+  token: { normal: 0.015, elite: 0.15, mini: 0.3, boss: 1 } as Record<MobRank, number>,
   banner: { def: 'hammer', name: 'Молот Короля-лича', subtitle: 'Выкован из костей павших королей. Шанс повышен!' },
   /** Hammer blows per pull; the rarity colour can climb after each, legendary only on the last one. */
   strikes: 5,

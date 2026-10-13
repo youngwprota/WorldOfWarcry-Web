@@ -1,7 +1,9 @@
 // Balance simulator: a bot plays the forest and the cemetery on a 1-D model of the trail, using the game's own
 // config and formulas (src/balance.ts). Prints a per-minute curve and when each boss falls.
 // Run: npm run sim -- [--faction human|orc] [--weapon sword] [--left dagger] [--runs 20] [--until 45]
-//                     [--dodge 0.6] [--uptime 0.8] [--combo 0.85] [--seed 1] [--keep] [--log] [--mobs]
+//                     [--dodge 0.6] [--uptime 0.8] [--combo 0.85] [--seed 1] [--keep] [--log] [--mobs] [--bench]
+//                     [--set MOBS.bandit_chief.hp=6000 --set GACHA.token.normal=0.05 ...] (what-if: config edits for this run)
+import * as CONFIG from '../src/config';
 import {
   ATTACK_HIT, BREAKABLES, COMBOS, FACTIONS, GACHA, HERO, MOBS, ORBS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, SWORD_PAIRS,
   WEAPONS, depthMul, mobImpact, mobRank, type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type ZoneId,
@@ -33,6 +35,17 @@ const OPT = {
   mobs: flag('mobs'), // per-mob fight table
   bench: flag('bench'), // single-target kill time of every weapon and sword pair, then exit
 };
+
+// --set path=value: config objects are mutable, so a what-if needs no file edit
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] !== '--set') continue;
+  const [path, raw] = argv[i + 1].split('=');
+  const keys = path.split('.');
+  let o = CONFIG as unknown as Record<string, unknown>;
+  for (const k of keys.slice(0, -1)) o = o[k] as Record<string, unknown>;
+  if (!o || !(keys[keys.length - 1] in o)) throw new Error(`--set: нет такого поля ${path}`);
+  o[keys[keys.length - 1]] = JSON.parse(raw);
+}
 
 // ---------- deterministic RNG (the game code calls Math.random) ----------
 let rs = 1;
@@ -95,7 +108,7 @@ function buildUnits(): Unit[] {
 }
 
 // ---------- hero ----------
-interface Hero extends HeroBuild { hp: number; bag: Item[]; pulls: number; pity: number; spot: Spot }
+interface Hero extends HeroBuild { hp: number; bag: Item[]; pulls: number; pity: number; spot: Spot; kit: Record<ZoneId, HeroBuild['weapons']> }
 const stats = (h: Hero) => heroStats(h);
 
 // ---------- fight: ticks of 0.05 s ----------
@@ -295,21 +308,21 @@ function lootItem(h: Hero, it: Item) {
   if (!OPT.keep) regear(h);
 }
 const dpsCache = new Map<string, number>();
+/** The best pair of hands for each open location (by DPS against its resists); armour by defense + bonus. */
 function regear(h: Hero) {
   const all = [...h.weapons, ...h.bag].filter((x): x is Item => !!x && x.kind === 'weapon');
-  let best: [Item | null, Item | null] = h.weapons;
-  let bestDps = -1;
-  const zone: ZoneId = h.spot.s > GATE.s ? 'cemetery' : 'forest';
-  for (const a of all) for (const b of [null, ...all]) {
-    if (b === a) continue;
-    const key = `${zone}|${wname(a)}|${wname(b)}`;
-    let dps = dpsCache.get(key);
-    if (dps === undefined) dpsCache.set(key, (dps = dummyDps(h, [a, b], zone)));
-    if (dps > bestDps) { bestDps = dps; best = [a, b]; }
+  h.bag = h.bag.filter((x) => x.kind !== 'weapon');
+  for (const zone of Object.keys(h.kit) as ZoneId[]) {
+    let bestDps = -1;
+    for (const a of all) for (const b of [null, ...all]) {
+      if (b === a) continue;
+      const key = `${zone}|${wname(a)}|${wname(b)}`;
+      let dps = dpsCache.get(key);
+      if (dps === undefined) dpsCache.set(key, (dps = dummyDps(h, [a, b], zone)));
+      if (dps > bestDps) { bestDps = dps; h.kit[zone] = [a, b]; }
+    }
   }
-  const used = new Set(best.filter(Boolean));
-  h.bag = h.bag.filter((x) => !used.has(x)).concat(h.weapons.filter((x): x is Item => !!x && !used.has(x)));
-  h.weapons = best;
+  h.weapons = h.kit.forest;
   // armour: the best piece per slot by defense + bonus
   const score = (it: Item) => { const s = armorStats(it); return s.defense + (s.bonus ? s.bonus.value * VALUE[s.bonus.stat] * 2 : 0); };
   for (const it of [...h.bag]) {
@@ -348,8 +361,9 @@ function run(seed: number): RunOut {
   const h: Hero = {
     faction: OPT.faction, stats: { power: HERO.power, hp: HERO.hp, regen: HERO.regen, speed: HERO.speed }, equip: {},
     weapons: [makeItem('weapon', OPT.weapon || f.startWeapon, 0, 1), OPT.left ? makeItem('weapon', OPT.left, 0, 1) : null],
-    hp: 0, bag: [], pulls: 0, pity: 0, spot: { s: sCamp, off: 0 },
+    hp: 0, bag: [], pulls: 0, pity: 0, spot: { s: sCamp, off: 0 }, kit: { forest: [null, null], cemetery: [null, null] } as Hero['kit'],
   };
+  h.kit.forest = h.kit.cemetery = h.weapons;
   h.hp = stats(h).maxHp;
   const units = buildUnits();
   const out: RunOut = { snaps: [], bossAt: {}, bossDur: {}, fights: [], pulls: [], deaths: 0 };
@@ -368,16 +382,16 @@ function run(seed: number): RunOut {
     const g = gearKey();
     if (st.power > verPower * 1.03 || st.maxHp > verHp * 1.03 || g !== verGear) { ver++; verPower = st.power; verHp = st.maxHp; verGear = g; est.clear(); }
   };
-  const full = (): Hero => ({ ...h, hp: stats(h).maxHp });
+  const full = (zone: ZoneId): Hero => ({ ...h, weapons: h.kit[zone], hp: stats(h).maxHp });
   const estimate = (u: Unit) => {
     const key = `${u.def}|${u.depth.toFixed(2)}`;
     let e = est.get(key);
     if (!e) {
       const boss = !!MOBS[u.def].boss;
-      e = fight(full(), foeOf(u), true, boss ? 400 : 150);
+      e = fight(full(u.zone), foeOf(u), true, boss ? 400 : 150);
       if (boss) {
         let wins = 0;
-        for (let i = 0; i < 6; i++) if (fight(full(), foeOf(u)).win) wins++;
+        for (let i = 0; i < 6; i++) if (fight(full(u.zone), foeOf(u)).win) wins++;
         e.rate = wins / 6;
       }
       est.set(key, e);
@@ -389,12 +403,12 @@ function run(seed: number): RunOut {
     const win: Record<string, number> = {};
     for (const b of BOSSES) {
       let w = 0;
-      for (let i = 0; i < 6; i++) if (fight(full(), foeOf(units.find((u) => u.def === b.id)!)).win) w++;
+      for (let i = 0; i < 6; i++) if (fight(full(b.boss!.zone), foeOf(units.find((u) => u.def === b.id)!)).win) w++;
       win[b.id] = w / 6;
     }
     out.snaps.push({
       t, zone: h.spot.s > GATE.s ? 'cemetery' : 'forest', power: st.power, maxHp: st.maxHp, regen: st.regen, defense: st.defense,
-      weapons: h.weapons.map(wname).join('+'), kills, deaths: out.deaths, pulls: out.pulls.length, win,
+      weapons: h.kit.forest.map(wname).join('+') + (open.has('cemetery') ? ' / ' + h.kit.cemetery.map(wname).join('+') : ''), kills, deaths: out.deaths, pulls: out.pulls.length, win,
     });
   };
   const walk = (to: Spot) => { t += dist(h.spot, to) / stats(h).speed; h.spot = to; };
@@ -448,6 +462,8 @@ function run(seed: number): RunOut {
       continue;
     }
     const u = best;
+    // a player switches to the weapons the location is weak to
+    h.weapons = h.kit[u.zone];
     const boss = u.kind === 'mob' && !!MOBS[u.def].boss;
     if (u.kind === 'mob' && (boss || h.hp - bestEst!.taken < 0.25 * st.maxHp)) heal();
     walk(u.spot);
@@ -512,7 +528,7 @@ if (OPT.bench) {
     for (let i = 0; i < n; i++) {
       rs = i + 1;
       const h: Hero = {
-        faction: 'human', stats: { power: 0, hp: 1e6, regen: 0, speed: 100 }, equip: {}, hp: 1e6, bag: [], pulls: 0, pity: 0, spot: { s: 0, off: 0 },
+        faction: 'human', stats: { power: 0, hp: 1e6, regen: 0, speed: 100 }, equip: {}, hp: 1e6, bag: [], pulls: 0, pity: 0, spot: { s: 0, off: 0 }, kit: {} as Hero['kit'],
         weapons: [makeItem('weapon', a, 2, 1), b ? makeItem('weapon', b, 2, 1) : null],
       };
       sum += fight(h, { def, hp: 4000, dmg: 0 }, false, 600).dur;
