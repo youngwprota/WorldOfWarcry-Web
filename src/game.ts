@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Character } from './character';
 import {
-  ANTI_KITE, COMBOS, FACTIONS, HERO, LEASH, MOBS, ORBS, depthMul, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
+  ANTI_KITE, COMBOS, FACTIONS, HERO, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, fmtOrb, RARITY, RESIST_MULT, RESPAWN_MIN_DIST, SHARPEN, WEAPONS,
   type AntiKite, type DamageType, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -56,7 +56,7 @@ class Mob {
   private lastSec = -1;
   // boss
   special = 4;
-  /** Game time of the last hit taken (boss regen). */
+  /** Game time of the last hit taken (regen waits MOB_REGEN_DELAY after it). */
   hurtAt = -99;
   fight: FightStat | null = null;
   casting = 0;
@@ -783,6 +783,7 @@ export class Game {
       if (!m.awake) continue;
       const def = m.def;
       let moving = false;
+      if (m.hp < m.maxHp && this.time - m.hurtAt > MOB_REGEN_DELAY) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * def.regen * dt);
       if (m.stun > 0) {
         m.stun -= dt;
       } else if (m.casting > 0) {
@@ -925,7 +926,6 @@ export class Game {
 
   private bossLogic(m: Mob, dt: number, dHero: number) {
     const b = m.def.boss!;
-    if (this.time - m.hurtAt > b.regenDelay) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * b.regen * dt);
     if (!m.phase2 && m.hp < m.maxHp * b.phase2At) {
       m.phase2 = true;
       this.fx.spawn(v1.copy(m.pos).setY(4.5), m.def.id === 'death' ? 'Твоё время вышло!' : 'Ты меня разозлил!', 'bark', 2);
