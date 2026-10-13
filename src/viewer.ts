@@ -1,5 +1,6 @@
 // Dev page: checks models, textures, animations and weapon grips.
 import * as THREE from 'three';
+import './grade';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { assets, ANIMS } from './assets';
 import { attachWeapon } from './rig';

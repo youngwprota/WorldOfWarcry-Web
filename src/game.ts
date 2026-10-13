@@ -206,8 +206,8 @@ export class Game {
     const f = FACTIONS[save.faction];
     this.camera = new THREE.PerspectiveCamera(46, 9 / 16, 0.5, 70);
     this.scene.fog = new THREE.FogExp2(0xbfe0f5, 0.015);
-    this.hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 1.7);
-    this.sun = new THREE.DirectionalLight(0xfff0d8, 2.0);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 2.0);
+    this.sun = new THREE.DirectionalLight(0xfff2d0, 2.6);
     this.sun.position.set(-6, 12, 5);
     // Real-time shadows in a box that follows the camera.
     this.sun.castShadow = true;

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { applySeeThrough } from './seethrough';
 
 const BASE = import.meta.env.BASE_URL + 'assets/';
 
@@ -90,8 +89,6 @@ class Assets {
         emissiveMap: emissive ? this.texture(emissive) : null,
       });
       m.name = texName;
-      // Level kit (buildings, props, elf foliage) fades out between the camera and the hero.
-      if (texName.startsWith('proto_')) applySeeThrough(m);
       this.materials.set(texName, m);
     }
     return m;

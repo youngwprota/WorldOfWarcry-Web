@@ -211,9 +211,9 @@ export interface ZoneDef {
 }
 
 export const ZONES: ZoneDef[] = [
-  { id: 'camp', name: 'Лагерь', z: [30, -22], ground: 0x7fa64a, ground2: 0x93b356, sky: 0xbfe0f5, fog: 0xcfe4ef, hemi: [0xffffff, 0x6f7d4a], fogDensity: 0.012, mist: 0.15, mistColor: 0xf4f8ff },
-  { id: 'forest', name: 'Опушка леса', z: [-22, -118], ground: 0x4f8c34, ground2: 0x6fa23e, sky: 0xa9d8b0, fog: 0xa8cfae, hemi: [0xf2fff0, 0x3e5a2a], fogDensity: 0.016, mist: 0.35, mistColor: 0xe6f4e8, recommend: 'slash' },
-  { id: 'cemetery', name: 'Старое кладбище', z: [-118, -225], ground: 0x55526a, ground2: 0x66607a, sky: 0x4d4862, fog: 0x5a5470, hemi: [0xd8d0ff, 0x2c2838], fogDensity: 0.024, mist: 0.6, mistColor: 0xc4bedc, recommend: 'crush' },
+  { id: 'camp', name: 'Лагерь', z: [30, -22], ground: 0x6cc23c, ground2: 0x8ed64c, sky: 0x8fd6ff, fog: 0xc4ecff, hemi: [0xffffff, 0x86a85a], fogDensity: 0.006, mist: 0.05, mistColor: 0xffffff },
+  { id: 'forest', name: 'Опушка леса', z: [-22, -118], ground: 0x45b236, ground2: 0x6ac43e, sky: 0x9ae6c8, fog: 0xbaf0d0, hemi: [0xfaffef, 0x5a8a3a], fogDensity: 0.008, mist: 0.15, mistColor: 0xf0fff4, recommend: 'slash' },
+  { id: 'cemetery', name: 'Старое кладбище', z: [-118, -225], ground: 0x625ea0, ground2: 0x746cb4, sky: 0x7c6ed0, fog: 0x9488d8, hemi: [0xf0e8ff, 0x4e4888], fogDensity: 0.012, mist: 0.4, mistColor: 0xddd4ff, recommend: 'crush' },
 ];
 
 export const WORLD = { halfWidth: 34, zMax: 26, zMin: -222, barrierZ: -118 };

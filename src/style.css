@@ -854,3 +854,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .divider b { color: #ffd23f; }
 .divider b.ok { color: #8cf26a; }
 .tier-lock { margin: -4px 0 6px; text-align: center; font-size: 14px; font-weight: 900; color: #ffb3a0; text-shadow: var(--stroke-s); }
+
+/* Clean main screen: no stats, boss respawn list, zone name or quest tracker (data still updates for the hero window). */
+#stats, #bosses, #zone-label, #goal { display: none !important; }

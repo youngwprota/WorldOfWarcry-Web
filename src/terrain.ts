@@ -92,10 +92,10 @@ export function buildGround(ponds: Pond[]): THREE.Mesh {
   const colors = new Float32Array(pos.count * 3);
   const c = new THREE.Color();
   const t = new THREE.Color();
-  const dirt = new THREE.Color(0xa4804f);
-  const darkDirt = new THREE.Color(0x7a5a3a);
-  const rock = new THREE.Color(0x8a8478);
-  const meadow = new THREE.Color(0x9cc45a);
+  const dirt = new THREE.Color(0xcfae80);
+  const darkDirt = new THREE.Color(0x8e6c48);
+  const rock = new THREE.Color(0xa49a88);
+  const meadow = new THREE.Color(0xa8e85a);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
@@ -113,13 +113,13 @@ export function buildGround(ponds: Pond[]): THREE.Mesh {
       if (d < 7) c.lerp(t.set(zd.ground), (1 - d / 7) * 0.5);
     }
     if (zone.id !== 'cemetery') c.lerp(meadow, smooth(0.62, 0.8, n2) * 0.35);
-    else c.lerp(t.set(0x4a4558), smooth(0.55, 0.8, n2) * 0.5);
+    else c.lerp(t.set(0x5a5494), smooth(0.55, 0.8, n2) * 0.5);
     // dirt path with ragged edges
     const pd = Math.abs(x - pathX(z)) + (n2 - 0.5) * 1.6;
     const pathW = zone.id === 'cemetery' ? 2.3 : 1.9;
     if (z < -12) {
       const k = 1 - smooth(pathW - 0.4, pathW + 1.2, pd);
-      c.lerp(zone.id === 'cemetery' ? t.set(0x7d7686) : dirt, k * 0.85);
+      c.lerp(zone.id === 'cemetery' ? t.set(0xa49cc8) : dirt, k * 0.85);
     }
     // camp plaza
     if (zone.id === 'camp') {
@@ -254,7 +254,7 @@ function mergeTwo(a: THREE.BufferGeometry, b: THREE.BufferGeometry) {
 export function buildPond(p: Pond, time: { value: number }) {
   const mat = new THREE.ShaderMaterial({
     transparent: true,
-    uniforms: { uTime: time, uDeep: { value: new THREE.Color(0x1f5f7a) }, uShallow: { value: new THREE.Color(0x58b8c8) } },
+    uniforms: { uTime: time, uDeep: { value: new THREE.Color(0x1a86c8) }, uShallow: { value: new THREE.Color(0x5ae0f0) } },
     vertexShader: 'varying vec2 vUv; varying vec3 vW; void main(){ vUv = uv; vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
     fragmentShader: `varying vec2 vUv; varying vec3 vW; uniform float uTime; uniform vec3 uDeep; uniform vec3 uShallow;
       void main(){
