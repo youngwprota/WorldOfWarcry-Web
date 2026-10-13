@@ -1533,6 +1533,15 @@ export class Game {
     this.afterGearChange();
   }
 
+  /** Debug: the left hand to the bag (or just gone if the bag is full). */
+  debugClearLeft() {
+    const it = this.save.weapons[1];
+    if (!it || !this.save.weapons[0]) return;
+    this.save.weapons[1] = null;
+    if (this.save.bag.length < BAG_SIZE) this.save.bag.push(it);
+    this.afterGearChange();
+  }
+
   debugSetHp(frac: number) {
     this.hp = Math.max(1, this.maxHp * frac);
   }

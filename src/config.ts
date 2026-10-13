@@ -96,6 +96,26 @@ export const WEAPONS: Record<string, WeaponDef> = {
     anim: 'AxeAttack', model: { human: 'reaper', orc: 'reaper' }, icon: '🌙',
     pull: { radius: 5, ahead: 1.5, force: 0.85, perEnemy: 0.15, max: 2 },
   },
+  nagamaki: {
+    id: 'nagamaki', name: 'Нагамаки', type: 'slash', dmgMul: 0.75, aps: 1.3, shape: 'arc', arc: 200, range: 2.6,
+    anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️',
+  },
+  scythe: {
+    id: 'scythe', name: 'Коса', type: 'slash', dmgMul: 0.9, aps: 0.55, shape: 'circle', arc: 360, range: 3,
+    anim: 'AxeAttack', model: { human: 'scythe', orc: 'scythe' }, icon: '🌀',
+  },
+  pan: {
+    id: 'pan', name: 'Сковорода', type: 'crush', dmgMul: 1.1, aps: 0.9, shape: 'circle', arc: 360, range: 2.2,
+    anim: 'AxeAttack', model: { human: 'pan', orc: 'pan' }, icon: '🍳', stun: 0.6,
+  },
+  hidden_blade: {
+    id: 'hidden_blade', name: 'Скрытый клинок', type: 'slash', dmgMul: 3.2, aps: 0.45, shape: 'arc', arc: 120, range: 2.0,
+    anim: 'SwordAttack', model: { human: 'hidden_blade', orc: 'hidden_blade' }, icon: '🗡', single: true,
+  },
+  shield: {
+    id: 'shield', name: 'Щит', type: 'crush', dmgMul: 0.5, aps: 0.8, shape: 'arc', arc: 120, range: 1.8,
+    anim: 'AxeAttack', model: { human: 'shield', orc: 'shield' }, icon: '🛡️',
+  },
 };
 
 /** Two weapons at once: each hand hits for `mul` of its damage (both hands ≈ ×1.2 of one). */
@@ -123,6 +143,11 @@ export const COMBOS: Record<string, ComboDef> = {
   hammer: { name: 'Землетрясение', hits: 3, window: 0.4, mult: 1.3, rangeAdd: 0.8, shape: 'circle', arc: 360, knock: 5, stun: 1.6, spin: false, color: 0xffc95a },
   dagger: { name: 'Шквал', hits: 3, window: 0.25, mult: 1.2, rangeAdd: 0.4, shape: 'circle', arc: 360, knock: 2, stun: 0, spin: true, color: 0xff6b8a },
   // reaper: the finisher pulls from twice as far
+  nagamaki: { name: 'Укол', hits: 3, window: 0.4, mult: 2.6, rangeAdd: 0.8, shape: 'arc', arc: 50, knock: 6, stun: 0.3, spin: false, color: 0xffe0a0 },
+  scythe: { name: 'Смерч', hits: 3, window: 0.6, mult: 1.4, rangeAdd: 1, shape: 'circle', arc: 360, knock: 3, stun: 0, spin: true, color: 0xb0ff9a },
+  pan: { name: 'БОНК', hits: 3, window: 0.4, mult: 1.6, rangeAdd: 0.4, shape: 'circle', arc: 360, knock: 2, stun: 1.5, spin: false, color: 0xffd28a },
+  hidden_blade: { name: 'Казнь', hits: 2, window: 0.8, mult: 1.5, rangeAdd: 0, shape: 'arc', arc: 120, knock: 1, stun: 1, spin: false, color: 0xff4040 },
+  shield: { name: 'Таран', hits: 3, window: 0.5, mult: 1.5, rangeAdd: 0.5, shape: 'arc', arc: 140, knock: 9, stun: 0.8, spin: false, color: 0xa0c8ff },
   reaper: { name: 'Жатва', hits: 3, window: 0.45, mult: 1.5, rangeAdd: 0.6, shape: 'circle', arc: 360, knock: 2, stun: 0.5, spin: true, color: 0x9a7bff },
 };
 

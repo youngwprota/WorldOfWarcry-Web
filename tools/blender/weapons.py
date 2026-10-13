@@ -4,7 +4,7 @@ so they share its hand-painted palette (the game assigns that texture by name, s
 Geometry is in centimetres, long axis along Blender +Z (exported as +Y), grip near the bottom - like the Bitgem weapons.
 
 PYTHONPATH=<numpy for py3.12> blender -b --python-use-system-env --factory-startup --python-exit-code 1 -P tools/blender/weapons.py -- [preview_dir]
-Output: public/assets/models/dagger.fbx, reaper.fbx (+ <name>.png renders in preview_dir when given).
+Output: public/assets/models/<name>.fbx for every builder in BUILDERS (+ <name>.png renders in preview_dir when given).
 """
 import math
 import os
@@ -193,6 +193,149 @@ def reaper():
     return b.finish("reaper")
 
 
+def blade_loft(b, pts, part="steel", spine=0.35, edge=0.95):
+    """Single-edged blade along a list of (x, z, width, thickness): spine at (x, z), edge `width` towards +X."""
+    rings = []
+    for x, z, w, th in pts:
+        rings.append([b.vert((x, th, z), spine), b.vert((x + w, 0.15, z), edge), b.vert((x, -th, z), spine * 0.7)])
+    x, z, _, _ = pts[-1]
+    rings.append([b.vert((x + 1.5, 0, z + 4), 1.0)] * 3)
+    b.loft(rings, part, cap_start=True, cap_end=False)
+
+
+def nagamaki():
+    """Nagamaki: a long wrapped grip as long as the slightly curved single-edged blade, round guard."""
+    b = Builder()
+    for i in range(10):
+        z = -40 + i * 9
+        b.cylinder(z, z + 7.5, 2.6, 2.6, "leather", seg=6, shade=(0.3, 0.9))
+        b.cylinder(z + 7.5, z + 9, 2.9, 2.9, "red", seg=6, shade=(0.3, 0.6))
+    b.cylinder(-46, -40, 3.2, 3.0, "gold", seg=8, shade=(0.4, 0.9))
+    b.cylinder(50, 53, 7.5, 7.5, "gold", seg=10, shade=(0.4, 0.8))
+    b.cylinder(53, 58, 3.0, 2.8, "gold", seg=6, shade=(0.6, 0.9))
+    pts = []
+    for k in range(9):
+        t = k / 8
+        pts.append((-2.6 + 9 * t ** 2, 58 + 92 * t, 5.5 - 1.5 * t, 1.1 * (1 - t) + 0.25))
+    blade_loft(b, pts)
+    return b.finish("nagamaki")
+
+
+def scythe():
+    """Throwing scythe: a short shaft with a crescent blade at each end (spins like a wheel when thrown)."""
+    b = Builder()
+    b.cylinder(-10, 60, 2.6, 2.6, "wood", seg=8, shade=(0.2, 0.7))
+    b.cylinder(18, 32, 3.0, 3.0, "leather", seg=8, shade=(0.3, 0.9))
+    for z0 in (-12, 58):
+        b.cylinder(z0, z0 + 4, 3.4, 3.4, "dark_steel", seg=8, shade=(0.4, 0.7))
+    for end, sign in ((60, 1), (-10, -1)):
+        rings = []
+        for k in range(9):
+            t = k / 8
+            a = math.pi * 0.85 * t
+            r = 26
+            x = sign * (r * math.sin(a))
+            z = end + sign * (r * (1 - math.cos(a)) * 0.9) - sign * 4
+            w = 9 * (1 - t) ** 0.7 + 0.4
+            th = 1.2 * (1 - t) + 0.15
+            rings.append([b.vert((x, th, z), 0.35), b.vert((x * (1 + w / r), 0.15, z + sign * w * 0.3), 0.95), b.vert((x, -th, z), 0.25)])
+        rings.append([rings[-1][1]] * 3)
+        b.loft(rings, "dark_steel", cap_start=True, cap_end=False)
+    return b.finish("scythe")
+
+
+def shield():
+    """Round buckler: wooden planks in a steel rim, a steel boss in the middle; handle along +Z under it."""
+    b = Builder()
+    # the disc faces +Y; its centre is 25 cm above the grip so the attach code finds the grip at the bottom
+    seg = 14
+    c = 25
+    rings = []
+    for r, y, sh in ((0.1, 5.5, 0.95), (6, 5.2, 0.85), (7, 3.2, 0.6)):
+        rings.append([b.vert((r * math.cos(2 * math.pi * i / seg), y, c + r * math.sin(2 * math.pi * i / seg)), sh) for i in range(seg)])
+    b.loft(rings, "dark_steel", cap_start=False, cap_end=False)
+    disc = [[b.vert((r * math.cos(2 * math.pi * i / seg), y, c + r * math.sin(2 * math.pi * i / seg)), sh) for i in range(seg)]
+            for r, y, sh in ((7, 3.2, 0.5), (24, 2.2, 0.85), (24, -1.5, 0.3), (7, -1.5, 0.2))]
+    b.loft(disc, "wood", cap_start=False, cap_end=False)
+    rim = [[b.vert((r * math.cos(2 * math.pi * i / seg), y, c + r * math.sin(2 * math.pi * i / seg)), sh) for i in range(seg)]
+           for r, y, sh in ((23.5, 3.0, 0.9), (27, 2.6, 0.95), (27, -2.2, 0.4), (23.5, -2.2, 0.3))]
+    b.loft(rim, "steel", cap_start=False, cap_end=False)
+    # inner handle (the grip point at the bottom), plus a strap bar
+    b.box((-1.6, -6.5, 0), (1.6, -2.2, 26), "leather", 0.6)
+    return b.finish("shield")
+
+
+def pan():
+    """Frying pan: long handle at the bottom, a round shallow pan on top."""
+    b = Builder()
+    b.cylinder(-8, 30, 2.0, 2.4, "wood", seg=6, shade=(0.2, 0.8))
+    b.cylinder(-11, -8, 2.6, 2.6, "dark_steel", seg=6, shade=(0.3, 0.6))
+    b.box((-1.4, -1.2, 30), (1.4, 1.2, 40), "dark_steel", 0.5)
+    seg = 14
+    c = 58
+    pan_rings = [[b.vert((r * math.cos(2 * math.pi * i / seg), y, c + r * math.sin(2 * math.pi * i / seg)), sh) for i in range(seg)]
+                 for r, y, sh in ((0.1, 2.0, 0.55), (17, 2.0, 0.5), (19, 6.0, 0.75), (20, 6.0, 0.95), (18.2, 0.5, 0.3), (0.1, 0.5, 0.25))]
+    b.loft(pan_rings, "dark_steel", cap_start=False, cap_end=False)
+    return b.finish("pan")
+
+
+def hidden_blade():
+    """Assassin's hidden blade: a leather bracer with a narrow blade sliding out of it."""
+    b = Builder()
+    b.cylinder(-6, 18, 3.6, 4.4, "leather", seg=8, shade=(0.3, 0.9))
+    for z in (-6, 6, 16):
+        b.cylinder(z, z + 2, 4.6, 4.6, "gold", seg=8, shade=(0.4, 0.8))
+    b.box((-1.2, -1.2, 18), (1.2, 1.2, 22), "dark_steel", 0.5)
+    rings = []
+    for k in range(6):
+        t = k / 5
+        z = 22 + 34 * t
+        w = 1.8 * (1 - t * 0.4)
+        th = 0.7
+        rings.append([b.vert((-w, 0, z), 0.95), b.vert((0, th, z), 0.5), b.vert((w, 0, z), 0.95), b.vert((0, -th, z), 0.35)])
+    rings.append([b.vert((0, 0, 62), 1.0)] * 4)
+    b.loft(rings, "steel", cap_start=True, cap_end=False)
+    return b.finish("hidden_blade")
+
+
+def sickle():
+    """Sickle: a short wooden handle and a hooked crescent blade."""
+    b = Builder()
+    b.cylinder(-8, 18, 2.2, 2.4, "wood", seg=6, shade=(0.2, 0.8))
+    b.cylinder(18, 21, 2.7, 2.7, "dark_steel", seg=6, shade=(0.4, 0.7))
+    rings = []
+    for k in range(10):
+        t = k / 9
+        a = math.pi * 1.25 * t
+        r = 15
+        x = r * math.sin(a) - 0.0
+        z = 21 + r * (1 - math.cos(a)) * 1.05
+        w = 4.5 * (1 - t) ** 0.6 + 0.3
+        th = 0.9 * (1 - t) + 0.15
+        nx, nz = -math.sin(a), math.cos(a) - 1  # towards the inside of the hook
+        ln = math.hypot(nx, nz) or 1
+        rings.append([b.vert((x, th, z), 0.35), b.vert((x - w * math.sin(a), 0.15, z - w * math.cos(a) * 0.3 + w * 0.2), 0.95), b.vert((x, -th, z), 0.25)])
+    rings.append([rings[-1][1]] * 3)
+    b.loft(rings, "steel", cap_start=True, cap_end=False)
+    return b.finish("sickle")
+
+
+def kitchen_knife():
+    """Kitchen chef's knife: riveted wooden handle, a wide blade with a straight spine."""
+    b = Builder()
+    b.box((-1.6, -1.1, -8), (1.6, 1.1, 14), "wood", 0.7)
+    for z in (-3, 4, 11):
+        b.box((-0.9, -1.25, z - 0.8), (0.9, 1.25, z + 0.8), "steel", 0.95)
+    b.box((-2.2, -1.2, 14), (2.2, 1.2, 16), "steel", 0.6)
+    pts = [(-1.8, 16 + 30 * t, 7.5 * (1 - t ** 3) + 0.6, 0.6 * (1 - t) + 0.15) for t in (k / 6 for k in range(7))]
+    blade_loft(b, pts)
+    return b.finish("kitchen_knife")
+
+
+BUILDERS = {"dagger": dagger, "reaper": reaper, "nagamaki": nagamaki, "scythe": scythe, "shield": shield, "pan": pan,
+            "hidden_blade": hidden_blade, "sickle": sickle, "kitchen_knife": kitchen_knife}
+
+
 def export(ob, name):
     bpy.ops.object.select_all(action="DESELECT")
     ob.select_set(True)
@@ -233,7 +376,12 @@ def preview(ob, name):
 
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
-built = {"dagger": dagger(), "reaper": reaper()}
+# `-- dir name1 name2`: only those builders
+ONLY = ARGS[1:] or list(BUILDERS)
+built = {}
+for name in ONLY:
+    built[name] = BUILDERS[name]()
+    # every model alone at the origin for its preview
 for name, ob in built.items():
     export(ob, name)
 if PREVIEW_DIR:

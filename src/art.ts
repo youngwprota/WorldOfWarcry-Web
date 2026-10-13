@@ -54,6 +54,21 @@ const ART: Record<string, string> = {
     ${P(rect(28, 46, 8, 10, 2), '#efe6cf')}
     ${P('M33 8C24 1 9 3 2 16C12 10 22 11 31 18Z', STEEL)}${N('M31 18C22 11 12 10 2 16C10 13 20 14 31 13Z', STEEL_DD)}${H('M8 9C14 6 20 6 25 7', 2.2)}
     ${P(rect(27, 5, 10, 9, 2), STEEL_DD)}${P('M37 8L46 6L37 13Z', STEEL_D)}</g>`,
+  nagamaki: `<g transform="rotate(40 32 32)">
+    ${P('M33 1C37 9 37 20 35 31H29C30 20 31 10 33 1Z', STEEL)}${N('M33 1C37 9 37 20 35 31H32C33 20 33 10 33 1Z', STEEL_D)}${H('M31.5 9C31 16 30.8 22 30.8 27', 2)}
+    ${P(circ(32, 33, 6), GOLD)}${N(circ(32, 33, 2.5), GOLD_D)}
+    ${P(rect(29, 38, 6, 24, 2), '#2b2b33')}${[41, 46, 51, 56].map((y) => N(rect(29, y, 6, 2), RED)).join('')}</g>`,
+  scythe: `<g transform="rotate(25 32 32)">
+    ${P(rect(29, 14, 6, 38, 3), WOOD_D)}${P(rect(28, 26, 8, 10, 2), LEATHER)}
+    ${P('M32 14C22 4 9 4 3 12C12 9 21 11 29 19Z', STEEL)}${H('M9 8C14 6 19 6 23 8', 2)}
+    ${P('M32 52C42 62 55 62 61 54C52 57 43 55 35 47Z', STEEL)}${N('M35 47C43 55 52 57 61 54C55 60 45 60 37 53Z', STEEL_D)}</g>`,
+  pan: `<g transform="rotate(35 32 32)">
+    ${P(rect(28.5, 34, 7, 28, 3), WOOD)}${N(rect(32, 36, 3.5, 24), WOOD_D)}${P(rect(29.5, 30, 5, 7, 1.5), STEEL_DD)}
+    ${P(circ(32, 18, 16), '#4a5260')}${N(circ(32, 18, 12), '#2e343d')}${H('M22 12C24 8 28 6 32 6', 2.5)}</g>`,
+  hidden_blade: `<g transform="rotate(40 32 32)">
+    ${P('M32 2L35 9L34.5 33H29.5L29 9Z', STEEL)}${N('M32 2L35 9L34.5 33H32Z', STEEL_D)}
+    ${P(rect(24, 32, 16, 28, 5), LEATHER_D)}${N(rect(32, 34, 7, 24, 3), '#6e3d20')}
+    ${P(rect(23, 35, 18, 4, 2), GOLD)}${P(rect(23, 46, 18, 4, 2), GOLD)}${P(rect(23, 55, 18, 4, 2), GOLD)}</g>`,
   head: `${P('M27 12L32 1L37 12Z', RED)}
     ${P('M9 42C9 21 19 10 32 10C45 10 55 21 55 42Z', STEEL)}${N('M32 10C45 10 55 21 55 42H43C44 27 40 16 32 10Z', STEEL_D)}${H('M17 32C18 23 23 17 29 14')}
     ${N(rect(14, 29, 13, 4.5, 2), INK)}${N(rect(37, 29, 13, 4.5, 2), INK)}
