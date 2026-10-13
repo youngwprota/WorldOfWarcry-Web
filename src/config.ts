@@ -232,6 +232,8 @@ export const fmtOrb = (k: OrbKind, n = 1) => `+${+(ORBS[k].value * n).toFixed(2)
 export const HERO = {
   power: 10, hp: 100, regen: 1, speed: 5,
   regenCap: 5, speedCap: 7.5, outOfCombatRegen: 3, outOfCombatDelay: 3,
+  /** Final run speed multiplier (applies to old saves too): base 5 → 4 m/s, cap 7.5 → 6. Mobs run 2.8–4.3. */
+  speedMul: 0.8,
   radius: 0.45, acquireExtra: 0.4, campfireRegen: 4, campfireRadius: 6,
 };
 

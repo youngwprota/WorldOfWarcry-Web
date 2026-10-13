@@ -320,7 +320,7 @@ export class Game {
   get shieldMax() { return this.faction === 'human' ? Math.round(this.maxHp * (0.15 + this.t('shieldPct') / 100)) : 0; }
   get regen() { return Math.min(HERO.regenCap, (this.save.stats.regen + this.gear().regen) * (this.faction === 'human' ? 1.1 : 1)) * (1 + this.t('healPct') / 100); }
   get speed() {
-    return Math.min(HERO.speedCap, this.save.stats.speed + this.gear().speed) * (this.faction === 'orc' ? 1.05 : 1) *
+    return Math.min(HERO.speedCap, this.save.stats.speed + this.gear().speed) * HERO.speedMul * (this.faction === 'orc' ? 1.05 : 1) *
       (1 + (this.t('speedPct') + this.buffSum('speed')) / 100);
   }
   /** Attack speed multiplier from talents and buffs. */
