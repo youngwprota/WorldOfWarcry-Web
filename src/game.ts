@@ -29,6 +29,8 @@ interface FightStat { t0: number; dealt: number; taken: number; hits: number; co
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
+/** Slack over the weapon's range for a hit to land (unit edge to hero centre); targeting and swings use the same. */
+const STRIKE_PAD = 0.35;
 
 /** Respawn timer text: 45s, 4m05s, or 11h45m from an hour up (no seconds). */
 function fmtRespawn(sec: number) {
@@ -622,7 +624,7 @@ export class Game {
     if (this.combo > 0 && this.impact < 0 && this.time - this.lastSwing > period + combo.window) this.combo = 0;
     // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
     // up to 1 m further for facing, and swinging there was a whiff into thin air.
-    const inReach = !!this.target && this.target.pos.distanceTo(p) - this.target.radius <= w.range + 0.35;
+    const inReach = !!this.target && this.inStrike(this.target, w.range);
     if (inReach && this.atkCd <= 0) {
       const chained = this.lastSwingHit && this.time - this.lastSwing <= period + combo.window;
       this.combo = chained ? this.combo + 1 : 1;
@@ -664,12 +666,18 @@ export class Game {
     return { dmg: Math.max(1, Math.round(dmg)), tier };
   }
 
+  /** The unit's edge is within the strike distance (any direction). */
+  private inStrike(u: Unit, range: number) {
+    const p = this.hero.position;
+    return Math.hypot(u.pos.x - p.x, u.pos.z - p.z) - u.radius <= range + STRIKE_PAD;
+  }
+
   private inShape(pos: THREE.Vector3, radius: number, shape: 'arc' | 'circle', arc: number, range: number) {
     const p = this.hero.position;
     const dx = pos.x - p.x;
     const dz = pos.z - p.z;
     const d = Math.hypot(dx, dz);
-    if (d - radius > range + 0.35) return false;
+    if (d - radius > range + STRIKE_PAD) return false;
     if (shape === 'circle' || d < 0.6) return true;
     let a = Math.atan2(dx, dz) - this.hero.facing;
     a = Math.atan2(Math.sin(a), Math.cos(a));
