@@ -3,7 +3,7 @@ import { Character } from './character';
 import { Creature } from './creature';
 import {
   COMBOS, FACTIONS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
-  type DamageType, type MobDef, type OrbKind, type ZoneDef,
+  type DamageType, type MobDef, type OrbKind, type WeaponDef, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
@@ -649,6 +649,7 @@ export class Game {
       this.lastSwing = this.time;
       const impactAt = Math.min(0.42, period * 0.4);
       ch.attack(w.anim, period, impactAt);
+      if (w.pull) this.reapPull(w.pull);
       this.impact = impactAt;
       this.atkCd = period;
     }
@@ -695,6 +696,25 @@ export class Game {
     return Math.abs(a) <= THREE.MathUtils.degToRad(arc / 2) + Math.atan2(radius, d);
   }
 
+  /** Reaper swing start: slide the mobs around towards a point in front of the hero, they land by the impact. */
+  private reapPull(pull: NonNullable<WeaponDef['pull']>) {
+    const p = this.hero.position;
+    const at = v2.set(p.x + Math.sin(this.hero.facing) * pull.ahead, 0, p.z + Math.cos(this.hero.facing) * pull.ahead);
+    const radius = pull.radius * (this.finisher ? 2 : 1);
+    let n = 0;
+    for (const m of this.mobs) {
+      if (!m.hittable || m.def.boss || m.pos.distanceTo(p) - m.radius > radius) continue;
+      // knockback slides 1/9 of its speed (it decays ×(1 − 9·dt)), so speed = 9 × the distance to cover
+      m.knock.set(at.x - m.pos.x, 0, at.z - m.pos.z).multiplyScalar(9 * pull.force);
+      if (m.state === 'idle') m.state = 'chase';
+      n++;
+    }
+    if (n) {
+      this.waves.add(at, 1.2, COMBOS.reaper.color, 0.3);
+      this.particles.burst(at.setY(0.3), COMBOS.reaper.color, 6 + 2 * Math.min(n, 6), 0.1, 4, 0.5);
+    }
+  }
+
   private heroStrike() {
     const w = this.weapon;
     const fin = this.finisher ? COMBOS[this.weaponItem.def] : null;
@@ -702,6 +722,14 @@ export class Game {
     const arc = fin ? fin.arc : w.arc;
     const range = w.range + (fin ? fin.rangeAdd : 0);
     let hits = 0;
+    // reaper: the more mobs the blow catches, the harder it hits each of them
+    let crowd = 1;
+    if (w.pull) {
+      let n = 0;
+      for (const m of this.mobs) if (m.hittable && this.inShape(m.pos, m.radius, shape, arc, range)) n++;
+      crowd = Math.min(w.pull.max, 1 + w.pull.perEnemy * (n - 1));
+      if (crowd > 1) this.fx.spawn(v1.copy(this.hero.position).setY(2.6), `×${crowd.toFixed(2).replace(/\.?0+$/, '')}`, 'dmg weak', 0.8);
+    }
     const only = !fin && w.single ? this.target : null;
     sfx.swing();
     for (const u of this.units) {
@@ -716,12 +744,13 @@ export class Game {
       const m = u as Mob;
       // daggers: +stack.add per stack on this mob, the finisher counts them twice; then one more stack
       const stackMul = w.stack ? 1 + w.stack.add * m.stacks * (fin ? 2 : 1) : 1;
-      const { dmg, tier } = this.damageFor(w.type, m.def.resist, (fin ? fin.mult : 1) * stackMul);
+      const { dmg, tier } = this.damageFor(w.type, m.def.resist, (fin ? fin.mult : 1) * stackMul * crowd);
       if (w.stack) m.setStacks(Math.min(w.stack.max, m.stacks + 1), this.time);
       const f = this.fightOf(m);
       f.hits++;
       if (fin) f.combos++;
-      this.damageMob(m, dmg, tier, fin ? fin.knock : 3.5);
+      // the reaper keeps the pulled crowd together: no knockback on plain swings
+      this.damageMob(m, dmg, tier, fin ? fin.knock : w.pull ? 0.5 : 3.5);
       if (m.alive && !m.def.boss) {
         if (fin?.stun) m.stun = Math.max(m.stun, fin.stun);
         else if (w.stun && Math.random() < w.stun) m.stun = 0.9;

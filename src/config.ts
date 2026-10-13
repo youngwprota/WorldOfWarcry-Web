@@ -66,8 +66,9 @@ export interface WeaponDef {
    */
   stack?: { add: number; max: number; decay: number };
   /**
-   * Reaper: each swing drags mobs within `radius` m towards a point `ahead` m in front of the hero (bosses stay),
-   * then the blow deals × (1 + perEnemy × (hits − 1)), up to × `max`.
+   * Reaper: each swing drags mobs within `radius` m (×2 on the finisher) towards a point `ahead` m in front of
+   * the hero (bosses stay); `force` = share of the way they slide. Then the blow deals
+   * × (1 + perEnemy × (mobs hit − 1)), up to × `max`.
    */
   pull?: { radius: number; ahead: number; force: number; perEnemy: number; max: number };
 }
@@ -93,7 +94,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   reaper: {
     id: 'reaper', name: 'Жнец', type: 'slash', dmgMul: 1.1, aps: 0.8, shape: 'arc', arc: 200, range: 2.6,
     anim: 'AxeAttack', model: { human: 'reaper', orc: 'reaper' }, icon: '🌙',
-    pull: { radius: 5, ahead: 1.5, force: 9, perEnemy: 0.15, max: 2 },
+    pull: { radius: 5, ahead: 1.5, force: 0.85, perEnemy: 0.15, max: 2 },
   },
 };
 
