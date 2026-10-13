@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WarCry Unit Roster</title>
+  <style>
+    :root {
+      --bg: #1b1a18; --panel: #24231f; --fg: #ecebe6; --muted: #a5a093; --line: #3a3833;
+      --human: #6f9be0; --orc: #e06a5f; --undead: #a888d6;
+      color-scheme: dark;
+    }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px system-ui, sans-serif; }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 16px 48px; }
+    h1 { font-size: 2rem; margin: 0 0 6px; letter-spacing: .02em; }
+    .lede { color: var(--muted); margin: 0 0 28px; max-width: 70ch; line-height: 1.45; }
+    section { margin-top: 28px; }
+    h2 { font-size: 1.25rem; margin: 0 0 12px; display: flex; align-items: baseline; gap: 10px; color: var(--c); }
+    h2 small { font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--c); border-radius: 6px;
+      padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+    .card img { width: 100%; aspect-ratio: 360/420; object-fit: contain; }
+    .card.mob { cursor: pointer; }
+    .card.mob:hover, .card.mob.sel { outline: 2px solid var(--c); }
+    .name { font-weight: 600; }
+    .file { font-size: .78rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
+    .tag { align-self: flex-start; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; padding: 2px 6px;
+      border-radius: 3px; border: 1px solid var(--line); color: var(--muted); }
+    .tag.in { border-color: var(--c); color: var(--c); }
+    .rules { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 16px; background: var(--panel);
+      border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin-bottom: 12px; }
+    @media (max-width: 700px) { .rules { grid-template-columns: 1fr; } }
+    .sws { display: flex; flex-wrap: wrap; gap: 10px; }
+    .sw { display: flex; gap: 8px; align-items: center; font-size: .8rem; min-width: 120px; }
+    .sw i { width: 22px; height: 40px; border-radius: 3px; border: 1px solid var(--line); flex: none; }
+    .sw code { color: var(--muted); font-size: .75rem; }
+    .rules ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; line-height: 1.45; }
+
+    /* Animation viewer: opens over the page for the selected mob */
+    #viewer { position: fixed; inset: 0; background: #000a; display: none; align-items: center; justify-content: center; padding: 16px; z-index: 10; }
+    #viewer.open { display: flex; }
+    .vbox { background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--c); border-radius: 8px;
+      width: min(900px, 100%); max-height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+    .vhead { display: flex; align-items: baseline; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+    .vhead b { font-size: 1.1rem; }
+    .vhead .stats { color: var(--muted); font-size: .85rem; flex: 1; }
+    .vhead button { background: none; border: 0; color: var(--fg); font-size: 1.4rem; cursor: pointer; }
+    #stage { position: relative; height: min(56vh, 480px); }
+    #stage canvas { display: block; width: 100%; height: 100%; }
+    .vctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); }
+    .vctl button { background: #2f2d29; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; cursor: pointer; }
+    .vctl button.on { border-color: var(--c); color: var(--c); }
+    .vctl label { color: var(--muted); font-size: .85rem; display: flex; gap: 6px; align-items: center; }
+    .tl { position: relative; flex: 1 1 100%; height: 22px; }
+    .tl input { width: 100%; margin: 0; }
+    .tl .hit { position: absolute; top: -2px; width: 2px; height: 26px; background: #ff5a3c; pointer-events: none; }
+    .tl .hit::after { content: 'hit'; position: absolute; left: 4px; top: -2px; font-size: .7rem; color: #ff5a3c; }
+    .time { font-family: ui-monospace, Consolas, monospace; font-size: .8rem; color: var(--muted); min-width: 120px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>WarCry Unit Roster</h1>
+    <p class="lede">Three factions: Human, Orc, Undead. Every unit and mob belongs to at least one, recolored to that
+      faction's rules. Swatches are sampled from the shared palette textures (the middle tone is shown in hex).
+      Units tagged <b>in web</b> are loaded by the prototype; <b>Unity only</b> ones still need <code>import-assets</code>.
+      Mobs come from the game's mob list: click one to open its animation viewer.</p>
+    <div id="root"></div>
+  </div>
+  <div id="viewer"></div>
+  <script type="module" src="/src/roster.ts"></script>
+</body>
+</html>

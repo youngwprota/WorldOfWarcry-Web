@@ -1,5 +1,5 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
-import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId } from './config';
+import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId, type ItemDrop } from './config';
 import { DAMAGE_TYPE_ICON, icon } from './icons';
 import { art } from './art';
 
@@ -10,7 +10,8 @@ export interface Item {
   def: string;
   rarity: number;
   sharpen: number;
-  lvl: number; // zone level the item dropped in
+  /** 1 + number of extra copies merged into it (each raises the stats, see RARITY). */
+  lvl: number;
   /** Unique name (gacha banner weapons); replaces the generic def name. */
   name?: string;
 }
@@ -37,7 +38,7 @@ export const PART_PREFIXES: Record<VisualPart, string[]> = {
   legs: ['legs_', 'hip_', 'hips_'],
 };
 
-export const BONUS_NAME: Record<BonusStat, string> = { hp: 'Здоровье', regen: 'Реген %/с', power: 'Урон', speed: 'Бег м/с' };
+export const BONUS_NAME: Record<BonusStat, string> = { hp: 'Здоровье', regen: 'Реген HP/с', power: 'Урон', speed: 'Скорость' };
 
 export interface ArmorDef {
   id: string;
@@ -50,17 +51,18 @@ export interface ArmorDef {
   alwaysBonus?: boolean;
 }
 
-// Armour sets reuse other characters of the hero's own race as "outfits".
+// Armour sets reuse other characters of the hero's own race as "outfits". The hero itself is the plainest
+// model (peasant / peon, FACTIONS.hero), so every piece visibly changes it.
 const SETS = [
-  { id: 'peasant', of: { human: 'крестьянина', orc: 'батрака' }, src: { human: 'peasant', orc: 'orc_peon' }, mult: 0.6 },
   { id: 'guard', of: { human: 'стражника', orc: 'рубаки' }, src: { human: 'soldier', orc: 'orc_warrior' }, mult: 1 },
+  { id: 'knight', of: { human: 'рыцаря', orc: 'громилы' }, src: { human: 'human_knight', orc: 'orc_grunt' }, mult: 1.2 },
   { id: 'lord', of: { human: 'паладина', orc: 'вождя' }, src: { human: 'paladin', orc: 'orc_chieftain' }, mult: 1.45 },
 ] as const;
 const PIECES: { slot: VisualPart; noun: string; defense: number; bonus: { stat: BonusStat; value: number } }[] = [
-  { slot: 'head', noun: 'Шлем', defense: 5, bonus: { stat: 'regen', value: 0.15 } },
+  { slot: 'head', noun: 'Шлем', defense: 5, bonus: { stat: 'regen', value: 1 } },
   { slot: 'chest', noun: 'Нагрудник', defense: 9, bonus: { stat: 'hp', value: 18 } },
   { slot: 'arms', noun: 'Перчатки', defense: 3, bonus: { stat: 'power', value: 4 } },
-  { slot: 'legs', noun: 'Поножи', defense: 6, bonus: { stat: 'speed', value: 0.15 } },
+  { slot: 'legs', noun: 'Поножи', defense: 6, bonus: { stat: 'speed', value: 3 } },
 ];
 
 export const ARMOR: Record<string, ArmorDef> = {};
@@ -70,22 +72,33 @@ for (const s of SETS) {
       id: `${s.id}_${p.slot}`, slot: p.slot,
       name: { human: `${p.noun} ${s.of.human}`, orc: `${p.noun} ${s.of.orc}` },
       source: s.src, defense: Math.round(p.defense * s.mult),
-      bonus: { stat: p.bonus.stat, value: +(p.bonus.value * s.mult).toFixed(2) },
+      bonus: { stat: p.bonus.stat, value: Math.max(1, Math.round(p.bonus.value * s.mult)) },
     };
   }
 }
 ARMOR.ring_power = { id: 'ring_power', slot: 'ring', name: { human: 'Кольцо силы', orc: 'Кольцо ярости' }, defense: 0, bonus: { stat: 'power', value: 5 }, alwaysBonus: true };
-ARMOR.ring_swift = { id: 'ring_swift', slot: 'ring', name: { human: 'Кольцо ветра', orc: 'Кольцо следопыта' }, defense: 0, bonus: { stat: 'speed', value: 0.2 }, alwaysBonus: true };
+ARMOR.ring_swift = { id: 'ring_swift', slot: 'ring', name: { human: 'Кольцо ветра', orc: 'Кольцо следопыта' }, defense: 0, bonus: { stat: 'speed', value: 4 }, alwaysBonus: true };
 ARMOR.amulet_life = { id: 'amulet_life', slot: 'amulet', name: { human: 'Амулет жизни', orc: 'Клык предков' }, defense: 2, bonus: { stat: 'hp', value: 20 }, alwaysBonus: true };
-ARMOR.amulet_spring = { id: 'amulet_spring', slot: 'amulet', name: { human: 'Амулет родника', orc: 'Тотем крови' }, defense: 2, bonus: { stat: 'regen', value: 0.2 }, alwaysBonus: true };
+ARMOR.amulet_spring = { id: 'amulet_spring', slot: 'amulet', name: { human: 'Амулет родника', orc: 'Тотем крови' }, defense: 2, bonus: { stat: 'regen', value: 1 }, alwaysBonus: true };
 
 export const BAG_SIZE = 24;
 
-export const lvlMult = (lvl: number) => 1 + 0.6 * (lvl - 1);
+/** Armour: each extra copy adds 30% of the piece's stats. */
+export const lvlMult = (lvl: number) => 1 + 0.3 * (lvl - 1);
 
+/** Quality base + a fixed amount per extra copy, times the weapon's multiplier (old saves may carry sharpening). */
 export function weaponDamage(it: Item) {
-  return WEAPONS[it.def].dmg * RARITY[it.rarity].mult * (1 + SHARPEN.perLevel * it.sharpen) * lvlMult(it.lvl);
+  const r = RARITY[it.rarity];
+  return (r.base + r.copy * (it.lvl - 1)) * WEAPONS[it.def].dmgMul * (1 + SHARPEN.perLevel * it.sharpen);
 }
+
+/** Damage one more copy would add (shown on pickup). */
+export function copyGain(it: Item) {
+  return it.kind === 'weapon' ? Math.round(RARITY[it.rarity].copy * WEAPONS[it.def].dmgMul) : 0;
+}
+
+/** Same item for merging copies: same weapon / armour piece and the same quality. */
+export const sameItem = (a: Item, b: Item) => a.kind === b.kind && a.def === b.def && a.rarity === b.rarity;
 
 export function armorStats(it: Item) {
   const d = ARMOR[it.def];
@@ -93,7 +106,7 @@ export function armorStats(it: Item) {
   const defense = Math.round(d.defense * r * lvlMult(it.lvl));
   // GDD 8.3: common armour has no bonus; rarer pieces get a bigger one.
   const has = d.alwaysBonus || it.rarity > 0;
-  const value = has ? +(d.bonus.value * (0.6 + 0.4 * (it.rarity + 1)) * lvlMult(it.lvl)).toFixed(2) : 0;
+  const value = has ? Math.max(1, Math.round(d.bonus.value * (0.6 + 0.4 * (it.rarity + 1)) * lvlMult(it.lvl))) : 0;
   return { defense, bonus: has ? { stat: d.bonus.stat, value } : null };
 }
 
@@ -150,19 +163,14 @@ export function makeItem(kind: ItemKind, def: string, rarity: number, lvl: numbe
   return { uid: newUid(), kind, def, rarity, sharpen: 0, lvl };
 }
 
-/** Random drop: mostly armour, sometimes weapons; luck shifts the rarity roll (bosses). */
-export function rollItem(lvl: number, luck = 0): Item {
-  const r = Math.random() + luck;
-  const rarity = r > 1.12 ? 3 : r > 0.93 ? 2 : r > 0.65 ? 1 : 0;
-  if (Math.random() < 0.25) {
-    const ids = Object.keys(WEAPONS);
-    return makeItem('weapon', ids[Math.floor(Math.random() * ids.length)], rarity, lvl);
-  }
-  const ids = Object.keys(ARMOR);
-  return makeItem('armor', ids[Math.floor(Math.random() * ids.length)], rarity, lvl);
-}
+/** The item a mob's `drop` describes (one copy). */
+export const dropItem = (d: ItemDrop) => makeItem(d.kind, d.def, d.rarity, 1);
+/** Icon id of a drop (weapon id or armour slot). */
+export const dropIconId = (d: ItemDrop) => (d.kind === 'weapon' ? d.def : ARMOR[d.def].slot);
 
 /** Old saves stored bare {def, rarity, sharpen} weapons. */
 export function normalizeItem(it: Partial<Item> & { def: string }): Item {
-  return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def: it.def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
+  // the old peasant set is gone (the hero looks like a peasant already): its pieces become guard pieces
+  const def = it.def.startsWith('peasant_') ? it.def.replace('peasant_', 'guard_') : it.def;
+  return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
 }

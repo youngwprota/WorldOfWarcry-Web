@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 const BASE = import.meta.env.BASE_URL + 'assets/';
@@ -43,6 +44,9 @@ export interface CharacterClips {
 class Assets {
   private manager = new THREE.LoadingManager();
   private fbx = new FBXLoader(this.manager);
+  private gltf = new GLTFLoader();
+  /** GLB creatures (own skeleton and clips, textures embedded). */
+  private creatures = new Map<string, { scene: THREE.Group; clips: THREE.AnimationClip[] }>();
   private texLoader = new THREE.TextureLoader();
   private sources = new Map<string, THREE.Group>();
   private textures = new Map<string, THREE.Texture>();
@@ -66,6 +70,25 @@ class Assets {
     );
     this.prepareClips();
     for (const n of names) this.prepareModel(n);
+  }
+
+  async loadCreatures(names: string[]) {
+    await Promise.all(
+      names.map(async (n) => {
+        const g = await this.gltf.loadAsync(`${BASE}models/${n}.glb`);
+        this.creatures.set(n, { scene: g.scene, clips: g.animations });
+      }),
+    );
+  }
+
+  /** Creature clone with its own skeleton, plus its clips by name (idle, walk, attack, death). */
+  cloneCreature(name: string): { model: THREE.Group; clips: Record<string, THREE.AnimationClip> } {
+    const src = this.creatures.get(name);
+    if (!src) throw new Error('creature not loaded: ' + name);
+    return {
+      model: SkeletonUtils.clone(src.scene) as THREE.Group,
+      clips: Object.fromEntries(src.clips.map((c) => [c.name, c])),
+    };
   }
 
   texture(name: string): THREE.Texture {

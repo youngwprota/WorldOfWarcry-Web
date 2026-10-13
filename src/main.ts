@@ -10,7 +10,6 @@ import { FACTIONS, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './c
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
-import { TalentsView } from './talentsview';
 import { DebugPanel } from './debug';
 import { Prologue, clearPrologue, prologueDone, type Gains } from './prologue';
 import { MapView } from './mapview';
@@ -18,6 +17,7 @@ import { GachaView } from './gachaview';
 import { loadSave, newSave, wipeAll, writeSave } from './save';
 import { clearLog, report } from './balancelog';
 import { UI } from './ui';
+import { DragScroll } from './dragscroll';
 import { BREAKABLES } from './world';
 
 const ui = new UI();
@@ -40,6 +40,7 @@ function resize() {
   return { w, h };
 }
 addEventListener('resize', resize);
+new DragScroll(app);
 resize();
 
 // Everything the prototype can show; loaded up-front (≈20 MB of FBX).
@@ -51,14 +52,15 @@ for (const f of Object.values(FACTIONS)) {
   models.add(f.campfire);
 }
 for (const w of Object.values(WEAPONS)) Object.values(w.model).forEach((m) => models.add(m));
-for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { models.add(c); if (w) models.add(w); }
+const creatures = new Set<string>();
+for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { (m.creature ? creatures : models).add(c); if (w) models.add(w); }
 for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
 ['orc_stone_big', 'orc_stone_mid', 'orc_stone_small', 'orc_log', 'orc_wood_pile_big', 'orc_tusk_standing', 'orc_skull',
   'undead_fence', 'undead_ruins_01', 'undead_ruins_02', 'undead_obelisk', 'undead_column_1', 'undead_big_bone',
   'undead_bones_remains', 'undead_lamp_post', 'campfire',
   // level design kit
   'palisade_pole', 'tower_human_small_1', 'orc_high_stand', 'human_house_large', 'human_house_mid', 'human_house_small',
-  'smithy_building', 'barrack_Lv2', 'tower_big', 'orc_cabin', 'orc_barrack_Lv2', 'orc_tower_Lv2', 'anvil_big', 'orc_anvil',
+  'barrack_Lv2', 'tower_big', 'orc_cabin', 'orc_barrack_Lv2', 'orc_tower_Lv2',
   'practice_dummy', 'orc_practice_dummy', 'target', 'orc_practice_aim', 'elf_well', 'wood_pile_big', 'orc_wood_pile_big',
   'orc_head_lantern', 'orc_flag_red', 'orc_drum_big', 'orc_altar', 'orc_horned_skull', 'cauldron', 'box_large_2',
   'woodcutter_building', 'elf_log_pile', 'saw', 'wood_pile_small', 'bucket', 'elf_stone_big', 'mine_enterance', 'minecart',
@@ -70,7 +72,10 @@ for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
   'undead_ground_bone_2', 'undead_ground_bone_3', 'orc_bucket', 'orc_box_large_2', 'shield', 'spear',
   'orc_wood_pile_small', 'orc_beam_pile'].forEach((m) => models.add(m));
 
-await assets.loadAll([...models], (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`));
+await Promise.all([
+  assets.loadAll([...models], (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`)),
+  assets.loadCreatures([...creatures]),
+]);
 ui.loading(1, 'Готово');
 
 let game: Game | null = null;
@@ -98,16 +103,7 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   ui.showHud(true);
   applyGfx(!!save.lowGfx);
   const inv = new Inventory(ui, game);
-  ui.onCharacter = game.onOpenCharacter = () => { input.reset(); inv.openCharacter(); };
-  ui.onBag = game.onOpenBag = () => { input.reset(); inv.openBag(); };
-  ui.onArmor = ui.onCharacter;
-  const talents = new TalentsView(ui, game);
-  ui.onTalents = inv.onTalents = game.onOpenTalents = () => {
-    if (inv.isOpen) inv.close();
-    if (ui.modalOpen) return;
-    input.reset();
-    talents.open();
-  };
+  ui.onBag = ui.onArmor = game.onOpenCharacter = game.onOpenBag = () => { input.reset(); inv.open(); };
   const debug = new DebugPanel(app, game);
   ui.onDebug = () => debug.toggle(true);
   const map = new MapView(game);
@@ -121,7 +117,6 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   addEventListener('keydown', (e) => {
     if (gacha.isOpen && (e.code === 'Escape' || e.code === 'KeyG')) gacha.close();
     else if (inv.isOpen && (e.code === 'Escape' || e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyB')) inv.close();
-    else if (talents.isOpen && (e.code === 'Escape' || e.code === 'KeyT')) talents.close();
   });
   ui.onSettings = function open() {
     if (!game) return;

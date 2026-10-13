@@ -27,7 +27,6 @@ export interface SnapRec {
   power: number;
   maxHp: number;
   regen: number;
-  gold: number;
   kills: number;
   deaths: number;
   weapon: string;
@@ -78,10 +77,10 @@ const pct = (a: number, b: number) => `${Math.round((100 * a) / Math.max(1, b))}
 
 /** Plain-text report: per-minute curve, per-mob averages, every boss fight. */
 export function report(): string {
-  const out: string[] = ['== Минуты: время зона | сила HP реген золото | убийств смертей | оружие | TTK боссов'];
+  const out: string[] = ['== Минуты: время зона | сила HP реген | убийств смертей | оружие | TTK боссов'];
   for (const s of log.snaps) {
     const ttk = Object.entries(s.ttk).map(([k, v]) => `${k} ${Math.round(v)}с`).join(', ');
-    out.push(`${mmss(s.t)} ${s.zone} | ${Math.round(s.power)} ${s.maxHp} ${s.regen.toFixed(2)} ${s.gold} | ${s.kills} ${s.deaths} | ${s.weapon} | ${ttk}`);
+    out.push(`${mmss(s.t)} ${s.zone} | ${Math.round(s.power)} ${s.maxHp} ${s.regen.toFixed(2)} | ${s.kills} ${s.deaths} | ${s.weapon} | ${ttk}`);
   }
   out.push('', '== Мобы (кроме боссов): боёв | ср. длительность | ср. получено % HP | убито/сброс/смерть');
   const by = new Map<string, FightRec[]>();

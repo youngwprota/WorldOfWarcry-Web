@@ -1,21 +1,24 @@
 import * as THREE from 'three';
 import {
-  DAMAGE_TYPE_NAME, FACTIONS, SHARPEN, UI_BASE, WEAPONS, WORLD, ZONES,
+  DAMAGE_TYPE_NAME, FACTIONS, fmtOrb, UI_REF, WEAPONS, ZONE_FOES,
   type FactionId, type OrbKind, type ZoneDef,
 } from './config';
-import { ARMOR_SLOTS, cellHtml, scrapValue, type ArmorSlot, type Item } from './items';
-import { DAMAGE_TYPE_ICON, fmtK, icon, resistIcons, rewardChips } from './icons';
-import { art } from './art';
+import { ARMOR_SLOTS, cellHtml, type ArmorSlot, type Item } from './items';
+import { DAMAGE_TYPE_ICON, fmtK, icon, iconImage, resistIcons, rewardChips } from './icons';
+import { STAT_ICON, art, mini } from './art';
 import type { MobDef } from './config';
 import { sfx } from './audio';
 import type { World } from './world';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-const fmt1 = (n: number) => (Math.round(n * 10) / 10).toString();
-export const STAT_ICON: Record<OrbKind, string> = { power: 'sword', hp: 'heart', regen: 'regen', speed: 'boot' };
+/** Bottom bar sides (the inventory paper doll keeps its own ARMOR_SLOTS.side layout). */
+const BAR_LEFT: ArmorSlot[] = ['head', 'chest', 'legs'];
+const BAR_RIGHT: ArmorSlot[] = ['arms', 'ring', 'amulet'];
+/** Seconds a "+N stat" line stays under the buffs after the last orb of that stat. */
+const GAIN_SHOW = 2.5;
 
 export interface HudState {
-  hp: number; maxHp: number; shield: number; shieldMax: number; gold: number;
+  hp: number; maxHp: number; shield: number; shieldMax: number;
   stats: { power: number; hp: number; regen: number; speed: number };
   goal: string;
   buffs: string[];
@@ -42,42 +45,89 @@ export interface DialogueLine {
   choices?: { text: string; then?: DialogueLine[] }[];
 }
 
+/** A special unit on the map (see Game.mapMarks). */
+export interface MapMark {
+  x: number; z: number;
+  kind: 'boss' | 'mini' | 'elite';
+  alive: boolean;
+  color: string;
+  /** icons.ts id: skull, or the elite's drop (weapon id / armour slot) */
+  icon: string;
+  name: string;
+  respawnIn: number;
+  /** A main boss's drop: a small framed item badge at the skull's corner. */
+  drop?: { icon: string; color: string };
+}
+
+/** An item icon in a quality-coloured frame (elites and bosses' drops on the maps). */
+function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number, id: string, color: string, s: number) {
+  g.fillStyle = '#1d120bdd';
+  g.strokeStyle = color;
+  g.lineWidth = 3 * s;
+  g.beginPath();
+  g.roundRect(x - r, y - r, r * 2, r * 2, 5 * s);
+  g.fill();
+  g.stroke();
+  const img = iconImage(id, color);
+  if (img.complete) g.drawImage(img, x - r * 0.85, y - r * 0.85, r * 1.7, r * 1.7);
+}
+
+/**
+ * Map marks on a canvas (minimap and the big map): a big red skull for the main boss (an hourglass while
+ * it is dead), a smaller orange skull for a micro-boss, the drop's icon in a quality-coloured frame for an elite.
+ */
+export function drawMarks(g: CanvasRenderingContext2D, marks: MapMark[], X: (x: number) => number, Y: (z: number) => number, s = 1) {
+  g.save();
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  // bosses on top
+  const order = { elite: 0, mini: 1, boss: 2 };
+  for (const m of [...marks].sort((a, b) => order[a.kind] - order[b.kind])) {
+    const x = X(m.x);
+    const y = Y(m.z);
+    if (m.kind === 'boss' && !m.alive) {
+      g.font = `${Math.round(22 * s)}px sans-serif`;
+      g.fillText('⏳', x, y);
+      continue;
+    }
+    if (m.kind === 'elite') {
+      framedItem(g, x, y, 13 * s, m.icon, m.color, s);
+      continue;
+    }
+    const r = (m.kind === 'boss' ? 19 : 13) * s;
+    const img = iconImage('skull', m.color);
+    if (img.complete) g.drawImage(img, x - r, y - r, r * 2, r * 2);
+    if (m.drop) framedItem(g, x + r * 0.8, y + r * 0.7, 8 * s, m.drop.icon, m.drop.color, s * 0.7);
+  }
+  g.restore();
+}
+
 export class UI {
   readonly app = $('app');
   readonly modal = $('modal');
   private bannerT = 0;
   private hintT = 0;
   private lastHud = '';
-  onSmith: () => void = () => {};
   onSettings: () => void = () => {};
-  onCharacter: () => void = () => {};
   onBag: () => void = () => {};
   onGacha: () => void = () => {};
   onMap: () => void = () => {};
   onArmor: () => void = () => {};
-  onTalents: () => void = () => {};
   onDebug: () => void = () => {};
-  private lastProgress = '';
-  private lastSkills = '';
+  private gains = new Map<OrbKind, { el: HTMLDivElement; n: number; until: number }>();
   private swapCb: () => void = () => {};
   private mm = $<HTMLCanvasElement>('minimap').getContext('2d')!;
 
   constructor() {
-    $('btn-smith').addEventListener('click', () => { sfx.click(); this.onSmith(); });
     $('btn-settings').addEventListener('click', () => { sfx.click(); this.onSettings(); });
-    $('btn-char').addEventListener('click', () => { sfx.click(); this.onCharacter(); });
     $('btn-bag').addEventListener('click', () => { sfx.click(); this.onBag(); });
     $('btn-gacha').addEventListener('click', () => { sfx.click(); this.onGacha(); });
     $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('bosses').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('btn-settings').innerHTML = art('gear', 40);
-    $('lvl').addEventListener('click', () => { sfx.click(); this.onTalents(); });
-    $('btn-char').insertAdjacentHTML('afterbegin', art('hero', 46));
     $('btn-bag').insertAdjacentHTML('afterbegin', art('bag', 48));
-    $('btn-gacha').insertAdjacentHTML('afterbegin', art('anvil', 46));
-    $('btn-smith').insertAdjacentHTML('afterbegin', art('anvil', 32) + ' ');
-    $('gold').querySelector('i')!.outerHTML = art('coin', 28);
-    $('armorbar').addEventListener('click', (e) => {
+    $('btn-gacha').insertAdjacentHTML('afterbegin', art('anvil', 44));
+    $('equipbar').addEventListener('click', (e) => {
       if (!(e.target as HTMLElement).closest('[data-armor]')) return;
       sfx.click();
       this.onArmor();
@@ -89,12 +139,26 @@ export class UI {
   }
 
   size() { return { w: this.app.clientWidth, h: this.app.clientHeight }; }
-  /** UI scale for small screens: #hud, #modal and friends are scale(--ui), their px are virtual (screen px / scale). */
+  /** HUD scale: #hud / #pro-hud are a UI_REF.hud rectangle centred on the screen and scaled by --hs (windows: --ms). */
   scale = 1;
   fit() {
     const { w, h } = this.size();
-    this.scale = Math.min(1, w / UI_BASE.w, h / UI_BASE.h);
-    this.app.style.setProperty('--ui', String(this.scale));
+    const { hud, modal } = UI_REF;
+    this.scale = Math.min(w / hud.w, h / hud.h);
+    const st = this.app.style;
+    st.setProperty('--hs', String(this.scale));
+    st.setProperty('--ms', String(Math.min(w / modal.w, h / modal.h)));
+    st.setProperty('--hw', `${hud.w}px`);
+    st.setProperty('--hh', `${hud.h}px`);
+    st.setProperty('--mw', `${modal.w}px`);
+    st.setProperty('--mh', `${modal.h}px`);
+  }
+
+  /** Screen px of #app → px inside the centred, scaled HUD rectangle. */
+  toHud(x: number, y: number) {
+    const { w, h } = this.size();
+    const s = this.scale;
+    return { x: (x - (w - UI_REF.hud.w * s) / 2) / s, y: (y - (h - UI_REF.hud.h * s) / 2) / s };
   }
   get modalOpen() { return this.modal.classList.contains('show'); }
 
@@ -115,10 +179,9 @@ export class UI {
     (hp.querySelector('.fill') as HTMLElement).style.width = `${(s.hp / s.maxHp) * 100}%`;
     (hp.querySelector('.shield') as HTMLElement).style.width = `${(s.shield / Math.max(1, total)) * 100}%`;
     (hp.querySelector('span') as HTMLElement).textContent = `${Math.ceil(s.hp)} / ${s.maxHp}${s.shield > 0 ? `  +${Math.ceil(s.shield)}🛡` : ''}`;
-    ($('gold').querySelector('span') as HTMLElement).textContent = fmtK(s.gold);
     const st = s.stats;
     const vals: Record<OrbKind, string> = {
-      power: fmtK(st.power), hp: fmtK(st.hp), regen: `${fmt1(st.regen)}%`, speed: fmt1(st.speed),
+      power: fmtK(st.power), hp: fmtK(st.hp), regen: fmtK(st.regen), speed: fmtK(st.speed),
     };
     $('stats').querySelectorAll<HTMLElement>('.st').forEach((el) => {
       (el.querySelector('span') as HTMLElement).textContent = vals[el.dataset.k as OrbKind];
@@ -130,45 +193,6 @@ export class UI {
       ${b.left > 0 ? `<div class="bw-time">${art('hourglass', 20)}${fmtTime(b.left)}</div>` : `<div class="bw-name">${b.name}</div>`}</div>`).join('');
   }
 
-  /** Level badge + XP bar under the gold; "+N" when talent points are waiting. */
-  progress(level: number, xp: number, need: number, free: number) {
-    const key = `${level}|${xp}|${need}|${free}`;
-    if (key === this.lastProgress) return;
-    this.lastProgress = key;
-    const el = $('lvl');
-    (el.querySelector('.lv-badge') as HTMLElement).textContent = String(level);
-    (el.querySelector('.fill') as HTMLElement).style.width = `${need ? Math.min(100, (xp / need) * 100) : 100}%`;
-    (el.querySelector('span') as HTMLElement).textContent = need ? `${fmtK(xp)} / ${fmtK(need)}` : 'MAX';
-    el.dataset.badge = free > 0 ? `+${free}` : '';
-  }
-
-  /** The two equipped auto-cast skills with a cooldown sweep. */
-  skills(list: ({ id: string; icon: string; name: string; cd: number } | null)[]) {
-    const box = $('skills');
-    const key = list.map((x) => x?.id ?? '-').join('|');
-    if (key !== this.lastSkills) {
-      this.lastSkills = key;
-      box.innerHTML = list.map((x) => (x
-        ? `<div class="skill ui-block" data-skill="${x.id}" title="${x.name}">${art(x.icon, 40)}<i class="cd"></i></div>`
-        : '')).join('');
-      box.querySelectorAll('.skill').forEach((b) => b.addEventListener('click', () => { sfx.click(); this.onTalents(); }));
-    }
-    list.forEach((x) => {
-      if (!x) return;
-      const el = box.querySelector<HTMLElement>(`[data-skill="${x.id}"]`);
-      el?.style.setProperty('--cd', `${x.cd * 360}deg`);
-      el?.classList.toggle('ready', x.cd <= 0);
-    });
-  }
-
-  skillFlash(id: string) {
-    const el = $('skills').querySelector<HTMLElement>(`[data-skill="${id}"]`);
-    if (!el) return;
-    el.classList.remove('fire');
-    void el.offsetWidth;
-    el.classList.add('fire');
-  }
-
   popStat(k: OrbKind) {
     const el = $('stats').querySelector<HTMLElement>(`[data-k="${k}"]`);
     if (!el) return;
@@ -178,10 +202,32 @@ export class UI {
 
   bindWeapons(swap: () => void) { this.swapCb = swap; }
 
-  combo(n: number, max: number, name: string) {
+  combo(n: number, max: number) {
     const el = $('combo');
-    el.innerHTML = `<span>${name}</span>` + Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
+    el.innerHTML = Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
     el.classList.toggle('live', n > 0);
+  }
+
+  /** Kill rewards under the buffs: one line per stat, summing orbs picked up in a row. */
+  gain(k: OrbKind, now: number) {
+    let g = this.gains.get(k);
+    if (!g) {
+      const el = document.createElement('div');
+      el.className = 'gain';
+      $('gains').appendChild(el);
+      g = { el, n: 0, until: 0 };
+      this.gains.set(k, g);
+    }
+    g.n++;
+    g.until = now + GAIN_SHOW;
+    g.el.innerHTML = `${mini(STAT_ICON[k], 22)}${fmtOrb(k, g.n)}`;
+    g.el.classList.remove('pop');
+    void g.el.offsetWidth; // restart the pop animation
+    g.el.classList.add('pop');
+  }
+
+  tickGains(now: number) {
+    for (const [k, g] of this.gains) if (now > g.until) { g.el.remove(); this.gains.delete(k); }
   }
 
   bagBadge(n: number, full: boolean) {
@@ -189,7 +235,7 @@ export class UI {
     b.dataset.badge = full ? '!' : n > 0 ? String(n) : '';
   }
 
-  /** Bottom "equipped" bar: two weapons (tap the other one to swap) and the six armour slots. */
+  /** Bottom "equipped" bar: armour left, the two weapons in the centre (tap the other one to swap), gloves and jewellery right. */
   weapons(items: (Item | null)[], active: number, dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>) {
     const box = $('weapons');
     box.innerHTML = [0, 1].map((i) => {
@@ -202,13 +248,26 @@ export class UI {
     box.querySelectorAll<HTMLElement>('[data-w]').forEach((b) => {
       if (+b.dataset.w! !== active && items[+b.dataset.w!]) b.addEventListener('click', () => this.swapCb());
     });
-    $('armorbar').innerHTML = ARMOR_SLOTS.map((x) => cellHtml(equip[x.id], `data-armor="${x.id}" title="${x.name}"`, x.icon)).join('');
+    const side = (ids: ArmorSlot[]) => ids.map((id) => {
+      const x = ARMOR_SLOTS.find((s) => s.id === id)!;
+      return cellHtml(equip[id], `data-armor="${id}" title="${x.name}"`, x.icon);
+    }).join('');
+    $('armor-l').innerHTML = side(BAR_LEFT);
+    $('armor-r').innerHTML = side(BAR_RIGHT);
   }
 
   zoneBanner(z: ZoneDef) {
     $('zone-label').textContent = z.name;
+    const f = ZONE_FOES[z.id];
+    // over the minimap: the enemies' weapon (red) and what they are weak to (green)
+    $('zone-foes').innerHTML = f
+      ? `<i class="foe atk" title="Враги бьют: ${DAMAGE_TYPE_NAME[f.attack]} урон">${icon(DAMAGE_TYPE_ICON[f.attack], '#fff', 22)}</i>` +
+        f.weak.map((t) => `<i class="foe weak" title="Слабость врагов: ${DAMAGE_TYPE_NAME[t]} урон">${icon(DAMAGE_TYPE_ICON[t], '#fff', 22)}</i>`).join('')
+      : '';
     const el = $('zone-banner');
-    el.innerHTML = z.name + (z.recommend ? `<small>Рекомендуемый урон: ${DAMAGE_TYPE_NAME[z.recommend]}</small>` : '<small>Безопасная зона</small>');
+    el.innerHTML = z.name + (f
+      ? `<small>Враги бьют: ${DAMAGE_TYPE_NAME[f.attack]} · слабость: ${f.weak.map((t) => DAMAGE_TYPE_NAME[t]).join(', ')}</small>`
+      : z.id === 'forest' ? '' : '<small>Безопасная зона</small>');
     el.classList.add('show');
     clearTimeout(this.bannerT);
     this.bannerT = window.setTimeout(() => el.classList.remove('show'), 2600);
@@ -222,7 +281,6 @@ export class UI {
     this.hintT = window.setTimeout(() => el.classList.remove('show'), ms);
   }
 
-  showSmithButton(on: boolean) { $('btn-smith').classList.toggle('hidden', !on); }
 
   updateBoss(name: string, hp: number, max: number, show: boolean, color: string, def: MobDef) {
     const el = $('bossbar');
@@ -261,60 +319,12 @@ export class UI {
     this.modal.querySelector(sel)?.addEventListener('click', () => { sfx.click(); fn(); });
   }
 
-  /** Smith styled as the Butcher Hero shop: ribbon header, item cards with a price button. */
-  smithPanel(items: (Item | null)[], gold: number, dmg: (it: Item) => number,
-    sharpen: (slot: number) => void, scrap: (slot: number) => void, close: () => void) {
-    const count = items.filter(Boolean).length;
-    const cards = items.map((it, i) => {
-      if (!it) return '';
-      const w = WEAPONS[it.def];
-      const max = it.sharpen >= SHARPEN.max;
-      const cost = SHARPEN.cost(it.sharpen);
-      const now = dmg(it);
-      const next = (now * (1 + SHARPEN.perLevel * (it.sharpen + 1))) / (1 + SHARPEN.perLevel * it.sharpen);
-      return `<div class="shop-card">
-        <div class="sc-name">${w.name}${it.sharpen ? ` +${it.sharpen}` : ''}</div>
-        <div class="sc-sub">${max ? 'максимум' : `${icon(DAMAGE_TYPE_ICON[w.type], '#9fe3ff', 14)} ${fmtK(now)} <em>›</em> <b>${fmtK(next)}</b>`}</div>
-        ${cellHtml(it, 'disabled')}
-        <button class="btn primary price" data-sharpen="${i}" ${max || gold < cost ? 'disabled' : ''}>${max ? 'MAX' : `${art('coin', 26)} ${fmtK(cost)}`}</button>
-        ${count > 1 ? `<button class="link" data-scrap="${i}">разобрать +${fmtK(scrapValue(it))}</button>` : ''}
-      </div>`;
-    }).join('');
-    this.open(`<div class="panel shop">
-      <div class="shop-head"><div class="pill">${art('coin', 28)}<span>${fmtK(gold)}</span></div><h2>Кузнец</h2><button class="xbtn" id="m-close">✕</button></div>
-      <div class="ribbon">Заточка +8% урона</div>
-      <div class="shop-grid">${cards}</div>
-      <p>Заточка до +${SHARPEN.max}. Лишнее оружие можно разобрать на золото.</p></div>`);
-    this.modal.querySelectorAll<HTMLButtonElement>('[data-sharpen]').forEach((b) => b.addEventListener('click', () => sharpen(+b.dataset.sharpen!)));
-    this.modal.querySelectorAll<HTMLButtonElement>('[data-scrap]').forEach((b) => b.addEventListener('click', () => scrap(+b.dataset.scrap!)));
-    this.on('#m-close', () => { this.close(); close(); });
-  }
-
-  showDeath(atFire: () => void, ad: () => void) {
+  showDeath(respawn: () => void) {
     this.open(`<div class="panel"><h2>Ты пал</h2>
       <p>Страж Грани шепчет: «Ещё не время… Вернись.»</p>
       <p>Предметы и прокачка сохранены.</p>
-      <div class="row"><button class="btn" id="m-fire">🔥 У костра</button>
-      <button class="btn ad" id="m-ad">▶ Здесь<br><small>за рекламу</small></button></div></div>`);
-    this.on('#m-fire', () => { this.close(); atFire(); });
-    this.on('#m-ad', () => {
-      this.close();
-      this.fakeAd(ad);
-    });
-  }
-
-  /** Rewarded-ad stub: the real SDK is out of scope for the web prototype. */
-  fakeAd(done: () => void) {
-    const el = document.createElement('div');
-    el.className = 'ad-overlay';
-    el.innerHTML = '<div>Здесь будет rewarded-реклама</div><div class="n">3</div>';
-    this.app.appendChild(el);
-    let n = 3;
-    const t = setInterval(() => {
-      n--;
-      (el.querySelector('.n') as HTMLElement).textContent = String(n);
-      if (n <= 0) { clearInterval(t); el.remove(); done(); }
-    }, 1000);
+      <div class="row"><button class="btn primary" id="m-respawn">Вернуться в лагерь</button></div></div>`);
+    this.on('#m-respawn', () => { this.close(); respawn(); });
   }
 
   settings(muted: boolean, lowGfx: boolean, toggleMute: () => void, toggleGfx: () => void, reset: () => void, close: () => void, showLog: () => void) {
@@ -460,7 +470,7 @@ export class UI {
   }
 
   // ---------- minimap & goal arrow ----------
-  minimap(hero: THREE.Vector3, facing: number, mobs: THREE.Vector3[], world: World, bosses: { pos: THREE.Vector3; alive: boolean }[]) {
+  minimap(hero: THREE.Vector3, facing: number, units: THREE.Vector3[], world: World, marks: MapMark[]) {
     const g = this.mm;
     const S = 220;
     const scale = S / 70; // ~70 m across
@@ -471,26 +481,11 @@ export class UI {
     g.clip();
     const tx = (x: number) => S / 2 + (x - hero.x) * scale;
     const tz = (z: number) => S / 2 + (z - hero.z) * scale;
-    for (const z of ZONES) {
-      g.fillStyle = '#' + z.ground.toString(16).padStart(6, '0');
-      const y0 = tz(z.z[1]);
-      const y1 = tz(z.z[0]);
-      g.fillRect(tx(-WORLD.halfWidth), y0, WORLD.halfWidth * 2 * scale, y1 - y0);
-    }
-    g.fillStyle = '#0005';
-    g.fillRect(0, 0, tx(-WORLD.halfWidth), S);
-    g.fillRect(tx(WORLD.halfWidth), 0, S, S);
-    if (!world.barrierOpen) {
-      g.fillStyle = '#b06bff';
-      g.fillRect(tx(-WORLD.halfWidth), tz(WORLD.barrierZ) - 3, WORLD.halfWidth * 2 * scale, 6);
-    }
-    for (const c of world.campfires) { g.fillStyle = '#ffa020'; g.beginPath(); g.arc(tx(c.x), tz(c.z), 7, 0, 7); g.fill(); }
+    world.drawMap(g, tx, tz, scale);
+    world.fog.drawOnMap(g, tx, tz, scale);
     g.fillStyle = '#ff3b3b';
-    for (const m of mobs) g.fillRect(tx(m.x) - 3, tz(m.z) - 3, 6, 6);
-    g.font = 'bold 26px sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    for (const b of bosses) g.fillText(b.alive ? '💀' : '⏳', tx(b.pos.x), tz(b.pos.z));
+    for (const u of units) g.fillRect(tx(u.x) - 3, tz(u.z) - 3, 6, 6); // mobs and props alike
+    drawMarks(g, marks, tx, tz, 1.15);
     g.restore();
     g.save();
     g.translate(S / 2, S / 2);
@@ -516,9 +511,7 @@ export class UI {
     const m = Math.max(Math.abs(x) / 0.85, y > 0 ? y / 0.55 : -y / 0.62);
     x /= m;
     y /= m;
-    // #hud is scaled by --ui: its px are screen px / scale
-    const px = ((x * 0.5 + 0.5) * w) / this.scale;
-    const py = ((-y * 0.5 + 0.5) * h) / this.scale;
+    const { x: px, y: py } = this.toHud((x * 0.5 + 0.5) * w, (-y * 0.5 + 0.5) * h);
     el.style.display = 'block';
     el.style.transform = `translate(${px - 13}px, ${py - 13}px) rotate(${Math.atan2(-y, x)}rad)`;
   }

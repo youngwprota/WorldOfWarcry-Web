@@ -1,10 +1,9 @@
 // Full-screen world map: opened by tapping the minimap; drag to pan, pinch / wheel / buttons to zoom.
-import { WORLD, ZONES } from './config';
+import { ZONES } from './config';
 import { sfx } from './audio';
+import { drawMarks } from './ui';
 import type { Game } from './game';
-import { pathX } from './terrain';
-
-const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
+import { ISLAND, ZONE_LABEL } from './island';
 
 /** The minimap itself expands into a big pannable / zoomable panel; the game keeps running. */
 export class MapView {
@@ -140,8 +139,11 @@ export class MapView {
       c.height = Math.round(h * dpr);
     }
     // keep the camera inside the world
-    this.cx = Math.min(WORLD.halfWidth + 6, Math.max(-WORLD.halfWidth - 6, this.cx));
-    this.cz = Math.min(WORLD.zMax + 6, Math.max(WORLD.zMin - 6, this.cz));
+    const off = Math.hypot(this.cx - ISLAND.cx, this.cz - ISLAND.cz);
+    if (off > 115) {
+      this.cx = ISLAND.cx + ((this.cx - ISLAND.cx) / off) * 115;
+      this.cz = ISLAND.cz + ((this.cz - ISLAND.cz) / off) * 115;
+    }
     const g = this.ctx;
     const s = this.scale;
     const X = (x: number) => w / 2 + (x - this.cx) * s;
@@ -153,29 +155,10 @@ export class MapView {
     g.beginPath();
     g.arc(w / 2, h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
     g.clip();
-    g.fillStyle = '#1a1922';
-    g.fillRect(0, 0, w, h);
-
-    // zones
-    for (const z of ZONES) {
-      const top = Math.max(z.z[1], WORLD.zMin);
-      const bottom = Math.min(z.z[0], WORLD.zMax);
-      g.fillStyle = hex(z.ground);
-      g.fillRect(X(-WORLD.halfWidth), Y(top), WORLD.halfWidth * 2 * s, (bottom - top) * s);
-    }
-    // hills beyond the playable strip
-    g.fillStyle = '#2c3b28';
-    g.fillRect(X(-WORLD.halfWidth - 40), Y(WORLD.zMin - 30), 40 * s, (WORLD.zMax - WORLD.zMin + 60) * s);
-    g.fillRect(X(WORLD.halfWidth), Y(WORLD.zMin - 30), 40 * s, (WORLD.zMax - WORLD.zMin + 60) * s);
-    // path
-    g.strokeStyle = '#b08a5599';
-    g.lineWidth = 3.4 * s;
-    g.lineCap = 'round';
-    g.beginPath();
-    for (let z = -12; z >= WORLD.zMin; z -= 2) (z === -12 ? g.moveTo : g.lineTo).call(g, X(pathX(z)), Y(z));
-    g.stroke();
-    // static obstacles: buildings, trees, rocks
+    // island + ocean (baked), closed barrier
     const world = this.game.world;
+    world.drawMap(g, X, Y, s);
+    // static obstacles: buildings, trees, rocks
     for (const o of world.obstacles) {
       if (o.r < 0.4) continue;
       g.fillStyle = o.r > 1.5 ? '#3b3530cc' : '#21301d99';
@@ -189,45 +172,34 @@ export class MapView {
       g.ellipse(X(p.x), Y(p.z), p.r * s, p.r * 0.8 * s, 0, 0, 7);
       g.fill();
     }
-    // barrier
-    if (!world.barrierOpen) {
-      g.fillStyle = '#b06bff';
-      g.fillRect(X(-WORLD.halfWidth), Y(WORLD.barrierZ) - 3, WORLD.halfWidth * 2 * s, 6);
-    }
+    world.fog.drawOnMap(g, X, Y, s);
     // zone names
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.font = `900 ${Math.max(12, Math.min(22, s * 2.4))}px sans-serif`;
     for (const z of ZONES) {
-      const mid = (Math.max(z.z[1], WORLD.zMin) + Math.min(z.z[0], WORLD.zMax)) / 2;
+      const [lx, lz] = ZONE_LABEL[z.id];
       g.fillStyle = '#ffffffcc';
       g.strokeStyle = '#000a';
       g.lineWidth = 4;
-      g.strokeText(z.name, X(WORLD.halfWidth - 12), Y(mid));
-      g.fillText(z.name, X(WORLD.halfWidth - 12), Y(mid));
+      g.strokeText(z.name, X(lx), Y(lz));
+      g.fillText(z.name, X(lx), Y(lz));
     }
-    // mobs
+    // mobs and breakable props (one unit type); bosses, micro-bosses and elites get their own marks
     g.fillStyle = '#ff4a4a';
-    for (const m of this.info.mobs) g.fillRect(X(m.x) - 2.5, Y(m.z) - 2.5, 5, 5);
-    // campfires
-    for (const f of world.campfires) {
-      g.fillStyle = '#ffa020';
-      g.beginPath();
-      g.arc(X(f.x), Y(f.z), 7, 0, 7);
-      g.fill();
-      g.font = '700 11px sans-serif';
-      g.fillStyle = '#ffd9a0';
-      g.fillText(f.name, X(f.x), Y(f.z) + 15);
-    }
-    // bosses
-    g.font = '20px sans-serif';
-    for (const b of this.info.bosses) {
-      g.fillText(b.alive ? '💀' : '⏳', X(b.x), Y(b.z));
-      g.font = '700 11px sans-serif';
-      g.fillStyle = b.alive ? '#ffdddd' : '#bbbbbb';
+    for (const m of this.info.units) g.fillRect(X(m.x) - 2.5, Y(m.z) - 2.5, 5, 5);
+    drawMarks(g, this.info.marks, X, Y);
+    g.font = '700 11px sans-serif';
+    for (const b of this.info.marks) {
+      if (b.kind === 'elite') continue;
+      g.fillStyle = b.alive ? b.color : '#bbbbbb';
       const sec = Math.ceil(b.respawnIn);
-      g.fillText(b.alive ? b.name : `${b.name} · ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`, X(b.x), Y(b.z) + 18);
-      g.font = '20px sans-serif';
+      g.strokeStyle = '#000a';
+      g.lineWidth = 3;
+      const text = b.alive ? b.name : `${b.name} · ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+      const dy = b.kind === 'boss' ? 26 : 20;
+      g.strokeText(text, X(b.x), Y(b.z) + dy);
+      g.fillText(text, X(b.x), Y(b.z) + dy);
     }
     // goal: pulsing ring + dashed line from the hero
     const hx = X(this.info.hero.x);

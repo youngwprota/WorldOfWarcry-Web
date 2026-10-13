@@ -3,7 +3,7 @@
 import { art } from './art';
 import { GACHA, RARITY } from './config';
 import { Forge3D } from './forge3d';
-import { bannerItem, pull } from './gacha';
+import { bannerItem, gachaTier, pull } from './gacha';
 import type { Game } from './game';
 import { cellHtml, itemLines, itemName, type Item } from './items';
 import type { UI } from './ui';
@@ -57,9 +57,9 @@ export class GachaView {
   private renderBanner() {
     this.forge3d?.pause();
     this.q('#g-3d').classList.add('hidden');
-    const it = bannerItem(this.game.itemLevel);
+    const it = bannerItem(1);
     const left = GACHA.pity - this.game.save.gachaPity;
-    const rates = GACHA.rates.map((r, i) => `<span style="color:${RARITY[i].color}">${RARITY[i].name} ${+(r * 100).toFixed(1)}%</span>`).join('');
+    const rates = GACHA.rates.map((r, i) => `<span style="color:${RARITY[GACHA.tiers[i]].color}">${RARITY[GACHA.tiers[i]].name} ${+(r * 100).toFixed(1)}%</span>`).join('');
     this.q('#g-body').className = 'g-body';
     this.q('#g-body').innerHTML = `
       <div class="g-banner">
@@ -79,7 +79,7 @@ export class GachaView {
   /** Pull right away (the item is granted even if the window is closed mid-animation), then play the forge. */
   private forge() {
     const s = this.game.save;
-    const res = pull(s.gachaPity, this.game.itemLevel);
+    const res = pull(s.gachaPity, 1);
     s.gachaPity = res.pity;
     this.item = res.item;
     this.where = this.game.lootItem(res.item);
@@ -102,7 +102,7 @@ export class GachaView {
     const rar = RARITY[it.rarity];
     const body = this.q('#g-body');
     body.innerHTML = `
-      <div class="g-result r${it.rarity}" style="--rc:${rar.color}">
+      <div class="g-result r${gachaTier(it.rarity)}" style="--rc:${rar.color}">
         <div class="g-tag">${rar.name}</div>
         <div class="g-name">${itemName(it, this.game.faction)}</div>
         <div class="g-got">${cellHtml(it, 'disabled')}${linesHtml(it)}</div>

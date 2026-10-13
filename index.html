@@ -14,33 +14,29 @@
     <div id="labels"></div>
     <div id="hud" class="hidden">
       <div class="top-left">
+        <button id="btn-settings" class="ui-block round-btn" aria-label="Настройки"></button>
+        <div class="tl-info">
         <div id="hp" class="bar"><div class="fill"></div><div class="shield"></div><span></span></div>
-        <div class="tl-row">
-          <button id="btn-settings" class="ui-block round-btn" aria-label="Настройки"></button>
-          <div id="gold" class="pill"><i></i><span>0</span></div>
-        </div>
-        <button id="lvl" class="ui-block" aria-label="Таланты (T)"><div class="lv-badge"></div><div class="xpbar"><div class="fill"></div><span></span></div></button>
         <div id="stats"></div>
+        <div id="buffs"></div>
+        <div id="gains"></div>
+        </div>
       </div>
       <div class="top-right">
-        <canvas id="minimap" class="ui-block" width="220" height="220" title="Карта (M)"></canvas>
+        <div id="mm-box">
+          <canvas id="minimap" class="ui-block" width="220" height="220" title="Карта (M)"></canvas>
+          <div id="zone-foes"></div>
+        </div>
         <div id="zone-label"></div>
         <div id="goal"></div>
       </div>
+      <button id="btn-bag" class="ui-block round-btn nav bag" aria-label="Инвентарь (I)"><span>Инвентарь</span></button>
+      <button id="btn-gacha" class="ui-block round-btn nav forge" aria-label="Горнило судьбы (G)"><span>Горнило</span></button>
       <div id="bosses"></div>
-      <div id="side-btns">
-        <button id="btn-gacha" class="ui-block side-btn forge" aria-label="Горнило судьбы (G)"><span>Горнило</span></button>
-        <button id="btn-char" class="ui-block side-btn hero" aria-label="Персонаж (C)"><span>Герой</span></button>
-        <button id="btn-bag" class="ui-block side-btn bag" aria-label="Сумка (B)"><span>Сумка</span></button>
-      </div>
       <div id="bossbar" class="hidden"><div class="name"></div><div class="binfo"></div><div class="bar"><div class="fill"></div><span></span></div></div>
       <div id="zone-banner"></div>
       <div id="edge-arrow">➤</div>
-      <div id="buffs"></div>
-      <div id="combo"></div>
-      <div id="skills"></div>
-      <div id="equipbar" class="ui-block"><div id="weapons"></div><div class="sep"></div><div id="armorbar"></div></div>
-      <button id="btn-smith" class="ui-block btn primary big-btn hidden">Кузнец</button>
+      <div id="equipbar" class="ui-block"><div id="armor-l" class="armorside"></div><div id="wcol"><div id="combo"></div><div id="weapons"></div></div><div id="armor-r" class="armorside"></div></div>
       <div id="hint"></div>
     </div>
     <div id="modal"></div>

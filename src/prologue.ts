@@ -5,11 +5,11 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { sfx } from './audio';
 import { Character } from './character';
-import { HERO, MOBS, ORBS, fmtOrb, type OrbKind } from './config';
+import { HERO, MOBS, ORBS, fmtOrb, mobImpact, type OrbKind } from './config';
 import { FloatingText, Particles, Pickups } from './fx';
 import type { Input } from './input';
-import { art } from './art';
-import { STAT_ICON, type DialogueLine, type UI } from './ui';
+import { STAT_ICON, art } from './art';
+import type { DialogueLine, UI } from './ui';
 
 /** Power orbs picked up in the prologue; they carry over to the new hero. */
 export type Gains = Record<OrbKind, number>;
@@ -76,7 +76,6 @@ export class Prologue {
   private kills = 0;
   readonly gains: Gains = { power: 0, hp: 0, regen: 0, speed: 0 };
   private hp: number = HERO.hp;
-  private lastFight = -99;
   private atkCd = 0;
   private impact = -1;
   private target: Skeleton | null = null;
@@ -176,16 +175,44 @@ export class Prologue {
 
   private buildArena() {
     const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(60, 64).rotateX(-Math.PI / 2),
+      new THREE.CircleGeometry(400, 64).rotateX(-Math.PI / 2),
       new THREE.MeshLambertMaterial({ color: 0x6c68a0 }),
     );
     ground.receiveShadow = true;
     this.scene.add(ground);
-    // Darker, worn circle around the throne
-    const dais = new THREE.Mesh(new THREE.CircleGeometry(6.5, 48).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x5a5490 }));
-    dais.position.set(LICH.x, 0.01, LICH.z + 1);
-    dais.receiveShadow = true;
-    this.scene.add(dais);
+    // Painted patch over the arena: soft blotches and a worn spot around the throne, fading to the plain
+    // ground colour at its edges (no hard seams).
+    const SIZE = 80;
+    const PX = 512;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = PX;
+    const g = cv.getContext('2d')!;
+    g.fillStyle = '#6c68a0';
+    g.fillRect(0, 0, PX, PX);
+    const toPx = (v: number) => ((v + SIZE / 2) / SIZE) * PX;
+    const blot = (x: number, z: number, r: number, rgb: string, a: number) => {
+      const gr = g.createRadialGradient(toPx(x), toPx(z), 0, toPx(x), toPx(z), (r / SIZE) * PX);
+      gr.addColorStop(0, `rgba(${rgb},${a})`);
+      gr.addColorStop(1, `rgba(${rgb},0)`);
+      g.fillStyle = gr;
+      g.fillRect(0, 0, PX, PX);
+    };
+    const rn = (() => { let s = 11; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
+    for (let i = 0; i < 70; i++) {
+      const a = rn() * Math.PI * 2;
+      const d = Math.sqrt(rn()) * 30;
+      blot(Math.sin(a) * d, Math.cos(a) * d, 2 + rn() * 5, rn() < 0.5 ? '84,80,140' : '128,124,184', 0.25 * (1 - d / 34));
+    }
+    blot(LICH.x, LICH.z + 1, 9, '80,74,134', 0.85);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    const patch = new THREE.Mesh(
+      new THREE.PlaneGeometry(SIZE, SIZE).rotateX(-Math.PI / 2),
+      new THREE.MeshLambertMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
+    );
+    patch.receiveShadow = true;
+    this.scene.add(patch);
 
     this.place('undead_throne', LICH.x, LICH.z - 3.2, 1.1, 0, 1.8);
     this.place('undead_throne_Lv1', 0, LICH.z - 13, 0.55, 0, 4);
@@ -345,7 +372,7 @@ export class Prologue {
 
   private stat(k: OrbKind) {
     const base = { power: HERO.power, hp: HERO.hp, regen: HERO.regen, speed: HERO.speed }[k];
-    return +(base + this.gains[k] * ORBS[k].value).toFixed(2);
+    return base + this.gains[k] * ORBS[k].value;
   }
   private get maxHp() { return this.stat('hp'); }
   private get power() { return this.stat('power'); }
@@ -354,7 +381,7 @@ export class Prologue {
     // Same look as the main HUD stats (#stats): coloured icon + number.
     const fmt = (k: OrbKind) => {
       const v = this.stat(k);
-      return k === 'regen' ? `${+v.toFixed(1)}%` : k === 'speed' ? String(+v.toFixed(1)) : String(Math.round(v));
+      return String(Math.round(v));
     };
     const el = document.getElementById('pro-stats')!;
     el.innerHTML = (['power', 'hp', 'regen', 'speed'] as OrbKind[])
@@ -433,7 +460,7 @@ export class Prologue {
     }
     const [ix, iy] = this.input.vector;
     const moving = Math.hypot(ix, iy) > 0.05;
-    const speed = this.stat('speed');
+    const speed = this.stat('speed') / HERO.speedPerMs;
     if (moving) {
       p.x += ix * speed * dt;
       p.z += iy * speed * dt;
@@ -468,7 +495,7 @@ export class Prologue {
       this.impact -= dt;
       if (this.impact < 0) this.strike();
     }
-    const rate = (this.stat('regen') / 100) * this.maxHp * (this.time - this.lastFight > HERO.outOfCombatDelay ? HERO.outOfCombatRegen : 1);
+    const rate = this.stat('regen'); // HP per second
     this.hp = Math.min(this.maxHp, this.hp + rate * dt);
     ch.update(dt, moving);
   }
@@ -485,7 +512,6 @@ export class Prologue {
       const a = Math.atan2(Math.sin(Math.atan2(dx, dz) - this.hero.facing), Math.cos(Math.atan2(dx, dz) - this.hero.facing));
       if (d > 0.6 && Math.abs(a) > THREE.MathUtils.degToRad(GHOST.arc / 2) + Math.atan2(SKEL.radius, d)) continue;
       const dmg = Math.round(GHOST.dmg * (1 + this.power / 100) * (0.9 + Math.random() * 0.2));
-      this.lastFight = this.time;
       s.hp -= dmg;
       s.ch.hit();
       if (s.state !== 'return') s.state = 'chase';
@@ -520,7 +546,6 @@ export class Prologue {
     if (this.ghostT >= 0 || this.stage !== 'hunt' && this.stage !== 'return') return;
     dmg = Math.max(1, Math.round(dmg * (0.9 + Math.random() * 0.2)));
     this.hp -= dmg;
-    this.lastFight = this.time;
     this.hero.hit();
     sfx.hurt();
     this.ui.hurtFlash();
@@ -568,7 +593,7 @@ export class Prologue {
           s.atkCd -= dt;
           if (dHero < reach && s.atkCd <= 0 && s.impact < 0) {
             const period = 1 / SKEL.aps;
-            const impactAt = Math.min(0.55, period * 0.45);
+            const impactAt = mobImpact(s.ch.hitTime('SwordAttack'), period);
             s.ch.attack('SwordAttack', period, impactAt);
             s.impact = impactAt;
             s.atkCd = period;
@@ -683,7 +708,7 @@ export class Prologue {
     x /= m;
     y /= m;
     arrow.style.display = 'block';
-    const s = this.ui.scale; // #pro-hud is scaled by --ui
-    arrow.style.transform = `translate(${((x * 0.5 + 0.5) * w) / s - 13}px, ${((-y * 0.5 + 0.5) * h) / s - 13}px) rotate(${Math.atan2(-y, x)}rad)`;
+    const p = this.ui.toHud((x * 0.5 + 0.5) * w, (-y * 0.5 + 0.5) * h); // #pro-hud is the scaled HUD rectangle
+    arrow.style.transform = `translate(${p.x - 13}px, ${p.y - 13}px) rotate(${Math.atan2(-y, x)}rad)`;
   }
 }

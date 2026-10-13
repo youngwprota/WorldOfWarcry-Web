@@ -10,6 +10,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { assets } from './assets';
 import { sfx } from './audio';
 import { FORGE3D as F, GACHA, RARITY, WEAPONS, type FactionId } from './config';
+import { gachaTier } from './gacha';
 import type { Item } from './items';
 
 let propsPromise: Promise<THREE.Group> | null = null;
@@ -18,7 +19,8 @@ function loadProps() {
   return propsPromise;
 }
 
-const RCOL = RARITY.map((r) => new THREE.Color(r.color));
+/** Colours of the gacha tiers (GACHA.tiers), not of every rarity. */
+const RCOL = GACHA.tiers.map((t) => new THREE.Color(RARITY[t].color));
 const HOT = new THREE.Color(1, 0.42, 0.12);
 const WHITE = new THREE.Color(1, 1, 1);
 
@@ -297,7 +299,7 @@ export class Forge3D {
   /** Plays the reveal of an already pulled item; `onReveal` fires when the item is up (show the card). */
   play(item: Item, onReveal: () => void) {
     this.reset();
-    const r = item.rarity;
+    const r = gachaTier(item.rarity);
     this.rarity = r;
     // Rarity climbs blow by blow and never goes down; before the last blow it stops below legendary,
     // the last blow always lands on the real rarity.
@@ -341,7 +343,7 @@ export class Forge3D {
       m.position.y = -((b.min.y + b.max.y) / 2) * (F.itemSize / h);
     } else {
       // Armour has no standalone model: a loot crystal like the ones dropped in the world.
-      const mat = this.mine(new THREE.MeshLambertMaterial({ color: RCOL[item.rarity], emissive: RCOL[item.rarity], emissiveIntensity: 0.3, flatShading: true }));
+      const mat = this.mine(new THREE.MeshLambertMaterial({ color: RCOL[this.rarity], emissive: RCOL[this.rarity], emissiveIntensity: 0.3, flatShading: true }));
       m = new THREE.Mesh(this.mine(new THREE.OctahedronGeometry(0.32, 0)), mat);
       m.scale.set(1, 1.6, 1);
     }

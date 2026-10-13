@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { HIT_FLASH, applyHitFlash } from './hitflash';
 import { assets } from './assets';
 import { attachWeapon } from './rig';
 import { PART_PREFIXES, type VisualPart } from './items';
-import type { AttackAnim } from './config';
+import { ATTACK_HIT, type AttackAnim } from './config';
 
 const shadowTex = (() => {
   const c = document.createElement('canvas');
@@ -72,6 +73,8 @@ export class Character {
   dead = false;
   facing = 0; // yaw, radians
   walkRate = 1;
+  /** Ground speed (m/s) of the walk clip at walkRate 1. */
+  readonly stride = 2.1;
   private spinT = 0;
   private spinDur = 0;
   private baseParts = new Map<VisualPart, THREE.Mesh[]>();
@@ -181,6 +184,20 @@ export class Character {
    * Shows armour on the body: replaces a body part with the same part of another character.
    * All Bitgem characters share one skeleton, so the borrowed skinned mesh is simply rebound to our bones.
    */
+  /**
+   * Our bone with the same name. A part may use bones our model lacks (the paladin's plume, the chieftain's
+   * topknot): such a bone is grafted onto our skeleton under its own parent, so it follows the body
+   * instead of staying behind in the borrowed model (whose vertices would then fly off).
+   */
+  private ownBone(b: THREE.Object3D): THREE.Object3D {
+    const own = this.model.getObjectByName(b.name);
+    if (own) return own;
+    const parent = b.parent ? this.ownBone(b.parent) : this.model;
+    const graft = b.clone(false);
+    parent.add(graft);
+    return graft;
+  }
+
   setOutfit(outfit: Partial<Record<VisualPart, string>>) {
     for (const part of Object.keys(PART_PREFIXES) as VisualPart[]) {
       const want = outfit[part] ?? null;
@@ -206,7 +223,7 @@ export class Character {
       const mat = (meshes[0]?.material as THREE.MeshLambertMaterial | undefined)?.clone();
       if (mat) { mat.color.copy(this.baseColor); this.materials.push(mat); }
       for (const sm of meshes) {
-        const bones = sm.skeleton.bones.map((b) => (this.model.getObjectByName(b.name) as THREE.Bone) ?? b);
+        const bones = sm.skeleton.bones.map((b) => this.ownBone(b) as THREE.Bone);
         const skel = new THREE.Skeleton(bones, sm.skeleton.boneInverses);
         const bind = sm.bindMatrix.clone();
         sm.removeFromParent();
@@ -227,9 +244,12 @@ export class Character {
     this.spinDur = duration;
   }
 
+  /** Hit marker of the attack clip (s at natural speed). */
+  hitTime(anim: AttackAnim) { return ATTACK_HIT[anim]; }
+
   /** Starts an attack swing. `impactAt` (s) is when the damage frame should land. */
   attack(anim: AttackAnim, period: number, impactAt: number) {
-    const clipImpact = anim === 'SwordAttack' ? 0.6 : 0.83;
+    const clipImpact = ATTACK_HIT[anim];
     const a = this.attackU[anim];
     this.current = a;
     a.reset();
@@ -240,7 +260,7 @@ export class Character {
   }
 
   hit() {
-    this.flashT = 0.12;
+    this.flashT = HIT_FLASH;
     if (this.atkTimer <= 0 && !this.dead) {
       this.hitU.reset();
       this.hitU.timeScale = 1.6;
@@ -248,6 +268,9 @@ export class Character {
       this.hitW = 1;
     }
   }
+
+  /** The death clip has played to its end (it clamps on the last frame). */
+  get deathDone() { return this.dead && !this.death.isRunning(); }
 
   die() {
     this.dead = true;
@@ -276,8 +299,7 @@ export class Character {
     }
     if (this.flashT > 0) {
       this.flashT -= dt;
-      const k = this.flashT > 0 ? 2.6 : 1;
-      for (const m of this.materials) m.color.copy(this.baseColor).multiplyScalar(k);
+      applyHitFlash(this.materials, this.flashT);
     }
     if (!animate) return;
     if (!this.dead) {
