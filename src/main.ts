@@ -250,7 +250,7 @@ function run() {
     const { w, h } = { w: app.clientWidth, h: app.clientHeight };
     if (game.camera.aspect !== w / h) { game.camera.aspect = w / h; game.camera.updateProjectionMatrix(); resize(); }
     game.update(dt);
-    renderer.render(game.scene, game.camera);
+    if (!game.offscreen) renderer.render(game.scene, game.camera);
   });
 }
 

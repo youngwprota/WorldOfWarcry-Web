@@ -291,3 +291,32 @@ export const GACHA = {
   strikeGap: 0.75,
   revealHold: 0.9,
 };
+
+/** 3D forge scene of the gacha (src/forge3d.ts). Positions in metres; `top` = anvil top, y offsets are added to it. */
+export const FORGE3D = {
+  bg: 0x140a08,
+  fov: 44,
+  /** Narrower screens widen the vertical FOV so this aspect's width always fits. */
+  minAspect: 0.5,
+  camera: [0.55, 1.95, 4.3] as [number, number, number],
+  lookAt: [0, 0.25, -0.5] as [number, number, number],
+  /** Camera push-in (m) over the three blows. */
+  push: 0.45,
+  anvilScale: 0.4,
+  anvilYaw: 0,
+  ingot: [0, 0.04, 0] as [number, number, number],
+  ingotYaw: 0,
+  hammerScale: 0.68,
+  /** Hammer shoulder pivot relative to the ingot top; angles (rad) around Z: raised and on the ingot. */
+  pivot: [-0.45, 0.2, 0] as [number, number, number],
+  hammerUp: 1.25,
+  hammerDown: -0.04,
+  hearth: [0, 0, -1.6] as [number, number, number],
+  hearthScale: [1.1, 1.35, 1.1] as [number, number, number],
+  coalLight: 13,
+  /** [model, x, z, scale, yaw] */
+  decor: [['bucket', 0.95, -0.55, 0.3, 0.4], ['wood_pile_small', -1.35, -1.2, 0.4, 0.8], ['barrel', 1.35, -1.1, 0.6, 0.3]] as [string, number, number, number, number][],
+  itemSize: 1.0,
+  itemRise: 0.85,
+  bloom: { strength: 0.8, radius: 0.5, threshold: 0.85 },
+};

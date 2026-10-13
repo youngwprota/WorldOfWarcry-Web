@@ -199,6 +199,8 @@ export class Game {
   private nearSmith = false;
   private nearFire = false;
   paused = false;
+  /** A full-screen window covers the world: main.ts skips rendering it. */
+  offscreen = false;
   private moveDir = new THREE.Vector3();
   // ---------- talents ----------
   /** Passive talent totals, recomputed when ranks change. */
