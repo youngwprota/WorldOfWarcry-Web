@@ -161,6 +161,7 @@ export class Creature {
     this.atk.timeScale = this.hitAt / impactAt;
     this.atk.play();
     this.atkTimer = period;
+    return period;
   }
 
   hit() {

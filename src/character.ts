@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { HIT_FLASH, applyHitFlash } from './hitflash';
 import { SKINS, assets } from './assets';
-import { attachWeapon } from './rig';
+import { WEAPON_GRIPS, attachWeapon } from './rig';
 import { Swinger, type SwingKind } from './swing';
 import { PART_PREFIXES, type VisualPart } from './items';
-import { ATTACK_HIT, type AttackAnim } from './config';
+import { ATTACK_HIT, type AttackAnim, type BossAnim } from './config';
 
 const shadowTex = (() => {
   const c = document.createElement('canvas');
@@ -17,6 +17,8 @@ const shadowTex = (() => {
   g.fillRect(0, 0, 64, 64);
   return new THREE.CanvasTexture(c);
 })();
+
+const FULL_BODY: Record<BossAnim, true> = { SlashAdvance: true, MeleeHigh: true, MeleeLong: true, MeleeHorizontal: true };
 /**
  * Inverted-hull outline: back faces of the same (skinned) mesh pushed out along the normals.
  * Works with skinning because the push happens in bind space, before the bones move it.
@@ -73,6 +75,16 @@ export class Character {
   private atkTimer = 0; // remaining attack time
   private hitW = 0;
   private current: THREE.AnimationAction | null = null;
+  /** Left-hand copy of the main weapon for clips that swing it with the left hand (rig.ts WEAPON_GRIPS.left). */
+  private swapWeapon: THREE.Object3D | null = null;
+  private swapAnims: string[] = [];
+  /** The clip the current one replaced, while it fades out. */
+  private fading: THREE.AnimationAction | null = null;
+  /** A second action per clip, so a swing restarted mid-way can fade from its old self instead of snapping. */
+  private attackTwin: Partial<Record<AttackAnim, THREE.AnimationAction>> = {};
+  /** Clip time (s) the current swing freezes at until release(); -1 = none. */
+  private holdT = -1;
+  private fullBody = false;
   dead = false;
   facing = 0; // yaw, radians
   walkRate = 1;
@@ -135,7 +147,10 @@ export class Character {
       a.setEffectiveWeight(0);
       return a;
     };
-    this.attackU = { SwordAttack: once(upper.SwordAttack), AxeAttack: once(upper.AxeAttack) };
+    this.attackU = {
+      SwordAttack: once(upper.SwordAttack), AxeAttack: once(upper.AxeAttack),
+      SlashAdvance: once(full.SlashAdvance), MeleeHigh: once(full.MeleeHigh), MeleeLong: once(full.MeleeLong), MeleeHorizontal: once(full.MeleeHorizontal),
+    };
     this.hitU = once(upper.Hit);
     this.death = once(full.Death);
     // Desync idle cycles between characters.
@@ -149,7 +164,11 @@ export class Character {
     this.weaponL?.removeFromParent();
     this.weapon = name ? attachWeapon(this.model, name) : null;
     this.weaponL = left ? attachWeapon(this.model, left, true) : null;
-    for (const w of [this.weapon, this.weaponL]) w?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
+    this.swapWeapon?.removeFromParent();
+    this.swapAnims = (name && WEAPON_GRIPS[name]?.left) || [];
+    this.swapWeapon = this.swapAnims.length ? attachWeapon(this.model, name!, true) : null;
+    if (this.swapWeapon) this.swapWeapon.visible = false;
+    for (const w of [this.weapon, this.weaponL, this.swapWeapon]) w?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
     if (this.highlighted) this.rebuildOutline();
   }
 
@@ -257,19 +276,39 @@ export class Character {
     this.spinDur = duration;
   }
 
+  /** Length of an attack clip (s at natural speed). */
+  clipLength(anim: AttackAnim) { return this.attackU[anim].getClip().duration; }
+
   /** Hit marker of the attack clip (s at natural speed). */
   hitTime(anim: AttackAnim) { return ATTACK_HIT[anim]; }
 
-  /** Starts an attack swing. `impactAt` (s) is when the damage frame should land. */
+  /** Starts an attack swing. `impactAt` (s) is when the damage frame should land. Returns how long the swing plays (s). */
   attack(anim: AttackAnim, period: number, impactAt: number) {
     const clipImpact = ATTACK_HIT[anim];
-    const a = this.attackU[anim];
+    let a = this.attackU[anim];
+    if (a === this.current && this.atkW > 0) {
+      a = this.attackTwin[anim] ??= this.mixer.clipAction(a.getClip().clone());
+      a.setLoop(THREE.LoopOnce, 1);
+      a.clampWhenFinished = true;
+    }
+    // the clip it replaces fades out (left alone it would keep its weight on its last frame and bend every later swing)
+    if (this.current && this.current !== a) {
+      this.current.fadeOut(0.15);
+      this.fading = this.current;
+      // the new swing ramps in from nothing while the old one fades
+      this.atkW = 0;
+    }
     this.current = a;
+    this.holdT = -1;
+    this.setSwapped(this.swapAnims.includes(anim));
+    this.fullBody = anim in FULL_BODY;
     a.reset();
     a.timeScale = clipImpact / impactAt;
-    a.setEffectiveWeight(1);
+    a.setEffectiveWeight(this.atkW);
     a.play();
-    this.atkTimer = period;
+    // a full-body clip plays to its end, even past the attack period
+    this.atkTimer = this.fullBody ? Math.max(period, a.getClip().duration / a.timeScale) : period;
+    return this.atkTimer;
   }
 
   /** Procedural swing of one hand (no clip): the blow lands `impactAt` s after the start. */
@@ -330,17 +369,43 @@ export class Character {
         this.atkW = Math.max(0, this.atkW - dt * 6);
       }
       this.hitW = Math.max(0, this.hitW - dt * 2.5);
-      const loco = 1 - Math.max(this.atkW, this.hitW);
-      this.idleL.setEffectiveWeight(1 - this.move);
-      this.walkL.setEffectiveWeight(this.move);
+      // a fading swing still holds the pose, so idle does not blend in under it
+      const fadeW = this.fading?.isScheduled() ? this.fading.getEffectiveWeight() : 0;
+      const loco = 1 - Math.max(Math.min(1, this.atkW + fadeW), this.hitW);
+      // a full-body attack takes the legs over too
+      const legs = this.fullBody ? loco : 1;
+      this.idleL.setEffectiveWeight((1 - this.move) * legs);
+      this.walkL.setEffectiveWeight(this.move * legs);
       this.idleU.setEffectiveWeight((1 - this.move) * loco);
       this.walkU.setEffectiveWeight(this.move * loco);
       this.walkL.timeScale = this.walkU.timeScale = this.walkRate;
       if (this.current) this.current.setEffectiveWeight(this.atkW);
       this.hitU.setEffectiveWeight(this.atkW > 0 ? 0 : this.hitW);
+      if (this.atkTimer <= 0) this.setSwapped(false);
+      if (this.holdT >= 0 && this.current && this.current.time >= this.holdT) this.current.paused = true;
     }
     this.mixer.update(dt);
     if (!this.dead) this.swinger.apply(dt);
+  }
+
+  /** Freezes the current swing at `at` s into its clip (a wind-up) until release(). */
+  holdAt(at: number) { this.holdT = at; }
+
+  /** A held swing goes on, its blow landing `impactIn` s from now. */
+  release(anim: AttackAnim, impactIn: number) {
+    const a = this.current;
+    if (!a || this.holdT < 0) return;
+    this.holdT = -1;
+    a.paused = false;
+    a.timeScale = Math.max(0.05, (ATTACK_HIT[anim] - a.time) / impactIn);
+    this.atkTimer = (a.getClip().duration - a.time) / a.timeScale;
+  }
+
+  /** The main weapon goes to the left hand (its copy there shows) or back to the right. */
+  private setSwapped(left: boolean) {
+    if (!this.swapWeapon || !this.weapon) return;
+    this.swapWeapon.visible = left;
+    this.weapon.visible = !left;
   }
 
   /** Removes the character; its materials are its own (the geometry and the weapon are shared clones). */

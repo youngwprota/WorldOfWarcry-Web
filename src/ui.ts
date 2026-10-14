@@ -100,6 +100,10 @@ export function drawMarks(g: CanvasRenderingContext2D, marks: MapMark[], X: (x: 
   g.restore();
 }
 
+/** A drop flying into a HUD button (UI.fly). */
+export type FlyEl = HTMLDivElement & { to: 'btn-bag' | 'btn-gacha'; item?: Item };
+const removeSelf = (e: Event) => (e.currentTarget as HTMLElement).remove();
+
 export class UI {
   readonly app = $('app');
   readonly modal = $('modal');
@@ -112,6 +116,8 @@ export class UI {
   onMap: () => void = () => {};
   onArmor: () => void = () => {};
   onDebug: () => void = () => {};
+  /** A flying drop (fly) has reached its button. */
+  onFlyEnd: (el: FlyEl) => void = () => {};
   private gains = new Map<OrbKind, { el: HTMLDivElement; n: number; until: number }>();
   private mm = $<HTMLCanvasElement>('minimap').getContext('2d')!;
 
@@ -202,13 +208,16 @@ export class UI {
     el.classList.toggle('live', n > 0);
   }
 
-  /** Kill rewards under the buffs: one line per stat, summing orbs picked up in a row. */
+  /** Kill rewards centred under the minimap's level: one line per stat, summing kills in a row. */
   gain(k: OrbKind, now: number) {
     let g = this.gains.get(k);
     if (!g) {
       const el = document.createElement('div');
       el.className = 'gain';
-      $('gains').appendChild(el);
+      const box = $('gains');
+      // #hud is scaled by --hs: the minimap's screen bottom back in HUD pixels
+      box.style.top = `${($('minimap').getBoundingClientRect().bottom - $('hud').getBoundingClientRect().top) / this.scale + 12}px`;
+      box.appendChild(el);
       g = { el, n: 0, until: 0 };
       this.gains.set(k, g);
     }
@@ -223,6 +232,44 @@ export class UI {
   tickGains(now: number) {
     for (const [k, g] of this.gains) if (now > g.until) { g.el.remove(); this.gains.delete(k); }
   }
+
+  /**
+   * A drop's icon glowing in `color` flies from (x, y) (#app pixels) into the bag or forge button;
+   * on arrival the button pulses, a "+1" pops out of it and onFlyEnd gets the element (its `item` / `to`).
+   */
+  fly(html: string, color: string, x: number, y: number, to: FlyEl['to'], item?: Item) {
+    const el = document.createElement('div') as FlyEl;
+    el.className = 'fly';
+    el.innerHTML = html;
+    el.to = to;
+    el.item = item;
+    el.style.setProperty('--glow', color);
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    el.style.setProperty('--s', String(this.scale));
+    this.app.appendChild(el);
+    const a = this.app.getBoundingClientRect();
+    const b = $(to).getBoundingClientRect();
+    el.style.setProperty('--dx', `${b.left + b.width / 2 - a.left - x}px`);
+    el.style.setProperty('--dy', `${b.top + b.height / 2 - a.top - y}px`);
+    el.addEventListener('animationend', this.flyEnd);
+  }
+
+  private flyEnd = (e: AnimationEvent) => {
+    const el = e.currentTarget as FlyEl;
+    el.remove();
+    const btn = $(el.to);
+    btn.classList.remove('pulse');
+    void btn.offsetWidth; // restart the pulse
+    btn.classList.add('pulse');
+    const plus = document.createElement('div');
+    plus.className = 'plus1';
+    plus.textContent = '+1';
+    plus.addEventListener('animationend', removeSelf);
+    btn.appendChild(plus);
+    sfx.orb();
+    this.onFlyEnd(el);
+  };
 
   /** Pulls the hero can spend in the forge. */
   gachaBadge(n: number) {

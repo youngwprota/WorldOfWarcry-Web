@@ -7,7 +7,11 @@ import { assets } from './assets';
  * pushed a little outward from the body (hand-local +Y) and tilted up toward the forearm (+X),
  * so blades do not cut through the helmet or the torso.
  */
-export const WEAPON_GRIPS: Record<string, { tilt?: number; out?: number; grip?: number; scale?: number; roll?: number; face?: number }> = {
+export const WEAPON_GRIPS: Record<string, {
+  tilt?: number; out?: number; grip?: number; scale?: number; roll?: number; face?: number;
+  /** Clips that swing it with the left hand: Character moves it there when one starts and back when it ends. */
+  left?: string[];
+}> = {
   sword_human_knight: { scale: 0.6, grip: 0.1 },
   sword_soldier: { scale: 0.7, grip: 0.12 },
   sword_orc_warrior: { scale: 0.68, grip: 0.12 },
@@ -18,7 +22,7 @@ export const WEAPON_GRIPS: Record<string, { tilt?: number; out?: number; grip?: 
   axe: { scale: 0.78, grip: 0.18, roll: Math.PI },
   hammer_human_paladin: { scale: 0.75, grip: 0.16 },
   dagger: { scale: 1.15, grip: 0.15 },
-  reaper: { scale: 1.05, grip: 0.3, tilt: 0.1, out: 0.2 },
+  reaper: { scale: 1.05, grip: 0.3, tilt: 0.1, out: 0.2, left: ['SlashAdvance'] },
   nagamaki: { scale: 1.0, grip: 0.22, tilt: 0.15, out: 0.3 },
   scythe: { scale: 1.0, grip: 0.42 },
   // `face`: lay the disc across the fist axis (its face looks forward), grip at its back

@@ -6,29 +6,32 @@ import { HELPER_SEEK, Helpers, type Helper } from './helpers';
 import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from './offhand';
 import { Creature } from './creature';
 import {
-  COMBOS, DUAL, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
-  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, isPctStat,
+  ATTACK_HIT, COMBOS, DUAL, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type BossAnim, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, isPctStat,
 } from './config';
-import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
+import { ArenaFog, FloatingText, FogPuffs, Particles, Shockwaves, Telegraphs } from './fx';
 import {
-  ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemName, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemIcon, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
+import { art } from './art';
 import { sfx } from './audio';
 import { writeSave, type SaveData } from './save';
 import { GATE, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
-import { UI, type MapMark } from './ui';
+import { UI, type FlyEl, type MapMark } from './ui';
 import { CampNpc } from './npc';
 import { fmtK, icon, resistIcons, rewardChips } from './icons';
 import { heroDeaths, logFight, logSnap } from './balancelog';
 import { addPct, addStat, armorMul, critAvg, critChance, critMul, dodgeChance, gearOf, guardMul, handMulOf, heroDps, heroStats, statBreakdown } from './balance';
 
 /** Debris colour of hits and kills: bone dust for skeletons and spirits, blood for the rest. */
-/** Death's souls: rise spots, the ritual aura, the reap. */
-const SOUL_GREEN = 0x6cff7a;
+/** Death's effects (souls, the ritual, the reap, its blows), teal like its skin, and the fog around them. */
+const SOUL_GREEN = 0x4fe3c4;
+const SOUL_FOG = 0x3fb89a;
 const SOUL_BARKS = ['Восстаньте, души!', 'Служите мне вечно!', 'Ваши кости — мои!'];
+const releaseHold = (m: Mob, anim: BossAnim, impactIn: number) => { if (m.ch instanceof Character) m.ch.release(anim, impactIn); };
 const bloodColor = (m: Mob) => m.def.id.startsWith('skel') || m.def.id === 'ghost' || m.def.id === 'death' ? 0xd8d4c8 : 0xc0392b;
 /** White-yellow sparks of a non-lethal hit (blood is for the kill). */
 const HIT_SPARK = 0xfff3a8;
@@ -173,9 +176,13 @@ class Mob extends Unit {
   owner: Mob | null = null;
   /** Death's soul: the hero walks through it. */
   passable = false;
-  /** Death: seconds since the last soul rose, and seconds left of the summoning ritual. */
+  /** Death: seconds since the last soul rose, and seconds left of the summoning flight (untargetable meanwhile). */
   soulT = 0;
   ritual = 0;
+  burstDue = false;
+  /** Boss: `animNext` starts in `animDelay` s (a cone clip timed to its telegraph); -1 = none. */
+  animDelay = -1;
+  animNext: BossAnim = 'MeleeHigh';
   awake = true;
   /** Damage type of the mob's hits (its location's, config ZONE_FOES); the hero's armour resists it. */
   dmgType: DamageType;
@@ -225,7 +232,7 @@ class Mob extends Unit {
   get visible() { return this.ch.root.visible; }
   get boss() { return !!this.def.boss; }
   get mark() { return this.def.boss ? 'boss' as const : this.def.rank ?? null; }
-  get hittable() { return this.alive && this.awake && this.rise <= 0; }
+  get hittable() { return this.alive && this.awake && this.rise <= 0 && this.ritual <= 0; }
   get barY() { return 2.15 * this.def.scale * this.ch.root.scale.x; }
   get barRange() { return this.def.boss || this.def.rank ? 24 : 16; }
   get loaderReady() { return !this.temp && ((!this.rewardsDue && this.deadT - this.paidAt > 2.2) || this.boss); }
@@ -250,6 +257,8 @@ class Mob extends Unit {
     this.adds = 0;
     this.soulT = 0;
     this.ritual = 0;
+    this.burstDue = false;
+    this.animDelay = -1;
     this.cycle = 0;
     this.special = 4;
     this.casting = 0;
@@ -325,8 +334,10 @@ export class Game {
   private fx: FloatingText;
   private particles: Particles;
   private telegraphs: Telegraphs;
-  private pickups: Pickups;
   private waves: Shockwaves;
+  private puffs: FogPuffs;
+  /** Fog ring around each Death-like boss's arena (BossDef.souls), shown while it fights. */
+  private arenas = new Map<Mob, ArenaFog>();
   /** Attack state per hand (save.weapons[0] right, [1] left). */
   private hands: [Hand, Hand] = [newHand(0), newHand(1)];
   private comboShown = -1;
@@ -438,9 +449,9 @@ export class Game {
     this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, text: hb.querySelector('span')! };
     this.particles = new Particles(this.scene);
     this.telegraphs = new Telegraphs(this.scene);
-    this.pickups = new Pickups(this.scene);
-    this.pickups.onCollect = (k, it) => this.collect(k, it);
+    this.ui.onFlyEnd = this.flyEnd;
     this.waves = new Shockwaves(this.scene);
+    this.puffs = new FogPuffs(this.scene);
     this.orbits = new Orbits(this.scene);
     this.falls = new Falls(this.scene);
     this.helpers = new Helpers(this.scene);
@@ -550,8 +561,9 @@ export class Game {
     this.updateRespawns();
     this.telegraphs.update(dt);
     this.particles.update(dt);
-    this.pickups.update(dt, this.hero.position);
     this.waves.update(dt);
+    this.puffs.update(dt);
+    for (const a of this.arenas.values()) a.update(dt, this.time);
     this.world.update(dt, this.time, this.hero.position);
     this.render(dt);
     this.saveT += dt;
@@ -639,7 +651,7 @@ export class Game {
     }
     // soft push from living mobs
     for (const m of this.mobs) {
-      if (!m.alive || !m.awake || m.rise > 0 || m.passable) continue;
+      if (!m.alive || !m.awake || m.rise > 0 || m.ritual > 0 || m.passable) continue;
       const dx = p.x - m.pos.x;
       const dz = p.z - m.pos.z;
       const rr = m.radius + HERO.radius;
@@ -1249,7 +1261,7 @@ export class Game {
     m.rewardsDue = false;
     m.paidAt = m.deadT;
     this.payRewards(m);
-    for (const it of m.loot) this.pickups.spawnItem(m.pos, it);
+    for (const it of m.loot) this.flyDrop(m.pos, itemIcon(it, 44), RARITY[it.rarity].color, 'btn-bag', it);
     m.loot = [];
     if (m.def.bonus) this.grantBonus(m);
     if (!m.owner && Math.random() < GACHA.token[mobRank(m.def)]) this.grantPull(m);
@@ -1260,10 +1272,22 @@ export class Game {
   private grantPull(m: Mob) {
     this.save.pulls = (this.save.pulls ?? 0) + 1;
     this.fx.spawn(v1.copy(m.pos).setY(2.6), '+1 крутка', 'loot', 1.6, { color: '#ffb347' });
-    this.ui.gachaBadge(this.save.pulls);
+    this.flyDrop(m.pos, art('anvil', 44), '#ffb347', 'btn-gacha');
     sfx.levelUp();
     this.persist();
   }
+
+  /** A drop's icon flies from the unit to its HUD button; the item reaches the bag on arrival (flyEnd). */
+  private flyDrop(at: THREE.Vector3, html: string, color: string, to: FlyEl['to'], item?: Item) {
+    const { w, h } = this.ui.size();
+    v1.copy(at).setY(1.2).project(this.camera);
+    this.ui.fly(html, color, (v1.x * 0.5 + 0.5) * w, (-v1.y * 0.5 + 0.5) * h, to, item);
+  }
+
+  private flyEnd = (el: FlyEl) => {
+    if (el.item) this.lootItem(el.item);
+    else this.ui.gachaBadge(this.save.pulls ?? 0);
+  };
 
   /** Micro-boss kill: permanent stats straight onto the hero. */
   private grantBonus(m: Mob) {
@@ -1293,9 +1317,9 @@ export class Game {
     u.respawnAt = this.time + u.respawnTotal;
   }
 
-  /** Stat orbs of a dead unit (a mob's wait for its death clip, see grantKillRewards). */
+  /** Stats of a dead unit go straight to the hero (a mob's wait for its death clip, see grantKillRewards). */
   private payRewards(u: Unit) {
-    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(u.pos, k);
+    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.collect(k);
   }
 
   /** Spawners: a dead unit comes back when its charge's cooldown ends (the hero's position does not matter). */
@@ -1350,17 +1374,12 @@ export class Game {
     return true;
   }
 
-  private collect(kind: PickupKind, item?: Item) {
-    if (kind === 'item' && item) {
-      this.lootItem(item);
-      return;
-    }
+  private collect(k: OrbKind) {
     sfx.orb();
-    const k = kind as OrbKind;
     addStat(this.save, 'enemy', k, ORBS[k].value);
     if (k === 'hp') this.hp = Math.min(this.maxHp, this.hp + ORBS.hp.value);
-    this.ui.gain(kind as OrbKind, this.time);
-    this.ui.popStat(kind as OrbKind);
+    this.ui.gain(k, this.time);
+    this.ui.popStat(k);
   }
 
   // ---------- mobs ----------
@@ -1384,6 +1403,7 @@ export class Game {
       m.awake = dHero < 40;
       m.ch.root.visible = m.state !== 'dead' ? dHero < 34 : m.ch.root.visible && dHero < 34;
       if (m.state === 'dead') {
+        this.arenas.get(m)?.set(false);
         const holdEnd = KILL_FX.holdAt + KILL_FX.freeze;
         const held = m.deadT < holdEnd;
         m.deadT += dt;
@@ -1406,7 +1426,23 @@ export class Game {
       const def = m.def;
       let moving = false;
       if (m.hp < m.maxHp && this.time - m.hurtAt > MOB_REGEN_DELAY) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * def.regen * dt);
-      if (def.boss?.souls && m.state === 'chase') this.raiseSouls(m, def.boss.souls, dt);
+      if (def.boss?.souls) {
+        if (m.state === 'chase') this.raiseSouls(m, def.boss.souls, dt);
+        let arena = this.arenas.get(m);
+        if (!arena) this.arenas.set(m, arena = new ArenaFog(this.scene, this.puffs, m.spawn, 16, SOUL_FOG));
+        arena.set(m.state === 'chase');
+        // the boss itself smokes with soul fog
+        if (m.visible && Math.random() < dt * 14) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.4 + Math.random() * 0.9;
+          v1.set(m.pos.x + Math.sin(a) * r, m.pos.y + 0.4 + Math.random() * 2.6, m.pos.z + Math.cos(a) * r);
+          this.puffs.spawn(v1, SOUL_FOG, 1 + Math.random() * 1.2, 1.6, 0.4);
+        }
+      }
+      if (m.animDelay >= 0) {
+        m.animDelay -= dt;
+        if (m.animDelay < 0) m.ch.attack(m.animNext, ATTACK_HIT[m.animNext] + 0.5, ATTACK_HIT[m.animNext]);
+      }
       if (m.air > 0) {
         // nagamaki launch: up and down, the blow lands with the mob
         m.air -= dt;
@@ -1448,10 +1484,12 @@ export class Game {
             }
           }
         } else if (m.state === 'chase') {
-          if (this.dead || heroInCamp || dSpawn > leash || hp.distanceTo(m.spawn) > leash + 4) {
+          // Death's souls have no leash: they chase the hero even after their boss gives up
+          const outOfLeash = !m.passable && (dSpawn > leash || hp.distanceTo(m.spawn) > leash + 4);
+          if (this.dead || heroInCamp || outOfLeash) {
             m.state = 'return';
             this.endFight(m, 'reset');
-            if (def.boss) { m.adds = 0; m.soulT = 0; m.ritual = 0; this.despawnMinions(m); }
+            if (def.boss) { m.adds = 0; m.soulT = 0; m.ritual = 0; m.pos.y = 0; releaseHold(m, def.boss.souls?.anim ?? 'MeleeHigh', 0.3); m.burstDue = false; m.animDelay = -1; this.despawnMinions(m, true); }
           } else {
             const reach = def.range + m.radius * 0.5 + HERO.radius;
             if (def.boss) {
@@ -1469,9 +1507,9 @@ export class Game {
               if (dHero < reach && m.atkCd <= 0 && m.impact < 0) {
                 const period = 1 / def.aps;
                 const impactAt = mobImpact(m.ch.hitTime(def.anim), period);
-                m.ch.attack(def.anim, period, impactAt);
+                // the next swing waits for this clip to finish
+                m.atkCd = m.ch.attack(def.anim, period, impactAt);
                 m.impact = impactAt;
-                m.atkCd = period;
               }
             }
           }
@@ -1486,7 +1524,8 @@ export class Game {
         }
       }
       if (m.impact >= 0) {
-        m.impact -= dt;
+        // the hit-stop freezes the clip, so the blow waits with it and lands when the weapon gets there
+        if (this.time - m.hurtAt >= HIT_FREEZE) m.impact -= dt;
         if (m.impact < 0 && !this.dead && m.stun <= 0) {
           const reach = def.range + m.radius * 0.5 + HERO.radius + 0.5;
           if (m.pos.distanceTo(hp) < reach) {
@@ -1595,9 +1634,10 @@ export class Game {
     if (m.special > 0 || m.impact >= 0 || m.ritual > 0) return;
     // Specials wait until the hero is in reach: no slams into thin air while the hero runs off.
     const chase = m.phase2 && dHero < b.chaseRange && Math.random() < b.chance;
-    // cycle step 0 = the slam around the boss, 1.. = the cones in order
-    const step = b.cones ? m.cycle % (b.cones.length + 1) : 0;
-    const cone = step > 0 ? b.cones![step - 1] : null;
+    // cycle step 0 = the slam around the boss (unless noSlam), then the cones in order
+    const slam0 = b.noSlam && b.cones ? 0 : 1;
+    const step = b.cones ? m.cycle % (b.cones.length + slam0) : 0;
+    const cone = step >= slam0 ? b.cones![step - slam0] : null;
     if (!chase && dHero > (cone ? cone.len * 0.75 : b.slamRadius) + HERO.radius) return;
     m.special = m.phase2 ? b.cdPhase2 : b.cd;
     if (!chase) m.cycle++;
@@ -1606,7 +1646,8 @@ export class Game {
         if (m.state === 'dead') return;
         sfx.slam();
         this.shake = Math.max(this.shake, 0.45);
-        this.particles.burst(v2.copy(at).setY(0.2), 0x8a7a6a, 14, 0.18, 7, 0.7);
+        this.particles.burst(v2.copy(at).setY(0.2), b.souls ? SOUL_GREEN : 0x8a7a6a, 14, 0.18, 7, 0.7);
+        if (b.souls) this.puffs.cloud(at, radius, SOUL_FOG, 10);
         const f = this.fightOf(m);
         f.slams++;
         if (!this.dead && this.hero.position.distanceTo(at) < radius + HERO.radius) {
@@ -1626,9 +1667,11 @@ export class Game {
       }
     } else if (cone) {
       const delay = cone.delay ?? b.slamDelay;
-      m.casting = delay + 0.1;
-      // the reaping cone is a slow scythe sweep across the whole sector
-      if (cone.reap && m.ch instanceof Character) m.ch.swing('slashRL', 0, delay + 0.6, delay);
+      // stands still through the clip's follow-through, so the next swing does not cut it
+      const follow = cone.anim && m.ch instanceof Character ? m.ch.clipLength(cone.anim) - ATTACK_HIT[cone.anim] : 0.1;
+      m.casting = delay + follow;
+      // a cone's own clip starts so that its hit marker lands with the telegraph
+      if (cone.anim) { m.animDelay = Math.max(0, delay - ATTACK_HIT[cone.anim]); m.animNext = cone.anim; }
       else m.ch.attack('AxeAttack', 1.35, 1.25);
       const yaw = Math.atan2(this.hero.position.x - m.pos.x, this.hero.position.z - m.pos.z);
       m.ch.facing = yaw;
@@ -1648,7 +1691,10 @@ export class Game {
     if (c.boss.state === 'dead') return;
     sfx.slam();
     this.shake = Math.max(this.shake, 0.35);
-    this.particles.burst(v2.set(c.at.x + Math.sin(c.yaw) * c.len * 0.5, 0.2, c.at.z + Math.cos(c.yaw) * c.len * 0.5), 0x8a7a6a, 10, 0.18, 7, 0.7);
+    const souls = !!c.boss.def.boss!.souls;
+    v2.set(c.at.x + Math.sin(c.yaw) * c.len * 0.5, 0.2, c.at.z + Math.cos(c.yaw) * c.len * 0.5);
+    this.particles.burst(v2, souls ? SOUL_GREEN : 0x8a7a6a, 10, 0.18, 7, 0.7);
+    if (souls) this.puffs.cloud(v2, c.len * 0.4, SOUL_FOG, 8);
     const f = this.fightOf(c.boss);
     f.slams++;
     if (c.reap) this.reapSouls(c);
@@ -1673,22 +1719,60 @@ export class Game {
     this.fx.spawn(this.unitTextAt(b), `+${fmtK(heal)}`, 'loot', 1.2, { color: '#6cff7a', lift: b.uiEl.offsetHeight });
     this.fx.spawn(v1.copy(b.pos).setY(5.6), 'Ваша жизнь — моя!', 'bark', 1.8);
     this.waves.add(b.pos, 2.5, SOUL_GREEN, 0.5);
+    this.puffs.cloud(b.pos, 2.5, SOUL_FOG, 8);
   }
 
-  /** Death's souls: one every `every` s of the fight; at each HP threshold the scythe goes up and a burst rises. */
+  /**
+   * Death's souls: one every `every` s of the fight. At each HP threshold Death flies up, hangs untargetable while a
+   * green aura pulses under it, raises the burst and comes back down with a swipe.
+   */
   private raiseSouls(m: Mob, s: SoulsDef, dt: number) {
-    if (m.adds < s.burstAt.length && m.hp < m.maxHp * s.burstAt[m.adds]) {
+    const f = s.fly;
+    const total = f.up + f.hover + f.down;
+    if (m.ritual <= 0 && m.adds < s.burstAt.length && m.hp < m.maxHp * s.burstAt[m.adds]) {
       while (m.adds < s.burstAt.length && m.hp < m.maxHp * s.burstAt[m.adds]) m.adds++;
-      m.ritual = s.ritual;
+      m.ritual = total;
+      m.burstDue = true;
+      m.impact = -1;
+      this.arenas.get(m)?.flare();
+      // the swipe holds on its first frame while it rises and hangs
+      m.ch.attack(s.anim, total, total);
+      if (m.ch instanceof Character) m.ch.holdAt(0);
+      if (this.target === m) this.target = null;
       this.fx.spawn(v1.copy(m.pos).setY(5.6), SOUL_BARKS[Math.floor(Math.random() * SOUL_BARKS.length)], 'bark', 2.2);
+      this.puffs.cloud(m.pos, 1.5, SOUL_FOG, 10);
       sfx.telegraph();
-      for (let i = 0; i < s.burst; i++) this.raiseSoul(m, s);
     }
     if (m.ritual > 0) {
       const before = m.ritual;
       m.ritual -= dt;
-      // the green aura pulses under the boss every 0.4 s of the ritual
-      if (Math.ceil(before / 0.4) !== Math.ceil(Math.max(0, m.ritual) / 0.4)) this.waves.add(m.pos, s.ring[1], SOUL_GREEN, 0.7);
+      const t = total - Math.max(0, m.ritual);
+      m.ch.facing = turn(m.ch.facing, Math.atan2(this.hero.position.x - m.pos.x, this.hero.position.z - m.pos.z), dt * 6);
+      const ease = (k: number) => k * k * (3 - 2 * k);
+      // up, a slow bob while hanging, then a fast drop
+      m.pos.y = t < f.up ? f.height * ease(t / f.up)
+        : t < f.up + f.hover ? f.height + 0.15 * Math.sin((t - f.up) * 5)
+        : f.height * (1 - Math.min(1, (t - f.up - f.hover) / f.down) ** 2);
+      if (m.burstDue && t >= f.up + f.hover) {
+        m.burstDue = false;
+        this.shake = Math.max(this.shake, 0.35);
+        for (let i = 0; i < s.burst; i++) this.raiseSoul(m, s);
+        // the held swipe goes on, its blow lands with the boss
+        releaseHold(m, s.anim, f.down);
+      }
+      // the aura pulses under the boss every 0.4 s of the flight
+      if (Math.ceil(before / 0.4) !== Math.ceil(Math.max(0, m.ritual) / 0.4)) {
+        this.waves.add(m.pos, s.ring[1], SOUL_GREEN, 0.7);
+        this.puffs.cloud(v1.copy(m.pos).setY(0), 2, SOUL_FOG, 3);
+      }
+      if (m.ritual <= 0) {
+        m.pos.y = 0;
+        this.shake = Math.max(this.shake, 0.4);
+        this.waves.add(m.pos, 3.5, SOUL_GREEN, 0.45);
+        this.particles.burst(v1.copy(m.pos).setY(0.2), SOUL_GREEN, 14, 0.16, 6, 0.8);
+        this.puffs.cloud(m.pos, 3, SOUL_FOG, 14);
+        sfx.slam();
+      }
     }
     m.soulT += dt;
     if (m.soulT >= s.every) {
@@ -1717,6 +1801,7 @@ export class Game {
     m.pos.y = -1.9;
     this.waves.add(at, 1.1, SOUL_GREEN, 1.3);
     this.particles.burst(v1.copy(at).setY(0.2), SOUL_GREEN, 10, 0.12, 4, 0.9);
+    this.puffs.cloud(at, 1, SOUL_FOG, 4);
   }
 
   /** 3–4 mobs of different kinds run in from the fort entrance and go for the hero. */
@@ -1743,12 +1828,17 @@ export class Game {
     m.cycle = 0;
     m.soulT = 0;
     m.ritual = 0;
+    m.pos.y = 0;
+    releaseHold(m, m.def.boss!.souls?.anim ?? 'MeleeHigh', 0.3);
+    m.burstDue = false;
+    m.animDelay = -1;
     this.despawnMinions(m);
   }
 
-  private despawnMinions(boss: Mob) {
+  /** `keepSouls`: the boss only lost the hero, its souls stay and keep chasing. */
+  private despawnMinions(boss: Mob, keepSouls = false) {
     for (const m of this.mobs) {
-      if (m.owner !== boss || m.removed) continue;
+      if (m.owner !== boss || m.removed || (keepSouls && m.passable)) continue;
       if (this.target === m) this.target = null;
       this.removeMob(m);
     }

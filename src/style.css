@@ -744,7 +744,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .mobui .mobhp span, .herohp span { position: absolute; inset: auto; left: 50%; top: 50%; transform: translate(-50%, -52%); display: block; font-size: var(--hpfs); font-weight: 900; line-height: 1; color: #fff; text-shadow: var(--stroke-s); white-space: nowrap; }
 /* buffs, then stats gained from kills, under the level badge */
 #buffs { position: static; }
-#gains { display: flex; flex-direction: column; gap: 4px; }
+#gains { position: absolute; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .gain { display: flex; align-items: center; gap: 4px; width: max-content; font-size: 20px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); }
 .gain.pop { animation: gain-pop 0.25s ease-out; }
 @keyframes gain-pop { from { transform: scale(1.4); } }
@@ -763,6 +763,30 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #btn-bag { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); }
 .round-btn.bag { background: linear-gradient(#ffb24a 0 50%, #d8701c 50%); }
 #btn-gacha { position: absolute; right: 14px; top: calc(50% - 110px); }
+/* a drop flying into the bag / forge (UI.fly): glows, shrinks a little on the way, then the button pulses and pops a "+1" */
+.fly { position: absolute; z-index: 6; pointer-events: none; transform: translate(-50%, -50%) scale(calc(var(--s) * 1.5)); filter: drop-shadow(0 0 6px var(--glow)) drop-shadow(0 0 14px var(--glow)); animation: fly-in 0.85s cubic-bezier(0.5, -0.25, 0.7, 1) 0.15s forwards; }
+@keyframes fly-in {
+  0% { transform: translate(-50%, -50%) scale(calc(var(--s) * 1.5)); }
+  25% { transform: translate(calc(-50% + var(--dx) * 0.1), calc(-50% + var(--dy) * 0.1 - 40px)) scale(calc(var(--s) * 1.8)) rotate(-12deg); }
+  100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(calc(var(--s) * 0.7)) rotate(8deg); }
+}
+#btn-bag.pulse, #btn-gacha.pulse { animation: btn-pulse 0.7s cubic-bezier(0.3, 1.6, 0.5, 1); }
+#btn-bag.pulse { --pulse-y: -50%; }
+@keyframes btn-pulse {
+  0% { transform: translateY(var(--pulse-y, 0)) scale(1); filter: none; }
+  20% { transform: translateY(var(--pulse-y, 0)) scale(1.28) rotate(-6deg); filter: brightness(1.5) drop-shadow(0 0 12px #fff6b0); }
+  40% { transform: translateY(var(--pulse-y, 0)) scale(0.9) rotate(4deg); }
+  60% { transform: translateY(var(--pulse-y, 0)) scale(1.1) rotate(-2deg); filter: brightness(1.2) drop-shadow(0 0 6px #fff6b0); }
+  100% { transform: translateY(var(--pulse-y, 0)) scale(1); filter: none; }
+}
+#btn-bag.pulse::after, #btn-gacha.pulse::after { animation: badge-pop 0.5s cubic-bezier(0.3, 1.8, 0.5, 1) 0.1s both; }
+@keyframes badge-pop { 0% { transform: scale(0.3); } 60% { transform: scale(1.5); } 100% { transform: scale(1); } }
+.plus1 { position: absolute; left: 50%; top: 0; font-size: 22px; font-weight: 900; color: #fff6b0; text-shadow: var(--stroke-s); pointer-events: none; animation: plus1 0.9s ease-out forwards; }
+@keyframes plus1 {
+  0% { transform: translate(-50%, 0) scale(0.4); opacity: 0; }
+  25% { transform: translate(-50%, -26px) scale(1.4); opacity: 1; }
+  100% { transform: translate(-50%, -60px) scale(1); opacity: 0; }
+}
 .round-btn.forge { background: linear-gradient(#ff8a4a 0 50%, #b8321c 50%); }
 .round-btn.nav { position: relative; }
 .round-btn.nav span { position: absolute; bottom: -11px; right: 0; font-size: 13px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); text-transform: uppercase; }

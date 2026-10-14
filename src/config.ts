@@ -6,15 +6,18 @@ export type DamageType = 'slash' | 'chop' | 'crush';
 export type ResistTier = 'weak' | 'normal' | 'resist' | 'immune';
 export type FactionId = 'human' | 'orc';
 export type ZoneId = 'forest' | 'cemetery' | 'peaks' | 'swamp' | 'grove' | 'dunes' | 'hills';
-export type AttackAnim = 'SwordAttack' | 'AxeAttack';
+export type WeaponAnim = 'SwordAttack' | 'AxeAttack';
+/** Full-body Mixamo clips on the project rig (legs included), used by bosses. */
+export type BossAnim = 'SlashAdvance' | 'MeleeHigh' | 'MeleeLong' | 'MeleeHorizontal';
+export type AttackAnim = WeaponAnim | BossAnim;
 /** The left hand has no clips: its swings by the right-hand clip the weapon uses. */
-export const LEFT_SWING: Record<AttackAnim, SwingKind[]> = { SwordAttack: ['slashLR', 'slashRL'], AxeAttack: ['overhead'] };
+export const LEFT_SWING: Record<WeaponAnim, SwingKind[]> = { SwordAttack: ['slashLR', 'slashRL'], AxeAttack: ['overhead'] };
 /**
  * Hit markers: seconds into each attack clip at natural speed where the blow connects. Mob damage lands on this
  * frame if the hero is still in reach. Humanoid FBX clips by name, GLB creatures as `<model>:attack`.
  */
 export const ATTACK_HIT: Record<string, number> = {
-  SwordAttack: 0.6, AxeAttack: 0.83,
+  SwordAttack: 0.6, AxeAttack: 0.83, SlashAdvance: 0.73, MeleeHigh: 0.32, MeleeLong: 1.07, MeleeHorizontal: 0.97,
   'orc_boar:attack': 9 / 24, 'undead_boar:attack': 9 / 24, 'human_murloc:attack': 0.6 / 1.3,
   'wild_bear:attack': 0.58, 'wild_direwolf:attack': 0.375, 'wild_lion:attack': 0.4, 'wild_dragon:attack': 1.04,
 };
@@ -58,7 +61,7 @@ export interface WeaponDef {
   shape: 'arc' | 'circle';
   arc: number; // degrees, for 'arc'
   range: number; // metres
-  anim: AttackAnim;
+  anim: WeaponAnim;
   model: Record<FactionId, string>;
   icon: string;
   stun?: number; // chance
@@ -308,6 +311,8 @@ export interface BossDef {
   chaseRange: number; // blasts only when the hero is this close, m
   /** Cone attacks aimed at the hero; the boss cycles slam → cones[0] → cones[1] … (phase 2 may swap any step for the chasing blasts). */
   cones?: ConeDef[];
+  /** No slam around the boss: the cycle is the cones only (the phase 2 chasing blasts stay). */
+  noSlam?: boolean;
   /** Packs of small mobs run in from the fort entrance when the boss HP first falls below each fraction in `at`. */
   reinforce?: { at: number[]; pool: string[] };
   souls?: SoulsDef;
@@ -316,13 +321,14 @@ export interface BossDef {
  * One cone attack: `yaws` are offsets (rad) from the line to the hero, one cone each; damage = boss dmg × mul.
  * `reap`: a slow scythe sweep (`delay` s telegraph) — each of the boss's souls caught in it dies and heals the boss by reap × max HP.
  */
-export interface ConeDef { half: number; len: number; mul: number; yaws: number[]; reap?: number; delay?: number }
+export interface ConeDef { half: number; len: number; mul: number; yaws: number[]; reap?: number; delay?: number; anim?: BossAnim }
 /**
  * Death's souls: one `mob` rises every `every` s of the fight, `burst` more at each HP fraction in `burstAt`
- * (the boss raises its scythe for `ritual` s). They rise `ring` m from the boss, never in the `backHalf` (rad)
+ * (the boss flies up `fly.height` m in `fly.up` s, hangs untargetable for `fly.hover` s in the bind pose (arms out), the burst rises, then it comes down in
+ * `fly.down` s with an `anim` swipe, visual only). They rise `ring` m from the boss, never in the `backHalf` (rad)
  * cone behind it; HP = `hits` plain blows of the hero's weapon; the hero walks through them.
  */
-export interface SoulsDef { mob: string; every: number; burstAt: number[]; burst: number; ritual: number; hits: number; ring: [number, number]; backHalf: number }
+export interface SoulsDef { mob: string; every: number; burstAt: number[]; burst: number; anim: BossAnim; fly: { up: number; hover: number; down: number; height: number }; hits: number; ring: [number, number]; backHalf: number }
 const BOSS_BASE = {
   slamMul: 2.2, slamDelay: 1.25, cd: 6.5, cdPhase2: 4.2, phase2At: 0.5, phase2Dmg: 1.2,
   chance: 0.55, chaseCount: 3, chaseRadius: 2.3, chaseMul: 1.4, chaseDelay: 1.0, chaseGap: 0.45, chaseRange: 11,
@@ -540,14 +546,14 @@ export const MOBS: Record<string, MobDef> = {
   death: {
     id: 'death', name: 'Смерть',
     model: { human: ['undead_king', 'reaper'], orc: ['undead_king', 'reaper'] },
-    anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
+    anim: 'MeleeHigh', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
     ...foes('cemetery'), reward: { power: 18 }, respawn: 1200,
     drop: { kind: 'armor', def: 'ring_power', rarity: 3 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['cemetery-peaks'],
-      slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
-      cones: [{ half: Math.PI / 3, len: 6, mul: 3.2, yaws: [0], reap: 0.05, delay: 1.8 }],
-      souls: { mob: 'skeleton_soul', every: 3, burstAt: [0.5, 0.1], burst: 6, ritual: 2.2, hits: 3, ring: [2.5, 6], backHalf: Math.PI / 6 },
+      slamRadius: 5, slamMul: 4.7, noSlam: true, chaseMul: 2.6, phase2Dmg: 1.3,
+      cones: [{ half: Math.PI / 3, len: 6, mul: 3.2, yaws: [0], reap: 0.05, delay: 1.8, anim: 'MeleeHorizontal' }],
+      souls: { mob: 'skeleton_soul', every: 3, burstAt: [0.5, 0.1], burst: 6, anim: 'MeleeHigh', fly: { up: 0.6, hover: 1.5, down: 0.5, height: 3.5 }, hits: 3, ring: [2.5, 6], backHalf: Math.PI / 6 },
     },
   },
   // Death's souls (BossDef.souls): HP is set from the hero's hit on spawn, no orbs
