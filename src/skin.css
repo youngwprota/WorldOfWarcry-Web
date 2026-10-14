@@ -190,6 +190,23 @@ html, body { background: radial-gradient(circle at 50% 30%, #6e4527, #1e1008); }
 .sw-name { flex: 1; min-width: 0; font-size: 25px; color: #fff; text-shadow: var(--stroke-s); line-height: 1.15; }
 .sw-name small { display: block; margin-top: 3px; font-size: 17px; font-weight: 600; color: #e9cfac; text-shadow: none; }
 .sw-row b { font-size: 29px; color: #ffe04a; text-shadow: var(--stroke-s); white-space: nowrap; }
+.sw-row.link { cursor: pointer; }
+.sw-row.link:active { transform: translateY(2px); }
+.sw-go { flex: none; margin-left: -4px; font-size: 34px; font-weight: 900; color: #e9cfac; text-shadow: var(--stroke-s); }
+.top-stats .chip[data-stat] { cursor: pointer; }
+.sw-head h2 .svgi { width: 44px; height: 44px; margin-right: 8px; vertical-align: -6px; }
+/* one stat taken apart: "Базовое" / "Процент" blocks (a light header row, the sources under it), then the formula */
+.sd-sec { flex: none; overflow: hidden; border-radius: 16px; background: #2b190c; box-shadow: 0 3px 0 #00000052; }
+.sd-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 20px; background: #7a5233; box-shadow: inset 0 3px 0 #ffffff1c; }
+.sd-top span { font-size: 29px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); }
+.sd-top b { font-size: 33px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); white-space: nowrap; }
+.sd-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 20px; font-size: 23px; color: #f0dcc0; text-shadow: 0 2px 0 #0008; }
+.sd-row:last-child { padding-bottom: 12px; }
+.sd-row b { color: #fff; white-space: nowrap; }
+.sd-formula { flex: none; padding: 12px 6px 4px; text-align: center; font-size: 27px; color: #f0dcc0; text-shadow: var(--stroke-s); }
+.sd-formula b { font-size: 33px; color: #fff; }
+.sd-formula i { font-style: normal; font-size: 22px; color: #e9cfac; }
+.sd-formula small { font-size: 19px; color: #e9cfac; }
 
 /* ---------- HUD ---------- */
 #equipbar { background: none; }

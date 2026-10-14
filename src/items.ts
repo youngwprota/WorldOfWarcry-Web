@@ -1,5 +1,5 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
-import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId, type ItemDrop } from './config';
+import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type StatId } from './config';
 import { DAMAGE_TYPE_ICON, icon } from './icons';
 import { art } from './art';
 
@@ -18,7 +18,7 @@ export interface Item {
 
 export type ArmorSlot = 'head' | 'chest' | 'arms' | 'legs' | 'ring' | 'amulet';
 export type VisualPart = 'head' | 'chest' | 'arms' | 'legs';
-export type BonusStat = 'hp' | 'regen' | 'power' | 'speed';
+export type BonusStat = StatId;
 
 export const ARMOR_SLOTS: { id: ArmorSlot; name: string; icon: string }[] = [
   { id: 'head', name: 'Шлем', icon: 'head' },
@@ -40,7 +40,10 @@ export const PART_PREFIXES: Record<VisualPart, string[]> = {
   legs: ['legs_', 'hip_', 'hips_'],
 };
 
-export const BONUS_NAME: Record<BonusStat, string> = { hp: 'Здоровье', regen: 'Реген HP/с', power: 'Урон', speed: 'Скорость' };
+export const BONUS_NAME: Record<BonusStat, string> = {
+  hp: 'Здоровье', regen: 'Реген HP/с', power: 'Урон', speed: 'Скорость',
+  defense: 'Защита', dodge: 'Уклонение', crit: 'Шанс крита', critDmg: 'Урон крита',
+};
 
 export interface ArmorDef {
   id: string;
@@ -88,10 +91,15 @@ export const BAG_SIZE = 128;
 /** Armour: each extra copy adds 30% of the piece's stats. */
 export const lvlMult = (lvl: number) => 1 + 0.3 * (lvl - 1);
 
-/** Quality base + a fixed amount per extra copy, times the weapon's multiplier (old saves may carry sharpening). */
-export function weaponDamage(it: Item) {
-  const r = RARITY[it.rarity];
-  return (r.base + r.copy * (it.lvl - 1)) * WEAPONS[it.def].dmgMul * (1 + SHARPEN.perLevel * it.sharpen);
+/** The weapon's own flat damage: quality base + a fixed amount per extra copy. */
+export const weaponBase = (it: Item) => RARITY[it.rarity].base + RARITY[it.rarity].copy * (it.lvl - 1);
+
+/**
+ * (weapon base + the hero's flat `power`) × the hero's damage percents (`powerMul`) × the weapon's multiplier
+ * (so a point of power is worth about the same DPS to a fast dagger and a slow hammer; old saves may carry sharpening).
+ */
+export function weaponDamage(it: Item, power = 0, powerMul = 1) {
+  return (weaponBase(it) + power) * powerMul * WEAPONS[it.def].dmgMul * (1 + SHARPEN.perLevel * it.sharpen);
 }
 
 /** Damage one more copy would add (shown on pickup). */

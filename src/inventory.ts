@@ -1,8 +1,11 @@
 import * as THREE from 'three';
 import { Character } from './character';
-import { COMBOS, DAMAGE_TYPE_NAME, FACTIONS, RARITY, WEAPONS } from './config';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, slotOf,
+  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, RARITY, STAT_CURVE, STAT_SOURCE_NAME, WEAPONS, isPctStat, type StatId,
+} from './config';
+import { armorMul, statBreakdown } from './balance';
+import {
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, slotOf, weaponBase,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -11,6 +14,23 @@ import { art } from './art';
 import type { Game } from './game';
 import type { UI } from './ui';
 import { pairText } from './offhand';
+
+/** 0.237 → "24%". */
+const pct = (x: number) => `${Math.round(x * 100)}%`;
+/** 0.1634 → "16.3%". */
+const pct1 = (x: number) => `${+(x * 100).toFixed(1)}%`;
+
+/** Stat window titles, icons and a line on how the stat works. */
+const STAT_UI: Record<StatId, { name: string; icon: string; note: string }> = {
+  power: { name: 'Урон', icon: 'sword', note: 'складывается с уроном оружия, проценты умножают сумму' },
+  hp: { name: 'Здоровье', icon: 'heart', note: 'сумма × проценты' },
+  regen: { name: 'Реген здоровья', icon: 'regen', note: 'HP в секунду: сумма × проценты' },
+  speed: { name: 'Скорость передвижения', icon: 'run', note: `100 очков = ${HERO.baseSpeed} м/с, предел ${HERO.baseSpeed * (1 + STAT_CURVE.speed.max)} м/с` },
+  defense: { name: 'Защита', icon: 'shield', note: `урон × 100 / (100 + защита), предел −${pct(DEFENSE_CAP)}` },
+  crit: { name: 'Шанс крита', icon: 'star', note: `предел ${pct(STAT_CURVE.crit.base + STAT_CURVE.crit.max)}` },
+  critDmg: { name: 'Урон крита', icon: 'flame', note: `предел ${pct(STAT_CURVE.critDmg.base + STAT_CURVE.critDmg.max)}` },
+  dodge: { name: 'Уклонение', icon: 'flag', note: `от любых ударов, предел ${pct(STAT_CURVE.dodge.max)}` },
+};
 
 /** Rotatable 3D hero for the character sheet (own small renderer, disposed on close). */
 class HeroPreview {
@@ -136,55 +156,96 @@ export class Inventory {
   private renderStats() {
     const g = this.game;
     const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
-    const hit = g.itemDamage(g.weaponItem) * g.handMul() * g.powerMult();
+    const s = g.stats;
+    const hit = g.itemDamage(g.weaponItem) * g.handMul();
     const big = (ic: string, v: string, label: string) => `<div>${art(ic, 46)}<b>${v}</b><span>${label}</span></div>`;
     q('#i-big').innerHTML = big('sword', fmtK(g.heroDps()), 'DPS') + big('heart', fmtK(g.maxHp), 'HP') +
       big('regen', fmtK(g.regen), 'Реген');
-    const combo = COMBOS[g.weaponItem.def];
-    const chip = (ic: string, v: string, title: string) => `<div class="chip" title="${title}">${art(ic, 28)}<b>${v}</b></div>`;
-    q('#i-stats').innerHTML = chip('hammer', fmtK(Math.round(hit)), 'Урон за удар') + chip('fist', fmtK(g.power), 'Сила (сферы и броня)') +
-      chip('shield', `${g.defense} <small>−${Math.round((g.defense / (g.defense + 100)) * 100)}%</small>`, 'Защита') +
-      chip('run', `${g.speedStat}`, 'Скорость') + chip('axe', `×${combo.mult}`, `Комбо: ${combo.name}`) +
-      chip('hourglass', `${g.weapon.aps}/с`, 'Атак в секунду');
+    // a chip with `k` opens that stat's breakdown
+    const chip = (ic: string, v: string, title: string, k?: StatId) =>
+      `<div class="chip" title="${title}"${k ? ` data-stat="${k}"` : ''}>${art(ic, 28)}<b>${v}</b></div>`;
+    q('#i-stats').innerHTML = chip('hammer', fmtK(Math.round(hit)), 'Урон за удар', 'power') +
+      chip('shield', `${g.defense} <small>−${pct(1 - armorMul(g.defense))}</small>`, 'Защита', 'defense') +
+      chip('run', `${g.speed.toFixed(1)} <small>м/с</small>`, 'Скорость', 'speed') +
+      chip('star', pct(s.crit), 'Шанс крита', 'crit') +
+      chip('flame', `×${s.critMul.toFixed(2)}`, 'Урон крита', 'critDmg') +
+      chip('flag', pct(s.dodge), 'Уклонение', 'dodge');
+  }
+
+  /** The window over the inventory (#i-sw): the full stat list or one stat's breakdown. */
+  private get statWrap() { return this.ui.modal.querySelector<HTMLElement>('#i-sw')!; }
+
+  private showWin(title: string, sub: string, body: string, onClose: () => void, icon = '') {
+    const wrap = this.statWrap;
+    wrap.innerHTML = `<div class="stats-win">
+      <div class="sw-head"><h2>${icon ? art(icon, 44) : ''}${title}</h2>${sub ? `<small>${sub}</small>` : ''}<button class="xbtn" id="i-sw-x">✕</button></div>
+      <div class="sw-list">${body}</div>
+    </div>`;
+    wrap.classList.remove('hidden');
+    wrap.querySelector('#i-sw-x')!.addEventListener('click', (e) => { e.stopPropagation(); sfx.click(); onClose(); });
+  }
+
+  /**
+   * One stat taken apart: "Базовое" — the flat parts by source, "Процент" — the percents (hp, regen, damage),
+   * then the formula: sum × percents = value, and for the curve stats `points >>> effect`.
+   * `fromList`: ✕ goes back to the full stat list.
+   */
+  private showStat(k: StatId, fromList: boolean) {
+    const g = this.game;
+    const s = g.stats;
+    const b = statBreakdown(g.save, k);
+    // damage: the main weapon's own damage is one of the flat parts
+    if (k === 'power') {
+      b.flat.splice(1, 0, ['weapon', weaponBase(g.weaponItem)]);
+      b.sum += weaponBase(g.weaponItem);
+      b.value = b.sum * b.mult;
+    }
+    const line = (name: string, v: string) => `<div class="sd-row"><span>${name}</span><b>${v}</b></div>`;
+    const sign = (n: number) => (n < 0 ? `−${fmtK(-n)}` : `+${fmtK(n)}`);
+    const flat = `<div class="sd-sec"><div class="sd-top"><span>Базовое</span><b>${sign(b.sum)}</b></div>` +
+      b.flat.map(([src, v]) => line(STAT_SOURCE_NAME[src], sign(v))).join('') + '</div>';
+    const pcts = isPctStat(k) && b.pct.length
+      ? `<div class="sd-sec"><div class="sd-top"><span>Процент</span><b>×${b.mult.toFixed(2)}</b></div>` +
+        b.pct.map(([src, v]) => line(STAT_SOURCE_NAME[src], `${sign(v)} (×${(1 + v / 100).toFixed(2)})`)).join('') + '</div>'
+      : '';
+    const w = g.weapon;
+    const effect: Partial<Record<StatId, string>> = {
+      power: `${fmtK(Math.round(g.itemDamage(g.weaponItem)))} за удар <small>(×${w.dmgMul} ${w.name.toLowerCase()})</small>`,
+      speed: `${s.speed.toFixed(2)} м/с`,
+      defense: `−${pct1(1 - armorMul(s.defense))} урона`,
+      crit: pct1(s.crit),
+      critDmg: pct1(s.critMul),
+      dodge: pct1(s.dodge),
+    };
+    const total = isPctStat(k)
+      ? `${fmtK(b.sum)} × ${b.mult.toFixed(2)} = <b>${fmtK(k === 'hp' ? Math.round(b.value) : b.value)}${k === 'regen' ? '/с' : ''}</b>`
+      : `${fmtK(b.sum)} = <b>${fmtK(b.sum)}</b>`;
+    const formula = `<div class="sd-formula">${total}${effect[k] ? ` <i>&gt;&gt;&gt;</i> <b>${effect[k]}</b>` : ''}</div>`;
+    const ui = STAT_UI[k];
+    this.showWin(ui.name, ui.note, flat + pcts + formula, () => (fromList ? this.showInfo() : this.statWrap.classList.add('hidden')), ui.icon);
   }
 
   /** Full list of the hero's stats ("i" on the stats panel). */
   private showInfo() {
-    const wrap = this.ui.modal.querySelector<HTMLElement>('#i-sw')!;
     const g = this.game;
     const f = FACTIONS[g.faction];
     const w = g.weapon;
-    const hit = g.itemDamage(g.weaponItem) * g.handMul() * g.powerMult();
-    const combo = COMBOS[g.weaponItem.def];
-    const gear = g.gear();
-    const t = Math.round(g.save.playTime ?? 0);
-    const played = t >= 3600 ? `${Math.floor(t / 3600)} ч ${Math.floor((t % 3600) / 60)} мин` : `${Math.floor(t / 60)} мин`;
-    const row = (ic: string, name: string, value: string, note = '') =>
-      `<div class="sw-row">${art(ic, 40)}<div class="sw-name">${name}${note ? `<small>${note}</small>` : ''}</div><b>${value}</b></div>`;
+    const s = g.stats;
+    // each row opens its stat's breakdown (showStat)
+    const stat = (k: StatId, value: string, note = '') =>
+      `<div class="sw-row link" data-stat="${k}" data-from="list">${art(STAT_UI[k].icon, 40)}<div class="sw-name">${STAT_UI[k].name}${note ? `<small>${note}</small>` : ''}</div><b>${value}</b><span class="sw-go">›</span></div>`;
     const rows = [
-      row('sword', 'Урон в секунду', fmtK(g.heroDps()), `${g.dual ? 'обе руки' : w.name}, с учётом силы`),
-      row('hammer', 'Урон за удар', fmtK(Math.round(hit))),
-      row('hourglass', 'Атак в секунду', String(w.aps)),
-      row(DAMAGE_TYPE_ICON[w.type], 'Тип урона', DAMAGE_TYPE_NAME[w.type]),
-      row('flag', 'Зона удара', w.shape === 'circle' ? 'круг' : `дуга ${w.arc}°`, `дальность ${w.range} м`),
-      row('star', 'Комбо-добивание', `×${combo.mult}`, `${combo.name}${combo.stun ? `, оглушение ${combo.stun} с` : ''}`),
-      row('fist', 'Сила', fmtK(g.power), `+${fmtK(g.power)}% к урону`),
-      row('heart', 'Здоровье', fmtK(g.maxHp), gear.hp ? `+${fmtK(gear.hp)} от брони` : ''),
-      g.shieldMax ? row('shield', 'Святой щит', fmtK(g.shieldMax), '15% здоровья, восстанавливается') : '',
-      row('regen', 'Регенерация', `${g.regen}/с`, 'здоровья в секунду'),
-      row('shield', 'Защита', String(g.defense), `−${Math.round((g.defense / (g.defense + 100)) * 100)}% входящего урона`),
-      row('run', 'Скорость', String(g.speedStat), `${g.speed.toFixed(1)} м/с`),
-      g.faction === 'orc' ? row('drop', 'Жажда крови', `+${Math.round(g.bloodlust * 100)}%`, 'урона сейчас, до +30% при низком здоровье') : '',
-      row('flame', f.passiveName, f.name, f.passiveText),
-      row('skull', 'Убито врагов', fmtK(g.save.kills)),
-      row('hourglass', 'Время в игре', played),
+      // the same total as the breakdown: (weapon + power) × percents
+      stat('power', fmtK((weaponBase(g.weaponItem) + s.power) * s.powerMul), 'вместе с оружием'),
+      stat('hp', fmtK(g.maxHp)),
+      stat('regen', `${fmtK(g.regen)}/с`, 'здоровья в секунду'),
+      stat('defense', String(g.defense), `−${pct(1 - armorMul(g.defense))} входящего урона`),
+      stat('speed', `${g.speed.toFixed(2)} м/с`, `${g.speedStat} очков`),
+      stat('crit', pct1(s.crit), `${s.critPts} очков`),
+      stat('critDmg', pct1(s.critMul), `${s.critDmgPts} очков`),
+      stat('dodge', pct1(s.dodge), `${s.dodgePts} очков`),
     ].join('');
-    wrap.innerHTML = `<div class="stats-win">
-      <div class="sw-head"><h2>Характеристики</h2><small>${f.name} · ${w.name}</small><button class="xbtn" id="i-sw-x">✕</button></div>
-      <div class="sw-list">${rows}</div>
-    </div>`;
-    wrap.classList.remove('hidden');
-    wrap.querySelector('#i-sw-x')!.addEventListener('click', () => { sfx.click(); wrap.classList.add('hidden'); });
+    this.showWin('Характеристики', `${f.name} · ${w.name}`, rows, () => this.statWrap.classList.add('hidden'));
   }
 
   // ---------- inventory window: stats on top, then the hero with the equipped slots, the bag sheet at the bottom ----------
@@ -269,6 +330,12 @@ export class Inventory {
 
   // ---------- item tooltip ----------
   private onClick = (e: Event) => {
+    const st = (e.target as HTMLElement).closest<HTMLElement>('[data-stat]');
+    if (st) {
+      sfx.click();
+      this.showStat(st.dataset.stat as StatId, st.dataset.from === 'list');
+      return;
+    }
     const t = (e.target as HTMLElement).closest<HTMLElement>('[data-bag],[data-armor],[data-weapon],[data-act]');
     if (!t) {
       if (!(e.target as HTMLElement).closest('.tip')) this.hideTip();

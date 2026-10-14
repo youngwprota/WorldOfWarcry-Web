@@ -6,9 +6,9 @@
 import * as CONFIG from '../src/config';
 import {
   ATTACK_HIT, BREAKABLES, COMBOS, FACTIONS, GACHA, HERO, MOBS, ORBS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, SWORD_PAIRS,
-  WEAPONS, depthMul, mobImpact, mobRank, type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type ZoneId,
+  WEAPONS, depthMul, mobImpact, mobRank, type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from '../src/config';
-import { armorMul, guardMul, handMulOf, heroStats, powerMult, type HeroBuild } from '../src/balance';
+import { addStat, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, handMulOf, heroStats, type HeroBuild } from '../src/balance';
 import { ARMOR, armorStats, dropItem, makeItem, sameItem, weaponDamage, type Item } from '../src/items';
 import { swordPair, type Pair } from '../src/offhand';
 import { pull } from '../src/gacha';
@@ -110,7 +110,6 @@ function buildUnits(): Unit[] {
 // ---------- hero ----------
 interface Hero extends HeroBuild { hp: number; bag: Item[]; pulls: number; pity: number; spot: Spot; kit: Record<ZoneId, HeroBuild['weapons']> }
 const stats = (h: Hero) => heroStats(h);
-
 // ---------- fight: ticks of 0.05 s ----------
 const DT = 0.05;
 interface FightOut { win: boolean; dur: number; swings: number; dealt: number; taken: number; hpEnd: number; slams: number; slamHits: number }
@@ -135,8 +134,6 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const chance = (p: number) => (mean ? false : rand() < p);
   const pair: Pair | null = swordPair(h.weapons[0]?.def, h.weapons[1]?.def);
   let hp = h.hp;
-  let shield = st.shieldMax;
-  let lastHurt = -99;
   let mhp = foe.hp;
   const mmax = foe.hp;
   let stun = 0;
@@ -153,18 +150,22 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   // hands
   const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1, combo: 0 }));
   const orbits: { until: number; next: number; dmg: number }[] = [];
-  const pmul = () => powerMult(h.faction, st.power, hp / st.maxHp);
+  // crits and dodges: dice, or their expected value with `mean`
+  const heroCrit = () => (mean ? critAvg(st.critPts, st.critDmgPts) : chance(st.crit) ? st.critMul : 1);
+  const foeHits = () => (mean ? 1 - dodgeChance(d.dodge) : chance(dodgeChance(d.dodge)) ? 0 : 1);
   const hurt = (raw: number) => {
-    let dmg = Math.max(1, raw * armorMul(st.defense) * guardMul(h.weapons) * roll());
-    lastHurt = t;
+    // the hero's dodge works on any blow, boss specials too
+    if (mean) raw *= (1 - st.dodge) * critAvg(d.crit, d.critDmg);
+    else if (chance(st.dodge)) return;
+    else if (chance(critChance(d.crit))) raw *= critMul(d.critDmg);
+    const dmg = Math.max(1, raw * armorMul(st.defense) * guardMul(h.weapons) * roll());
     taken += dmg;
-    if (shield > 0) { const a = Math.min(shield, dmg); shield -= a; dmg -= a; }
     hp -= dmg;
   };
   const hit = (it: Item, mult: number) => {
     const w = WEAPONS[it.def];
     const r = RESIST_MULT[d.resist[w.type] ?? 'normal'];
-    let dmg = weaponDamage(it) * handMulOf(h.weapons, pair, it) * pmul() * r * mult * roll();
+    let dmg = weaponDamage(it, st.power, st.powerMul) * handMulOf(h.weapons, pair, it) * heroCrit() * foeHits() * r * mult * roll();
     if (w.stack) { dmg *= 1 + w.stack.add * stacks; stacks = Math.min(w.stack.max, stacks + 1); }
     mhp -= dmg;
     return dmg;
@@ -191,7 +192,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     if (swordHit && pair!.kind === 'dagger') { haste = Math.min(SWORD_PAIRS.dagger.max, (t - hasteAt < SWORD_PAIRS.dagger.decay ? haste : 0) + SWORD_PAIRS.dagger.aps); hasteAt = t; }
     if (swordHit && pair!.kind === 'scythe') {
       const sp = SWORD_PAIRS.scythe;
-      if (mean) mhp -= sp.chance * (sp.time / sp.rehit) * sp.mult * weaponDamage(it) * handMulOf(h.weapons, pair, it) * pmul() * RESIST_MULT[d.resist[w.type] ?? 'normal'];
+      if (mean) mhp -= sp.chance * (sp.time / sp.rehit) * sp.mult * weaponDamage(it, st.power, st.powerMul) * handMulOf(h.weapons, pair, it) * heroCrit() * foeHits() * RESIST_MULT[d.resist[w.type] ?? 'normal'];
       else if (chance(sp.chance)) orbits.push({ until: t + sp.time, next: t + sp.rehit, dmg: -sp.mult });
     }
     if (fin && pair?.kind === 'nagamaki' && w.cycle) hit(it, SWORD_PAIRS.nagamaki.mult);
@@ -275,15 +276,13 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
         else { slamHits++; hurt(foe.dmg * mul); }
       }
     }
-    // regen, the human shield
     hp = Math.min(st.maxHp, hp + st.regen * DT);
-    if (st.shieldMax > 0 && t - lastHurt > 6) shield = st.shieldMax;
   }
   return { win: mhp <= 0 && hp > 0, dur: t, swings, dealt: mmax - Math.max(0, mhp), taken, hpEnd: Math.max(0, hp), slams, slamHits };
 }
 
 // ---------- loot and gear ----------
-const VALUE: Record<OrbKind, number> = { power: 1, hp: 0.35, regen: 1.5, speed: 0.2 };
+const VALUE: Record<StatId, number> = { power: 1, hp: 0.35, regen: 1.5, speed: 0.2, defense: 1, dodge: 2, crit: 1.5, critDmg: 1 };
 const rewardOf = (u: Unit): OrbReward => {
   if (u.kind === 'prop') return BREAKABLES[u.def].reward;
   const d = MOBS[u.def];
@@ -295,10 +294,8 @@ const rewardOf = (u: Unit): OrbReward => {
 function giveStats(h: Hero, r: Partial<Record<OrbKind, number>>, orbs: boolean) {
   for (const [k, n] of Object.entries(r) as [OrbKind, number][]) {
     const v = orbs ? n * ORBS[k].value : n;
-    if (k === 'hp') { h.stats.hp += v; h.hp += v; }
-    else if (k === 'regen') h.stats.regen = Math.min(HERO.regenCap, h.stats.regen + v);
-    else if (k === 'speed') h.stats.speed = Math.min(HERO.speedCap, h.stats.speed + v);
-    else h.stats.power += v;
+    addStat(h, orbs ? 'enemy' : 'mini', k, v);
+    if (k === 'hp') h.hp += v;
   }
 }
 function lootItem(h: Hero, it: Item) {
@@ -340,7 +337,7 @@ function regear(h: Hero) {
 function dummyDps(h: Hero, weapons: [Item | null, Item | null], zone: ZoneId) {
   const resist = MOBS[zone === 'forest' ? 'bandit_chief' : 'death'].resist;
   const def: MobDef = { ...MOBS.bandit_thug, resist, dmg: 0, rank: 'elite' };
-  const test: Hero = { ...h, weapons, hp: 1e6, stats: { ...h.stats, hp: 1e6 } };
+  const test: Hero = { ...h, weapons, hp: 1e6, src: { ...h.src, debug: { hp: 1e6 } } };
   return fight(test, { def, hp: 1e7, dmg: 0 }, true, 20).dealt / 20;
 }
 
@@ -359,7 +356,7 @@ function run(seed: number): RunOut {
   rs = seed * 7919;
   const f = FACTIONS[OPT.faction];
   const h: Hero = {
-    faction: OPT.faction, stats: { power: HERO.power, hp: HERO.hp, regen: HERO.regen, speed: HERO.speed }, equip: {},
+    faction: OPT.faction, src: {}, pct: {}, equip: {},
     weapons: [makeItem('weapon', OPT.weapon || f.startWeapon, 0, 1), OPT.left ? makeItem('weapon', OPT.left, 0, 1) : null],
     hp: 0, bag: [], pulls: 0, pity: 0, spot: { s: sCamp, off: 0 }, kit: { forest: [null, null], cemetery: [null, null] } as Hero['kit'],
   };
@@ -528,7 +525,7 @@ if (OPT.bench) {
     for (let i = 0; i < n; i++) {
       rs = i + 1;
       const h: Hero = {
-        faction: 'human', stats: { power: 0, hp: 1e6, regen: 0, speed: 100 }, equip: {}, hp: 1e6, bag: [], pulls: 0, pity: 0, spot: { s: 0, off: 0 }, kit: {} as Hero['kit'],
+        faction: 'human', src: { debug: { hp: 1e6, regen: -HERO.regen } }, pct: {}, equip: {}, hp: 1e6, bag: [], pulls: 0, pity: 0, spot: { s: 0, off: 0 }, kit: {} as Hero['kit'],
         weapons: [makeItem('weapon', a, 2, 1), b ? makeItem('weapon', b, 2, 1) : null],
       };
       sum += fight(h, { def, hp: 4000, dmg: 0 }, false, 600).dur;

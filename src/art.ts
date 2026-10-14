@@ -179,6 +179,35 @@ const PNG: Record<string, string> = {
 const png = (id: string, size: number, cls: string) =>
   `<img class="svgi art png ${cls}" src="${import.meta.env.BASE_URL}assets/ui/${PNG[id]}.png" width="${size}" height="${size}" alt="" draggable="false">`;
 
+const tintCache = new Map<string, HTMLCanvasElement | null>();
+/**
+ * A pack PNG icon recoloured for canvas drawing (map marks): the light parts take `color`, the dark outline stays.
+ * Cached per id + colour; null until the PNG has loaded.
+ */
+export function tintedArt(id: string, color: string) {
+  const key = id + color;
+  if (tintCache.get(key)) return tintCache.get(key)!;
+  if (!tintCache.has(key)) {
+    tintCache.set(key, null);
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const g = c.getContext('2d')!;
+      g.drawImage(img, 0, 0);
+      g.globalCompositeOperation = 'multiply';
+      g.fillStyle = color;
+      g.fillRect(0, 0, c.width, c.height);
+      g.globalCompositeOperation = 'destination-in';
+      g.drawImage(img, 0, 0);
+      tintCache.set(key, c);
+    };
+    img.src = `${import.meta.env.BASE_URL}assets/ui/${PNG[id]}.png`;
+  }
+  return null;
+}
+
 /** Coloured icon; falls back to nothing for unknown ids. */
 export function art(id: string, size = 24, cls = '') {
   if (PNG[id]) return png(id, size, cls);

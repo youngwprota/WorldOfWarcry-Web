@@ -16,6 +16,7 @@ import { Prologue, clearPrologue, prologueDone, type Gains } from './prologue';
 import { MapView } from './mapview';
 import { GachaView } from './gachaview';
 import { loadSave, newSave, wipeAll, writeSave } from './save';
+import { addStat } from './balance';
 import { clearLog, report } from './balancelog';
 import { UI } from './ui';
 import { DragScroll } from './dragscroll';
@@ -111,7 +112,7 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   if (!save || save.faction !== faction) {
     save = newSave(faction);
     // Orbs collected in the prologue stay with the hero.
-    if (gains) for (const k of Object.keys(gains) as OrbKind[]) save.stats[k] = +(save.stats[k] + gains[k] * ORBS[k].value).toFixed(2);
+    if (gains) for (const k of Object.keys(gains) as OrbKind[]) if (gains[k]) addStat(save, 'enemy', k, gains[k] * ORBS[k].value);
     writeSave(save);
   }
   setMuted(save.muted);

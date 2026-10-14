@@ -5,7 +5,7 @@ import {
 } from './config';
 import { ARMOR_SLOTS, EQUIP_BAR, cellHtml, type ArmorSlot, type Item } from './items';
 import { DAMAGE_TYPE_ICON, fmtK, icon, iconImage, resistIcons, rewardChips } from './icons';
-import { STAT_ICON, art, mini } from './art';
+import { STAT_ICON, art, mini, tintedArt } from './art';
 import type { MobDef } from './config';
 import { sfx } from './audio';
 import type { World } from './world';
@@ -15,7 +15,7 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const GAIN_SHOW = 2.5;
 
 export interface HudState {
-  hp: number; maxHp: number; shield: number; shieldMax: number;
+  hp: number; maxHp: number;
   stats: { power: number; hp: number; regen: number; speed: number };
   goal: string;
   buffs: string[];
@@ -92,8 +92,9 @@ export function drawMarks(g: CanvasRenderingContext2D, marks: MapMark[], X: (x: 
       continue;
     }
     const r = (m.kind === 'boss' ? 19 : 13) * s;
-    const img = iconImage('skull', m.color);
-    if (img.complete) g.drawImage(img, x - r, y - r, r * 2, r * 2);
+    // the skull of the "Убито врагов" stat, tinted red (boss) / orange (micro-boss)
+    const img = tintedArt('skull', m.color);
+    if (img) g.drawImage(img, x - r, y - r, r * 2, r * 2);
     if (m.drop) framedItem(g, x + r * 0.8, y + r * 0.7, 8 * s, m.drop.icon, m.drop.color, s * 0.7);
   }
   g.restore();
@@ -171,10 +172,8 @@ export class UI {
     if (key === this.lastHud) return;
     this.lastHud = key;
     const hp = $('hp');
-    const total = s.maxHp + s.shieldMax;
     (hp.querySelector('.fill') as HTMLElement).style.width = `${(s.hp / s.maxHp) * 100}%`;
-    (hp.querySelector('.shield') as HTMLElement).style.width = `${(s.shield / Math.max(1, total)) * 100}%`;
-    (hp.querySelector('span') as HTMLElement).textContent = `${Math.ceil(s.hp)} / ${s.maxHp}${s.shield > 0 ? `  +${Math.ceil(s.shield)}🛡` : ''}`;
+    (hp.querySelector('span') as HTMLElement).textContent = `${Math.ceil(s.hp)} / ${s.maxHp}`;
     const st = s.stats;
     const vals: Record<OrbKind, string> = {
       power: fmtK(st.power), hp: fmtK(st.hp), regen: fmtK(st.regen), speed: fmtK(st.speed),
@@ -443,7 +442,6 @@ export class UI {
       const w = WEAPONS[d.startWeapon];
       return `<div class="fcard ui-block" data-f="${f}" style="border-top:5px solid ${d.color}">
         <h3>${d.name}</h3><div class="fan">${d.fantasy}</div>
-        <div class="pas">${d.passiveName}</div><div>${d.passiveText}</div>
         <div class="pas">Старт: ${art(w.id, 22)} ${w.name}</div></div>`;
     };
     this.open(`<div class="factions ui-block">${lead ? `<p class="lead">${lead}</p>` : ''}<h1>Выбери, чьим воином вернёшься</h1>

@@ -1,13 +1,22 @@
-import { FACTIONS, HERO, type FactionId } from './config';
+import { FACTIONS, HERO, type FactionId, type SavedSource, type StatId } from './config';
+import { BASE_STATS, type PctPoints, type StatPoints } from './balance';
 import { makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
 
-/** Number scale of the save: 2 = hero HP ×10, regen in HP/s, 6 item qualities, item level = copies. */
-const SCALE = 4;
+/**
+ * Number scale of the save: 2 = hero HP ×10, regen in HP/s, 6 item qualities, item level = copies; 5 = flat power;
+ * 6 = stat points by source.
+ */
+const SCALE = 6;
 
 export interface SaveData {
   v: 1;
   faction: FactionId;
-  stats: { power: number; hp: number; regen: number; speed: number };
+  /** Legacy (scale < 6): all of the hero's stat points in one sum, now in `src`. */
+  stats?: Record<StatId, number>;
+  /** Stat points by source on top of the base (HERO) and the gear (src/balance.ts statBreakdown). */
+  src: Partial<Record<SavedSource, StatPoints>>;
+  /** Percent bonuses by source (+1 = +1%) to hp, regen and power. */
+  pct: Partial<Record<SavedSource, PctPoints>>;
   weapons: [Item | null, Item | null];
   active: 0 | 1;
   equip: Partial<Record<ArmorSlot, Item>>;
@@ -43,7 +52,8 @@ export function newSave(faction: FactionId): SaveData {
   return {
     v: 1,
     faction,
-    stats: { power: HERO.power, hp: HERO.hp, regen: HERO.regen, speed: HERO.speed },
+    src: {},
+    pct: {},
     weapons: [makeItem('weapon', FACTIONS[faction].startWeapon, 0, 1), null],
     active: 0,
     equip: {},
@@ -77,6 +87,10 @@ export function loadSave(): SaveData | null {
     if ((d.scale ?? 1) < 2) migrateScale(d);
     if ((d.scale ?? 1) < 3) migrateInts(d);
     if ((d.scale ?? 1) < 4) migrateBack(d);
+    if ((d.scale ?? 1) < 5) migrateFlat(d);
+    if ((d.scale ?? 1) < 6) migrateSources(d);
+    d.src ??= {};
+    d.pct ??= {};
     return d;
   } catch {
     return null;
@@ -88,8 +102,9 @@ export function loadSave(): SaveData | null {
  * common / rare / epic / legendary → their new places among six, item level becomes the copy count (1).
  */
 function migrateScale(d: SaveData) {
-  d.stats.hp = Math.round(d.stats.hp * 10);
-  d.stats.regen = +(d.stats.regen * 10).toFixed(2);
+  const s = d.stats!;
+  s.hp = Math.round(s.hp * 10);
+  s.regen = +(s.regen * 10).toFixed(2);
   const fix = (it: Item | null | undefined) => { if (it) { it.rarity = [0, 2, 3, 4][it.rarity] ?? it.rarity; it.lvl = 1; } };
   d.weapons.forEach(fix);
   Object.values(d.equip).forEach(fix);
@@ -99,7 +114,7 @@ function migrateScale(d: SaveData) {
 
 /** Scale 2 → 3: whole-number stats; speed from m/s to points (HERO.speedPerMs per m/s). */
 function migrateInts(d: SaveData) {
-  const s = d.stats;
+  const s = d.stats!;
   s.power = Math.round(s.power);
   s.regen = Math.round(s.regen);
   s.speed = Math.round(s.speed * HERO.speedPerMs);
@@ -108,10 +123,29 @@ function migrateInts(d: SaveData) {
 
 /** Scale 3 → 4: back to the 100-HP balance — hero HP and regen ÷10. */
 function migrateBack(d: SaveData) {
-  const s = d.stats;
+  const s = d.stats!;
   s.hp = Math.round(s.hp / 10);
   s.regen = Math.max(1, Math.round(s.regen / 10));
   d.scale = 4;
+}
+
+/** Scale 4 → 5: power is flat damage now (was +%), the old base 10 is gone; the orbs picked up stay. */
+function migrateFlat(d: SaveData) {
+  d.stats!.power = Math.max(0, d.stats!.power - 10);
+  d.scale = 5;
+}
+
+/** Scale 5 → 6: the one stat sum becomes points by source; whatever is above the base was picked up from enemies. */
+function migrateSources(d: SaveData) {
+  const enemy: StatPoints = {};
+  for (const [k, v] of Object.entries(d.stats ?? {}) as [StatId, number][]) {
+    const n = Math.round(v - BASE_STATS[k]);
+    if (n > 0) enemy[k] = n;
+  }
+  d.src = { enemy };
+  d.pct = {};
+  delete d.stats;
+  d.scale = 6;
 }
 
 /** Set by wipeAll(): nothing may write the save again before the page reloads. */

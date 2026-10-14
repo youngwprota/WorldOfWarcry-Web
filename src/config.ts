@@ -224,8 +224,6 @@ export interface FactionDef {
   /** Model + weapon shown on the faction-select stage (the race's champion). */
   preview: [string, string];
   startWeapon: string;
-  passiveName: string;
-  passiveText: string;
   color: string;
   campBuildings: string[];
   campProps: string[];
@@ -235,8 +233,6 @@ export interface FactionDef {
 export const FACTIONS: Record<FactionId, FactionDef> = {
   human: {
     id: 'human', name: 'Люди', fantasy: 'Дисциплина, защита, свет', hero: 'peasant', preview: ['paladin', 'hammer_human_paladin'], startWeapon: 'sword',
-    passiveName: 'Святой щит',
-    passiveText: 'Щит на 15% HP, восстанавливается через 6 с без урона. +10% HP, +10% реген.',
     color: '#3f7fd8',
     campBuildings: ['house_Lv1', 'house_Lv2', 'tower_Lv1', 'barrack_Lv1'],
     campProps: ['banner', 'flag', 'lantern_street'],
@@ -244,8 +240,6 @@ export const FACTIONS: Record<FactionId, FactionDef> = {
   },
   orc: {
     id: 'orc', name: 'Орки', fantasy: 'Ярость, натиск, сила', hero: 'orc_peon', preview: ['orc_chieftain', 'axe_orc_chieftain'], startWeapon: 'axe',
-    passiveName: 'Жажда крови',
-    passiveText: 'Чем меньше HP, тем больше урон (до +30%). +10% урон, +5% скорость бега.',
     color: '#c0392b',
     campBuildings: ['orc_house_Lv1', 'orc_house_Lv2', 'orc_tower_Lv1', 'orc_barrack_Lv1'],
     campProps: ['orc_banner', 'orc_tusk_standing', 'orc_practice_dummy', 'orc_skull'],
@@ -271,6 +265,10 @@ export interface MobDef {
   resist: Partial<Record<DamageType, ResistTier>>;
   /** HP fraction per second once nobody has hit the mob for MOB_REGEN_DELAY s. */
   regen: number;
+  /** Stat points on the hero's curves (STAT_CURVE), 0 when left out. */
+  crit?: number;
+  critDmg?: number;
+  dodge?: number;
   /** GLB animal (Creature): `model` names a .glb with its own rig and clips, weapon is always null. */
   creature?: boolean;
   /** Speed (m/s) the hit shoves the hero back with. */
@@ -499,18 +497,56 @@ export const ORBS: Record<OrbKind, { color: number; css: string; label: string; 
 };
 export const fmtOrb = (k: OrbKind, n = 1) => `+${Math.round(ORBS[k].value * n)}`;
 
+/** Every stat of the hero (and of mobs: crit, critDmg, dodge in MobDef). All are whole points. */
+export type StatId = OrbKind | 'defense' | 'dodge' | 'crit' | 'critDmg';
+/** Stats that also take percent bonuses: value = (sum of the flat parts) × (1 + sum of the percents / 100). */
+export type PctStat = 'hp' | 'regen' | 'power';
+export const PCT_STATS: readonly PctStat[] = ['hp', 'regen', 'power'];
+export const isPctStat = (k: StatId): k is PctStat => (PCT_STATS as readonly StatId[]).includes(k);
+
+/**
+ * Where stat points come from, in the order the stat window lists them. `base` (HERO) and `gear` (the
+ * equipped armour) are computed; the others are saved (SaveData.src / pct). New sources (shop, quests, events)
+ * go here.
+ */
+export const STAT_SOURCES = ['base', 'weapon', 'enemy', 'mini', 'gear', 'debug'] as const;
+export type StatSource = (typeof STAT_SOURCES)[number];
+/** Sources kept in the save. */
+export type SavedSource = Exclude<StatSource, 'base' | 'weapon' | 'gear'>;
+export const STAT_SOURCE_NAME: Record<StatSource, string> = {
+  base: 'База', weapon: 'Оружие', enemy: 'Враг', mini: 'Мини-босс', gear: 'Снаряжение', debug: 'Дебаг',
+};
+
 export const HERO = {
-  /** All stats are whole numbers. power: +% damage, regen: HP per second, speed: points (see speedPerMs). */
-  power: 10, hp: 100, regen: 1, speed: 100,
-  regenCap: 50, speedCap: 150,
-  /** Speed points per metre per second: 100 points = 5 m/s. */
+  /**
+   * All stats are whole numbers. power: flat damage added to the weapon's base (before its type
+   * multiplier), regen: HP per second, speed: points (100 = base run speed, see STAT_CURVE.speed).
+   */
+  power: 0, hp: 100, regen: 1, speed: 100,
+  /** Speed points per metre per second (prologue only: 100 points = 5 m/s). */
   speedPerMs: 20,
+  /** Run speed at 100 speed points, m/s. Mobs run 2.8–4.3. */
+  baseSpeed: 4,
   /** In the camp HP comes back fast: % of max HP per second (on top of the normal regen). */
   campRegen: 10,
-  /** Final run speed multiplier (applies to old saves too): 100 points → 4 m/s. Mobs run 2.8–4.3. */
-  speedMul: 0.8,
   radius: 0.45, acquireExtra: 0.4,
 };
+
+/**
+ * Diminishing returns (src/balance.ts curve): `base + max · p / (p + k)` — never reaches base + max,
+ * half of `max` at `k` points. Health, regen and damage grow linearly without a cap.
+ */
+export const STAT_CURVE = {
+  /** Run speed multiplier from the points above 100: ×1.25 at +50, never ×1.5 (6 m/s). */
+  speed: { base: 1, max: 0.5, k: 50 },
+  /** Chance to avoid a blow completely (any blow, boss specials too). */
+  dodge: { base: 0, max: 0.5, k: 100 },
+  crit: { base: 0, max: 0.6, k: 100 },
+  /** Damage multiplier of a critical hit. */
+  critDmg: { base: 1.5, max: 1.5, k: 100 },
+};
+/** Defense: incoming damage × 100 / (100 + defense), at most this share is taken off. */
+export const DEFENSE_CAP = 0.75;
 
 export interface ZoneDef {
   id: ZoneId;

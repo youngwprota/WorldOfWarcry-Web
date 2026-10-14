@@ -511,7 +511,7 @@ export class Prologue {
       if (d - SKEL.radius > GHOST.range + 0.35) continue;
       const a = Math.atan2(Math.sin(Math.atan2(dx, dz) - this.hero.facing), Math.cos(Math.atan2(dx, dz) - this.hero.facing));
       if (d > 0.6 && Math.abs(a) > THREE.MathUtils.degToRad(GHOST.arc / 2) + Math.atan2(SKEL.radius, d)) continue;
-      const dmg = Math.round(GHOST.dmg * (1 + this.power / 100) * (0.9 + Math.random() * 0.2));
+      const dmg = Math.round((GHOST.dmg + this.power) * (0.9 + Math.random() * 0.2));
       s.hp -= dmg;
       s.ch.hit();
       if (s.state !== 'return') s.state = 'chase';

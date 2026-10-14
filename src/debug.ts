@@ -2,7 +2,9 @@
 import { sfx } from './audio';
 import type { Game } from './game';
 
-type Action = [label: string, run: (g: Game) => void, cls?: string];
+const pct = (x: number) => `${Math.round(x * 100)}%`;
+
+type Action =[label: string, run: (g: Game) => void, cls?: string];
 
 const SECTIONS: [string, Action[]][] = [
   ['Бой', [
@@ -28,6 +30,20 @@ const SECTIONS: [string, Action[]][] = [
     ['Щит', (g) => g.debugGiveWeapon('shield', 1)],
     ['Кинжалы', (g) => g.debugGiveWeapon('dagger', 1)],
     ['Пусто', (g) => g.debugClearLeft(), 'wide'],
+  ]],
+  ['Статы (+очки)', [
+    ['+10 урон', (g) => g.debugAddStat('power', 10)],
+    ['+50 HP', (g) => g.debugAddStat('hp', 50)],
+    ['+5 реген', (g) => g.debugAddStat('regen', 5)],
+    ['+25 скор.', (g) => g.debugAddStat('speed', 25)],
+    ['+25 защ.', (g) => g.debugAddStat('defense', 25)],
+    ['+25 уклон', (g) => g.debugAddStat('dodge', 25)],
+    ['+25 крит', (g) => g.debugAddStat('crit', 25)],
+    ['+25 к.урон', (g) => g.debugAddStat('critDmg', 25)],
+    ['+10% урон', (g) => g.debugAddStat('power', 10, true)],
+    ['+10% HP', (g) => g.debugAddStat('hp', 10, true)],
+    ['+10% реген', (g) => g.debugAddStat('regen', 10, true)],
+    ['Сбросить дебаг-статы', (g) => g.debugClearStats(), 'wide'],
   ]],
   ['Горнило', [
     ['+5 круток', (g) => g.debugAddPulls(5), 'wide'],
@@ -113,6 +129,7 @@ export class DebugPanel {
     this.el.querySelector('.god')?.classList.toggle('on', d.god);
     this.info.textContent = [
       `HP ${d.hp}/${d.maxHp}${d.god ? '  [бессмертие]' : ''}`,
+      `Крит ${pct(d.crit)} ×${d.critMul.toFixed(2)}  уклон ${pct(d.dodge)}  ${d.speed.toFixed(2)} м/с`,
       `Скейл: герой ×${d.heroScale.toFixed(2)}  враги ×${d.mobScale.toFixed(2)}  FOV ${d.fov}°`,
     ].join('\n');
   }

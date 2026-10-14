@@ -7,7 +7,7 @@ import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from '.
 import { Creature } from './creature';
 import {
   COMBOS, DUAL, FACTIONS, GACHA, LEFT_SWING, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
-  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type WeaponDef, type ZoneDef,
+  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StatId, type WeaponDef, type ZoneDef, isPctStat,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
@@ -22,7 +22,7 @@ import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } 
 import { UI, type MapMark } from './ui';
 import { icon, resistIcons, rewardChips } from './icons';
 import { heroDeaths, logFight, logSnap } from './balancelog';
-import { BLOODLUST, SHIELD_DELAY, armorMul, gearOf, guardMul, handMulOf, heroDps, heroStats, powerMult } from './balance';
+import { addPct, addStat, armorMul, critAvg, critChance, critMul, dodgeChance, gearOf, guardMul, handMulOf, heroDps, heroStats } from './balance';
 
 /** Debris colour of hits and kills: bone dust for skeletons and spirits, blood for the rest. */
 const bloodColor = (m: Mob) => m.def.id.startsWith('skel') || m.def.id === 'ghost' || m.def.id === 'death' ? 0xd8d4c8 : 0xc0392b;
@@ -335,8 +335,6 @@ export class Game {
   onOpenGacha: () => void = () => {};
   private time = 0;
   private hp: number;
-  private shield = 0;
-  private lastHurt = -99;
   private target: Unit | null = null;
   private dead = false;
   private deadT = 0;
@@ -349,8 +347,8 @@ export class Game {
   /** A full-screen window covers the world: main.ts skips rendering it. */
   offscreen = false;
   private moveDir = new THREE.Vector3();
-  /** Player HP (+ human shield) floating above the hero's head. */
-  private heroBar!: { el: HTMLDivElement; fill: HTMLDivElement; shield: HTMLDivElement; text: HTMLSpanElement };
+  /** Player HP floating above the hero's head. */
+  private heroBar!: { el: HTMLDivElement; fill: HTMLDivElement; text: HTMLSpanElement };
 
   private labels: HTMLElement;
 
@@ -386,7 +384,6 @@ export class Game {
     this.scene.add(this.hero.root);
     for (const t of this.trails) this.scene.add(t.mesh);
     this.hp = this.maxHp;
-    this.shield = this.shieldMax;
 
     for (const s of this.world.spawns) {
       const u = s.unit === 'mob' ? this.addMob(MOBS[s.kind], new THREE.Vector3(s.x, 0, s.z), labels, s.depth) : this.addProp(s, labels);
@@ -414,9 +411,9 @@ export class Game {
     this.fx = new FloatingText(labels, this.camera);
     const hb = document.createElement('div');
     hb.className = 'herohp';
-    hb.innerHTML = '<div class="fill"></div><div class="shield"></div><span></span>';
+    hb.innerHTML = '<div class="fill"></div><span></span>';
     labels.appendChild(hb);
-    this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, shield: hb.querySelector('.shield')!, text: hb.querySelector('span')! };
+    this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, text: hb.querySelector('span')! };
     this.particles = new Particles(this.scene);
     this.telegraphs = new Telegraphs(this.scene);
     this.pickups = new Pickups(this.scene);
@@ -452,19 +449,16 @@ export class Game {
   get faction() { return this.save.faction; }
   /** Totals from equipped armour and jewellery. */
   gear() { return gearOf(this.save.equip); }
-  get power() { return heroStats(this.save).power; }
-  get defense() { return heroStats(this.save).defense; }
-  get maxHp() { return heroStats(this.save).maxHp; }
-  get shieldMax() { return heroStats(this.save).shieldMax; }
-  get regen() { return heroStats(this.save).regen; }
-  /** Speed stat in whole points (HERO.speedPerMs per m/s). */
-  get speedStat() { return heroStats(this.save).speedStat; }
-  /** Running speed, m/s (HERO.speedMul applies on top: 100 points = 4 m/s). */
-  get speed() { return heroStats(this.save).speed; }
-  /** Orc racial: up to +30% damage as HP drops. */
-  get bloodlustMax() { return BLOODLUST; }
-  /** Current bloodlust damage bonus (0 for humans). */
-  get bloodlust() { return this.faction === 'orc' ? this.bloodlustMax * (1 - this.hp / this.maxHp) : 0; }
+  /** Final stats (base points + gear), see heroStats. */
+  get stats() { return heroStats(this.save); }
+  get power() { return this.stats.power; }
+  get defense() { return this.stats.defense; }
+  get maxHp() { return this.stats.maxHp; }
+  get regen() { return this.stats.regen; }
+  /** Speed stat in whole points (100 = HERO.baseSpeed). */
+  get speedStat() { return this.stats.speedStat; }
+  /** Running speed, m/s. */
+  get speed() { return this.stats.speed; }
   /** Main weapon: the right hand, or the left one when the right is empty (stats, balance log). */
   get weaponItem(): Item { return this.save.weapons[0] ?? this.save.weapons[1]!; }
   get weapon() { return WEAPONS[this.weaponItem.def]; }
@@ -473,10 +467,13 @@ export class Game {
   handMul() { return this.dual ? DUAL.mul : 1; }
   /** Hand multiplier of one weapon: the hidden blade carries the folded-in sword at full damage. */
   handMulOf(it: Item) { return handMulOf(this.save.weapons, this.pair, it); }
-  powerMult() { return powerMult(this.faction, this.power, this.hp / this.maxHp); }
-  itemDamage(it: Item) { return weaponDamage(it); }
-  /** Both hands together; `resist` applies each hand's own damage type. */
-  heroDps(resist?: Partial<Record<DamageType, ResistTier>>) { return heroDps(this.save.weapons, this.pair, this.powerMult(), resist); }
+  /** Damage of one plain blow of `it` with the hero's power and damage percents (no crit, no hand multiplier). */
+  itemDamage(it: Item) { const s = this.stats; return weaponDamage(it, s.power, s.powerMul); }
+  /** Both hands together, crits on average; `resist` applies each hand's own damage type. */
+  heroDps(resist?: Partial<Record<DamageType, ResistTier>>) {
+    const s = this.stats;
+    return heroDps(this.save.weapons, this.pair, s.power, s.powerMul, critAvg(s.critPts, s.critDmgPts), resist);
+  }
 
   /** Model names of the right / left hand weapons. */
   handModels(): [string | null, string | null] {
@@ -584,9 +581,7 @@ export class Game {
     const hb = this.heroBar;
     hb.el.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
     hb.el.classList.toggle('dead', this.dead);
-    const total = this.maxHp + this.shieldMax;
     hb.fill.style.width = `${(this.hp / this.maxHp) * 100}%`;
-    hb.shield.style.width = `${Math.min(1, this.shield / Math.max(1, total)) * 100}%`;
     hb.text.textContent = `${Math.ceil(this.hp)}`;
     hb.el.classList.toggle('low', this.hp < this.maxHp * 0.3);
     this.updateMobBars(w, h);
@@ -673,7 +668,6 @@ export class Game {
     let rate = this.regen; // HP per second
     if (inCamp(p.x, p.z)) rate += (HERO.campRegen / 100) * this.maxHp;
     this.hp = Math.min(this.maxHp, this.hp + rate * dt);
-    if (this.shieldMax > 0 && this.time - this.lastHurt > SHIELD_DELAY) this.shield = this.shieldMax;
 
     // zone + interactions
     const zone = this.world.zoneAt(p.x, p.z);
@@ -768,10 +762,14 @@ export class Game {
     }
   }
 
-  private damageFor(it: Item, resist: MobDef['resist'], mult = 1) {
-    const tier = resist[WEAPONS[it.def].type] ?? 'normal';
-    const dmg = this.itemDamage(it) * this.handMulOf(it) * this.powerMult() * RESIST_MULT[tier] * mult * (0.9 + Math.random() * 0.2);
-    return { dmg: Math.max(1, Math.round(dmg)), tier };
+  /** A blow on mob `def`: it may dodge (dmg 0, `fx` 'miss') or take a crit (`fx` 'crit'). */
+  private damageFor(it: Item, def: MobDef, mult = 1) {
+    const tier = def.resist[WEAPONS[it.def].type] ?? 'normal';
+    if (Math.random() < dodgeChance(def.dodge)) return { dmg: 0, tier, fx: 'miss' as HitFx };
+    const s = this.stats;
+    const crit = Math.random() < s.crit;
+    const dmg = this.itemDamage(it) * this.handMulOf(it) * RESIST_MULT[tier] * mult * (crit ? s.critMul : 1) * (0.9 + Math.random() * 0.2);
+    return { dmg: Math.max(1, Math.round(dmg)), tier, fx: (crit ? 'crit' : '') as HitFx };
   }
 
   /** The unit's edge is within the strike distance (any direction). */
@@ -860,11 +858,11 @@ export class Game {
       const stackMul = w.stack ? 1 + w.stack.add * m.stacks : 1;
       // hammer pair: no knockback, the closer to the centre of the blow, the harder
       const center = hammerPair ? 1 + SWORD_PAIRS.hammer.center * Math.max(0, 1 - m.pos.distanceTo(this.hero.position) / (range + 0.35)) : 1;
-      const r = this.damageFor(it, m.def.resist, (fin ? fin.mult : 1) * stackMul * crowd * ring * pairMul * center);
-      const { tier } = r;
+      const r = this.damageFor(it, m.def, (fin ? fin.mult : 1) * stackMul * crowd * ring * pairMul * center);
+      const { tier, fx } = r;
       let { dmg } = r;
       // axe pair: the sword tears off a share of what the mob has left
-      if (swordHit && pair!.kind === 'axe') {
+      if (swordHit && pair!.kind === 'axe' && fx !== 'miss') {
         const a = SWORD_PAIRS.axe;
         dmg += Math.round(m.hp * (mobRank(m.def) === 'normal' ? a.pct : a.boss));
       }
@@ -873,7 +871,7 @@ export class Game {
       f.hits++;
       if (fin) f.combos++;
       // the reaper keeps the pulled crowd together, the pan and the blade knock heads, not bodies
-      this.damageMob(m, dmg, tier, hammerPair ? 0 : fin ? fin.knock : w.pull ? 0.5 : w.ahead || w.assassin ? 1 : 3.5);
+      this.damageMob(m, dmg, tier, hammerPair ? 0 : fin ? fin.knock : w.pull ? 0.5 : w.ahead || w.assassin ? 1 : 3.5, fx);
       if (swordHit && pair!.kind === 'hammer' && Math.random() < SWORD_PAIRS.hammer.chance) this.spawnHelper(m.pos);
       if (w.assassin) this.assassinate(m, w.assassin);
       else if (m.alive && !m.def.boss) {
@@ -960,11 +958,11 @@ export class Game {
     const color = COMBOS.nagamaki.color;
     sfx.combo();
     const cut = (m: Mob, mult: number, knock: number) => {
-      const { dmg, tier } = this.damageFor(it, m.def.resist, mult);
+      const { dmg, tier, fx } = this.damageFor(it, m.def, mult);
       const f = this.fightOf(m);
       f.hits++;
       f.combos++;
-      this.damageMob(m, dmg, tier, knock);
+      this.damageMob(m, dmg, tier, knock, fx);
     };
     if (kind === 'fall') {
       const at = this.fallPoint(v3);
@@ -978,7 +976,7 @@ export class Game {
       for (const m of this.mobs) {
         if (!m.hittable || !this.inShape(m.pos, m.radius, 'arc', 160, WEAPONS[it.def].range)) continue;
         if (m.def.boss) { cut(m, n.mult, 0); continue; }
-        const { dmg } = this.damageFor(it, m.def.resist, n.mult);
+        const { dmg } = this.damageFor(it, m.def, n.mult);
         m.air = m.airDur = 0.9;
         m.airDmg = dmg;
         m.stun = Math.max(m.stun, 1.2);
@@ -1061,11 +1059,11 @@ export class Game {
           continue;
         }
         const m = u as Mob;
-        const { dmg, tier } = this.damageFor(tag.item, m.def.resist, tag.mult);
+        const { dmg, tier, fx } = this.damageFor(tag.item, m.def, tag.mult);
         const f = this.fightOf(m);
         f.hits++;
         if (tag.fin) f.combos++;
-        this.damageMob(m, dmg, tier, 2);
+        this.damageMob(m, dmg, tier, 2, fx);
         // scythe pair: a sword may start circling the cut mob
         if (this.pair?.kind === 'scythe' && m.alive && Math.random() < SWORD_PAIRS.scythe.chance) this.spawnSwordOrbit(m);
       }
@@ -1106,9 +1104,9 @@ export class Game {
     if (this.time - last < o.rehit) return;
     o.last.set(m, this.time);
     const p = SWORD_PAIRS.scythe;
-    const { dmg, tier } = this.damageFor(tag.item, m.def.resist, p.mult);
+    const { dmg, tier, fx } = this.damageFor(tag.item, m.def, p.mult);
     this.fightOf(m).hits++;
-    this.damageMob(m, dmg, tier, 0.5);
+    this.damageMob(m, dmg, tier, 0.5, fx);
     if (Math.random() < p.jump) {
       const next = this.mobs.find((x) => x !== m && x.hittable && x.pos.distanceTo(m.pos) < p.jumpR);
       if (next) this.spawnSwordOrbit(next);
@@ -1143,9 +1141,9 @@ export class Game {
       const pair = this.pair;
       const sword = pair && this.save.weapons[pair.sword];
       const it = sword ?? this.weaponItem;
-      const { dmg, tier } = this.damageFor(it, m.def.resist, p.dmg * (h.kind === 'hammer' ? 1.4 : 1));
+      const { dmg, tier, fx } = this.damageFor(it, m.def, p.dmg * (h.kind === 'hammer' ? 1.4 : 1));
       this.fightOf(m).hits++;
-      this.damageMob(m, dmg, tier, h.kind === 'hammer' ? 2 : 1);
+      this.damageMob(m, dmg, tier, h.kind === 'hammer' ? 2 : 1, fx);
       if (h.kind === 'sickle' && Math.random() < p.chain) this.spawnHelper(m.pos);
     });
   }
@@ -1165,7 +1163,13 @@ export class Game {
   }
 
 
-  private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5) {
+  /** `fx`: 'crit' shows a bigger number, 'miss' (or no damage at all) — the mob dodged. */
+  private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5, fx: HitFx = '') {
+    if (fx === 'miss' || dmg <= 0) {
+      m.state = m.state === 'return' ? 'return' : 'chase';
+      this.fx.spawn(this.unitTextAt(m), 'Промах', 'dmg resist', 0.7, { lift: m.uiEl.offsetHeight });
+      return;
+    }
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
     m.hp -= dmg;
     m.hurtAt = this.time;
@@ -1174,9 +1178,11 @@ export class Game {
     if (!m.def.boss) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
     const head = this.unitTextAt(m);
     const lift = m.uiEl.offsetHeight;
-    if (tier === 'weak') { this.fx.spawn(head, `-${dmg}`, 'dmg weak', 0.8, { lift }); sfx.hit(true); }
-    else if (tier === 'resist' || tier === 'immune') { this.fx.spawn(head, `-${dmg}`, 'dmg resist', 0.8, { lift }); sfx.resist(); }
-    else { this.fx.spawn(head, `-${dmg}`, 'dmg', 0.8, { lift }); sfx.hit(); }
+    const text = fx === 'crit' ? `-${dmg}!` : `-${dmg}`;
+    const crit = fx === 'crit' ? ' crit' : '';
+    if (tier === 'weak') { this.fx.spawn(head, text, 'dmg weak' + crit, 0.8, { lift }); sfx.hit(true); }
+    else if (tier === 'resist' || tier === 'immune') { this.fx.spawn(head, text, 'dmg resist' + crit, 0.8, { lift }); sfx.resist(); }
+    else { this.fx.spawn(head, text, 'dmg' + crit, 0.8, { lift }); sfx.hit(!!crit); }
     this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), HIT_SPARK, 2, 0.06, 5, 0.3);
     if (m.hp <= 0) this.killMob(m);
   }
@@ -1233,13 +1239,10 @@ export class Game {
 
   /** Micro-boss kill: permanent stats straight onto the hero. */
   private grantBonus(m: Mob) {
-    const s = this.save.stats;
     const b = m.def.bonus!;
     for (const [k, v] of Object.entries(b) as [OrbKind, number][]) {
-      if (k === 'hp') { s.hp += v; this.hp = Math.min(this.maxHp, this.hp + v); }
-      else if (k === 'regen') s.regen = Math.min(HERO.regenCap, s.regen + v);
-      else if (k === 'speed') s.speed = Math.min(HERO.speedCap, s.speed + v);
-      else s.power += v;
+      addStat(this.save, 'mini', k, v);
+      if (k === 'hp') this.hp = Math.min(this.maxHp, this.hp + v);
       this.ui.popStat(k);
     }
     const text = bonusText(b);
@@ -1319,18 +1322,14 @@ export class Game {
   }
 
   private collect(kind: PickupKind, item?: Item) {
-    const s = this.save.stats;
     if (kind === 'item' && item) {
       this.lootItem(item);
       return;
     }
     sfx.orb();
-    switch (kind as OrbKind) {
-      case 'power': s.power += ORBS.power.value; break;
-      case 'hp': s.hp += ORBS.hp.value; this.hp = Math.min(this.maxHp, this.hp + ORBS.hp.value); break;
-      case 'regen': s.regen = Math.min(HERO.regenCap, s.regen + ORBS.regen.value); break;
-      case 'speed': s.speed = Math.min(HERO.speedCap, s.speed + ORBS.speed.value); break;
-    }
+    const k = kind as OrbKind;
+    addStat(this.save, 'enemy', k, ORBS[k].value);
+    if (k === 'hp') this.hp = Math.min(this.maxHp, this.hp + ORBS.hp.value);
     this.ui.gain(kind as OrbKind, this.time);
     this.ui.popStat(kind as OrbKind);
   }
@@ -1594,24 +1593,23 @@ export class Game {
 
   private hurtHero(raw: number, from: THREE.Vector3, src?: Mob) {
     if (this.dead) return;
-    // GDD 10.5: reduction = defense / (defense + 100).
-    let dmg = Math.max(1, Math.round(raw * armorMul(this.defense) * this.guardMul() * (0.9 + Math.random() * 0.2)));
-    this.lastHurt = this.time;
-    if (src) this.tryCounter(src);
-    if (src) this.fightOf(src).taken += Math.min(dmg, this.hp + this.shield);
-    if (this.shield > 0) {
-      const absorbed = Math.min(this.shield, dmg);
-      this.shield -= absorbed;
-      dmg -= absorbed;
+    const s = this.stats;
+    const barY = 2.45 * this.heroScale;
+    const lift = this.heroBar.el.offsetHeight + 14;
+    // dodge: any blow, boss specials too
+    if (Math.random() < s.dodge) {
+      this.fx.spawn(v1.copy(this.hero.position).setY(barY), 'Уклон', 'hurt', 0.6, { color: '#9fe8ff', lift });
+      return;
     }
+    const crit = !!src && Math.random() < critChance(src.def.crit);
+    // GDD 10.5: reduction = defense / (defense + 100).
+    const dmg = Math.max(1, Math.round(raw * (crit ? critMul(src!.def.critDmg) : 1) * armorMul(s.defense) * this.guardMul() * (0.9 + Math.random() * 0.2)));
+    if (src) this.tryCounter(src);
+    if (src) this.fightOf(src).taken += Math.min(dmg, this.hp);
     this.hp -= dmg;
     this.hero.hit();
     sfx.hurt();
-    // Fully absorbed by the human shield: show it in shield blue instead of "-0".
-    const barY = 2.45 * this.heroScale;
-    const lift = this.heroBar.el.offsetHeight + 14;
-    if (dmg > 0) this.fx.spawn(v1.copy(this.hero.position).setY(barY), `-${dmg}`, 'hurt', 0.7, { lift });
-    else this.fx.spawn(v1.copy(this.hero.position).setY(barY), '🛡', 'hurt', 0.5, { color: '#6cc6ff', lift });
+    this.fx.spawn(v1.copy(this.hero.position).setY(barY), crit ? `-${dmg}!` : `-${dmg}`, crit ? 'hurt crit' : 'hurt', 0.7, { lift });
     void from;
     this.ui.hurtFlash();
     if (this.hp <= 0 && this.god) this.hp = 1; // debug
@@ -1673,7 +1671,6 @@ export class Game {
   private revive() {
     this.dead = false;
     this.hp = this.maxHp;
-    this.shield = this.shieldMax;
     this.hero.revive();
     this.ui.flash();
     this.persist();
@@ -1865,21 +1862,6 @@ export class Game {
     this.refreshHud(true);
   }
 
-  statRows(): [string, string][] {
-    return [
-      ['Урон (Power)', String(Math.round(this.power))],
-      ['Здоровье', String(this.maxHp)],
-      ['Реген', `${this.regen} HP/с`],
-      ['Скорость', String(this.speedStat)],
-      ['Защита', `${this.defense} (−${Math.round((this.defense / (this.defense + 100)) * 100)}%)`],
-      ...this.save.weapons.flatMap((it, i): [string, string][] => it ? [
-        [i ? 'Левая рука' : 'Правая рука', `${Math.round(this.itemDamage(it) * this.handMul() * this.powerMult())} × ${WEAPONS[it.def].aps}/с`],
-        [`Комбо ${WEAPONS[it.def].name.toLowerCase()}`, `${COMBOS[it.def].name} ×${COMBOS[it.def].mult}`],
-      ] : []),
-      ['Пассивка', FACTIONS[this.faction].passiveName],
-    ];
-  }
-
   // ---------- HUD / save ----------
   private goal() {
     const b = this.save.bosses;
@@ -1941,12 +1923,11 @@ export class Game {
   refreshHud(full: boolean) {
     const g = this.goal();
     this.ui.hud({
-      hp: this.hp, maxHp: this.maxHp, shield: this.shield, shieldMax: this.shieldMax,
+      hp: this.hp, maxHp: this.maxHp,
       stats: { power: Math.round(this.power), hp: this.maxHp, regen: this.regen, speed: this.speedStat },
       goal: g.text,
       buffs: [
         inCamp(this.hero.position.x, this.hero.position.z) && this.hp < this.maxHp ? '🏠 Лагерь: быстрое восстановление' : '',
-        this.faction === 'orc' && this.hp < this.maxHp * 0.7 ? `🩸 Жажда крови: +${Math.round(this.bloodlust * 100)}% урона` : '',
       ].filter(Boolean),
       bosses: this.mobs.filter((m) => m.def.boss).map((m) => ({
         name: m.def.boss!.titles[this.faction],
@@ -1976,6 +1957,25 @@ export class Game {
   /** Debug: a rare weapon of this type straight into a hand; the old one goes to the bag if it fits. */
   debugAddPulls(n: number) {
     this.save.pulls = (this.save.pulls ?? 0) + n;
+    this.refreshHud(true);
+    this.persist();
+  }
+
+  /** Adds `n` points of stat `k` (source "Дебаг"); `pct`: `n` percent instead (hp / regen / power). */
+  debugAddStat(k: StatId, n: number, pct = false) {
+    const hpFrac = this.hp / this.maxHp;
+    if (pct && isPctStat(k)) addPct(this.save, 'debug', k, n);
+    else addStat(this.save, 'debug', k, n);
+    this.hp = hpFrac * this.maxHp;
+    this.refreshHud(true);
+    this.persist();
+  }
+
+  /** Removes every debug stat point and percent. */
+  debugClearStats() {
+    delete this.save.src.debug;
+    delete this.save.pct.debug;
+    this.hp = Math.min(this.hp, this.maxHp);
     this.refreshHud(true);
     this.persist();
   }
@@ -2101,8 +2101,10 @@ export class Game {
 
   /** Live numbers for the debug panel. */
   debugInfo() {
+    const s = this.stats;
     return {
       hp: Math.ceil(this.hp), maxHp: this.maxHp, god: this.god, heroScale: this.heroScale, mobScale: this.mobScale, fov: this.camera.fov,
+      crit: s.crit, critMul: s.critMul, dodge: s.dodge, speed: s.speed,
     };
   }
 
@@ -2186,3 +2188,5 @@ interface ScytheTag { kind: 'scythe'; hand: 0 | 1; item: Item; mult: number; fin
 /** Scythe pair: a sword circling one mob. */
 interface SwordTag { kind: 'sword'; mob: Mob; item: Item }
 type OrbitTag = ScytheTag | SwordTag;
+/** How a blow landed: a crit, dodged, or plain (''). */
+type HitFx = '' | 'crit' | 'miss';
