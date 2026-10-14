@@ -39,7 +39,7 @@ const IK: Record<AttackAnim, IkSwing> = {
   SwordAttack: {
     arm: [[0, -80, 22, 0.85, -140, 20], [0.6, -55, 12, 0.93, -85, 8], [1, 0, -3, 0.97, 35, 0], [1.3, 18, -18, 0.95, 100, -10]],
     pole: [-0.7, -1, -0.3], lift: 0,
-    body: [[0, -0.4, 0, -0.04], [1, 0.1, 0.05, 0.12], [1.3, 0.5, 0.05, 0.08]],
+    body: [[0, -0.6, 0, -0.06], [1, 0.1, 0.05, 0.14], [1.3, 0.55, 0.05, 0.1]],
   },
   // diagonal chop: the hand high by the right shoulder (further back looked unnatural), the axe cocked up and back,
   // the whole arm cuts down across to the front-left, the torso turning with it (straight down from above read as a
@@ -47,7 +47,7 @@ const IK: Record<AttackAnim, IkSwing> = {
   AxeAttack: {
     arm: [[0, -85, 55, 0.82, -140, 50], [0.6, -65, 42, 0.92, -110, 50], [0.85, -55, 10, 0.97, -40, 5], [1, -5, -8, 0.97, 20, -20], [1.3, 30, -30, 0.92, 55, -40]],
     pole: [-1, -0.4, 0], lift: 0.15,
-    body: [[0, -0.3, -0.04, -0.05], [1, 0.15, 0.06, 0.14], [1.3, 0.35, 0.06, 0.1]],
+    body: [[0, -0.5, -0.04, -0.06], [1, 0.15, 0.06, 0.15], [1.3, 0.45, 0.06, 0.1]],
   },
 };
 const FOLLOW_P = 1.3;
@@ -192,7 +192,8 @@ export class Swinger {
     let lead = -1, leadT = Infinity;
     for (let h = 0; h < 2; h++) {
       const a = this.hands[h];
-      if (a && a.t + dt < a.dur && a.t < leadT) { lead = h; leadT = a.t; }
+      // an IK swing past its blow is led by its held pose below
+      if (a && a.t + dt < a.dur && !(a.clip && this.ik && a.hit) && a.t < leadT) { lead = h; leadT = a.t; }
     }
     for (let h = 0; h < 2; h++) {
       const a = this.hands[h];
@@ -215,6 +216,21 @@ export class Swinger {
         // fwd: hanging (−Y) towards +Z is a negative turn about X; out: right arm to −X is negative about Z
         rotateInModel(arm, this.model, qa.setFromAxisAngle(AXIS_Z, -pose[4] * m).premultiply(qb.setFromAxisAngle(AXIS_X, -pose[2])));
         rotateInModel(arm, this.model, qa.setFromAxisAngle(AXIS_Y, pose[3] * m));
+      }
+    }
+    if (lead < 0 && this.ik) {
+      // no swing on its way to a blow: the torso goes with the latest held arm (follow-through, then back to the
+      // windup); left at the follow-through, the arm went back to the windup behind a torso turned away from it
+      let hb = -1;
+      for (let h = 0; h < 2; h++) {
+        const hd = this.held[h];
+        if (hd.anim && hd.w > 0 && (hb < 0 || hd.back < this.held[hb].back)) hb = h;
+      }
+      if (hb >= 0) {
+        const hd = this.held[hb];
+        const m = hb ? -1 : 1;
+        sample(IK[hd.anim!].body, hd.at * (1 - smooth(hd.back)), pose, 3);
+        yaw = pose[0] * m * hd.w; lean = pose[1] * hd.w; lunge = pose[2] * hd.w;
       }
     }
     const k = 1 - Math.exp(-dt * 16);
