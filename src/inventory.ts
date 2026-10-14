@@ -292,6 +292,7 @@ export class Inventory {
       if (w.stack) ability = `<div class="ab-title">Порезы</div><p>Каждый удар по врагу добавляет <b>+${Math.round(w.stack.add * 100)}%</b> урона по нему, до <b>+${Math.round(w.stack.add * w.stack.max * 100)}%</b>. Через <b>${w.stack.decay} с</b> без ударов бонус сгорает.</p>` + ability;
       if (w.pull) ability = `<div class="ab-title">Жатва душ</div><p>Взмах стягивает врагов в радиусе <b>${w.pull.radius} м</b> перед героем (боссов — нет). Каждый задетый враг сверх первого даёт <b>+${Math.round(w.pull.perEnemy * 100)}%</b> урона, до <b>×${w.pull.max}</b>.</p>` + ability;
       if (w.guard) ability = `<div class="ab-title">Защита</div><p>−${Math.round(w.guard.reduce * 100)}% входящего урона. Удар по герою с шансом <b>${Math.round(w.guard.counter.normal * 100)}–${Math.round(w.guard.counter.boss * 100)}%</b> (чем сильнее враг, тем выше) вызывает контратаку оружием в другой руке. Рядом с оружием сам не бьёт.</p>` + ability;
+      ability = `<p>${w.role}</p>` + ability;
       const pt = pairText(it.def);
       if (pt) ability += `<div class="ab-title">С мечом в другой руке</div><p>${pt}</p>`;
     } else {

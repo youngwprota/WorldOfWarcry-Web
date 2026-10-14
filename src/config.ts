@@ -50,6 +50,8 @@ export interface ItemDrop { kind: 'weapon' | 'armor'; def: string; rarity: numbe
 export interface WeaponDef {
   id: string;
   name: string;
+  /** What the weapon is for, one line for the tooltip. */
+  role: string;
   type: DamageType;
   /** Damage multiplier on the quality's base damage (slow weapons hit harder). */
   dmgMul: number;
@@ -89,31 +91,31 @@ export const mobRank = (d: MobDef): MobRank => (d.boss ? 'boss' : d.rank ?? 'nor
 
 export const WEAPONS: Record<string, WeaponDef> = {
   sword: {
-    id: 'sword', name: 'Меч', type: 'slash', dmgMul: 1, aps: 1.15, shape: 'arc', arc: 140, range: 2.3,
+    id: 'sword', role: 'Универсал: обычный удар — только по цели, добивание — по кругу. С мечом в другой руке любое оружие получает бонус пары.', name: 'Меч', type: 'slash', dmgMul: 1, aps: 1.15, shape: 'arc', arc: 140, range: 2.3,
     anim: 'SwordAttack', model: { human: 'sword_human_knight', orc: 'sword_orc_warrior' }, icon: '🗡️', single: true,
   },
   axe: {
-    id: 'axe', name: 'Топор', type: 'chop', dmgMul: 1.25, aps: 0.95, shape: 'arc', arc: 160, range: 2.3,
+    id: 'axe', role: 'Тяжёлые рубящие удары широкой дугой — и против одного врага, и против нескольких.', name: 'Топор', type: 'chop', dmgMul: 1.25, aps: 0.95, shape: 'arc', arc: 160, range: 2.3,
     anim: 'AxeAttack', model: { human: 'axe', orc: 'axe_orc_grunt' }, icon: '🪓',
   },
   hammer: {
-    id: 'hammer', name: 'Молот', type: 'crush', dmgMul: 1.7, aps: 0.7, shape: 'circle', arc: 360, range: 2.1,
+    id: 'hammer', role: 'Медленный, бьёт всех вокруг и часто оглушает — против толпы.', name: 'Молот', type: 'crush', dmgMul: 1.7, aps: 0.7, shape: 'circle', arc: 360, range: 2.1,
     anim: 'AxeAttack', model: { human: 'hammer_human_paladin', orc: 'hammer_human_paladin' }, icon: '🔨', stun: 0.25,
   },
   dagger: {
-    id: 'dagger', name: 'Кинжалы', type: 'slash', dmgMul: 0.38, aps: 2.4, shape: 'arc', arc: 90, range: 1.9,
+    id: 'dagger', role: 'Очень быстрые удары по одной цели, урон по ней растёт с каждым ударом — против элиток и боссов.', name: 'Кинжалы', type: 'slash', dmgMul: 0.38, aps: 2.4, shape: 'arc', arc: 90, range: 1.9,
     anim: 'SwordAttack', model: { human: 'dagger', orc: 'dagger' }, icon: '🔪', single: true,
     stack: { add: 0.06, max: 10, decay: 2.5 },
     swing: ['slashRL', 'slashLR'],
   },
   reaper: {
-    id: 'reaper', name: 'Жнец', type: 'slash', dmgMul: 1.1, aps: 0.8, shape: 'arc', arc: 200, range: 2.6,
+    id: 'reaper', role: 'Стягивает толпу перед собой и режет её разом: чем больше врагов, тем сильнее удар.', name: 'Жнец', type: 'slash', dmgMul: 1.1, aps: 0.8, shape: 'arc', arc: 200, range: 2.6,
     anim: 'AxeAttack', model: { human: 'reaper', orc: 'reaper' }, icon: '🌙',
     pull: { radius: 5, ahead: 1.5, force: 0.85, perEnemy: 0.15, max: 2 },
     swing: ['reap'],
   },
   shield: {
-    id: 'shield', name: 'Щит', type: 'crush', dmgMul: 0.5, aps: 0.8, shape: 'arc', arc: 120, range: 1.8,
+    id: 'shield', role: 'Защита: снижает входящий урон и отвечает контратаками оружием в другой руке.', name: 'Щит', type: 'crush', dmgMul: 0.5, aps: 0.8, shape: 'arc', arc: 120, range: 1.8,
     anim: 'AxeAttack', model: { human: 'shield', orc: 'shield' }, icon: '🛡️',
     guard: { reduce: 0.15, counter: { normal: 0.2, elite: 0.3, mini: 0.4, boss: 0.5 }, cd: 0.4 },
     swing: ['bash'],
