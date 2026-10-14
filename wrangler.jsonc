@@ -6,5 +6,8 @@
   "compatibility_date": "2026-06-01",
   "assets": {
     "directory": "./dist"
-  }
+  },
+  // Превью веток (`wrangler preview` в Workers Builds) требует этот блок, даже пустой.
+  // Ассеты берутся из верхнего уровня, отдельных настроек превью игре не нужно.
+  "previews": {}
 }
