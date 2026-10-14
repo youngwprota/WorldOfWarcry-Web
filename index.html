@@ -2,54 +2,8 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
-  <meta name="theme-color" content="#0b2a55" />
-  <!-- the page is dark itself: keeps Chrome auto dark mode from recolouring the HUD (washed-out icons on Android) -->
-  <meta name="color-scheme" content="dark" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>WarCry — веб-прототип</title>
-  <link rel="stylesheet" href="/src/style.css" />
-  <link rel="stylesheet" href="/src/skin.css" />
 </head>
-<body>
-  <div id="app">
-    <div id="labels"></div>
-    <div id="hud" class="hidden">
-      <div class="top-left">
-        <button id="btn-settings" class="ui-block round-btn" aria-label="Настройки"></button>
-        <div class="tl-info">
-        <div id="hp" class="bar"><div class="fill"></div><div class="shield"></div><span></span></div>
-        <div id="stats"></div>
-        <div id="buffs"></div>
-        <div id="gains"></div>
-        </div>
-      </div>
-      <div class="top-right">
-        <div id="mm-box">
-          <canvas id="minimap" class="ui-block" width="220" height="220" title="Карта (M)"></canvas>
-          <div id="zone-foes"></div>
-        </div>
-        <div id="zone-label"></div>
-        <div id="goal"></div>
-      </div>
-      <button id="btn-bag" class="ui-block round-btn nav bag" aria-label="Инвентарь (I)"><span>Инвентарь</span></button>
-      <button id="btn-gacha" class="ui-block round-btn nav forge" aria-label="Горнило судьбы (G)"><span>Горнило</span></button>
-      <div id="bosses"></div>
-      <div id="bossbar" class="hidden"><div class="name"></div><div class="binfo"></div><div class="bar"><div class="fill"></div><span></span></div></div>
-      <div id="zone-banner"></div>
-      <div id="edge-arrow">➤</div>
-      <div id="equipbar" class="ui-block"><div id="armor-l" class="armorside"></div><div id="wcol"><div id="combo"></div><div id="weapons"></div></div><div id="armor-r" class="armorside"></div></div>
-      <div id="hint"></div>
-    </div>
-    <div id="modal"></div>
-    <div id="flash"></div>
-    <div id="loading">
-      <div class="logo">WarCry</div>
-      <div class="sub">веб-прототип</div>
-      <div class="bar"><div class="fill"></div></div>
-      <div class="pct">Загрузка моделей…</div>
-    </div>
-  </div>
-  <div id="rotate"><div class="ic">📱</div><div>Поверни телефон</div><small>Игра работает в вертикальном режиме</small></div>
-  <script type="module" src="/src/main.ts"></script>
-</body>
+<body style="margin:0;background:#000;height:100vh"></body>
 </html>
