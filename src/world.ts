@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, GLOVES_BANDITS, GLOVES_MURLOCS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
+import { FACTIONS, FOREST_TREES, GLOVES_BANDITS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
   ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_MINI, GATE, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
-  borderAway, borderRoom, pathAt, pathDist, progressAt, ridgeAway, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
+  borderAway, borderRoom, pathAt, pathDist, progressAt, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
 } from './island';
 import type { Gate } from './island';
 import {
@@ -225,6 +225,25 @@ export class World {
   }
 
   /**
+   * Like place(), at the nearest spot round (x, z) that is walkable with `pad` room, in the same location and clear of the trail
+   * (rings out to 24 m); skipped when there is none, so a building never lands on a road or in the next location.
+   */
+  private placeInside(name: string, x: number, z: number, scale: number, rot: number, pad = 3, collide: number | 'auto' = 'auto') {
+    const zone = zoneIdAt(x, z);
+    const ok = (px: number, pz: number) => walkable(px, pz, pad) && zoneIdAt(px, pz) === zone && pathDist(px, pz) > PATH_W + pad;
+    for (let d = 0; d <= 24; d += 1.5) {
+      const n = d ? Math.ceil((d * Math.PI * 2) / 3) : 1;
+      for (let k = 0; k < n; k++) {
+        const a = (k / n) * Math.PI * 2;
+        const px = x + Math.sin(a) * d;
+        const pz = z + Math.cos(a) * d;
+        if (ok(px, pz)) return this.place(name, px, pz, scale, rot, collide);
+      }
+    }
+    return null;
+  }
+
+  /**
    * Instanced copies of a model (trees, rocks, poles). Items are split into 24 m tiles so each tile
    * has its own bounding sphere and off-screen tiles are frustum-culled.
    */
@@ -404,15 +423,13 @@ export class World {
       && !this.packCenters.some(([px, pz]) => Math.hypot(px - x, pz - z) < 6);
     ZOO.forEach((def, i) => {
       const side = -1;
-      const big = def.id === 'wild_dragon';
-      const offs = big ? [11, 13, 9] : [6, 8, 10];
       let c: { x: number; z: number } | null = null;
       search: for (const sd of [side, -side]) {
         for (const ds of [0, 3, 6, 9, 12, 15, 18]) {
           const p = pathAt(sGate + 3 + i * 3.5 + ds);
-          for (const off of offs) {
+          for (const off of [6, 8, 10]) {
             const q = { x: p.x + p.tz * sd * off, z: p.z - p.tx * sd * off };
-            if (ok(q.x, q.z, big ? 3.5 : 1.8)) { c = q; break search; }
+            if (ok(q.x, q.z, 1.8)) { c = q; break search; }
           }
         }
       }
@@ -515,47 +532,41 @@ export class World {
       ['human_house_mid', 15.5, -56.8], ['human_house_large', -20, -44.4], ['house_Lv2', 14, -26, Math.PI / 2], ['house_Lv1', 15.5, -8.5],
     ];
     const curves = [PATH, ...BRANCH_PATHS];
-    for (const [name, x0, z0, turn = 0] of kit) {
+    /** Nearest trail point (main trail and its branches). */
+    const nearest = (x: number, z: number) => {
       let best = Infinity;
-      let nx = x0;
-      let nz = z0;
+      let nx = x;
+      let nz = z;
       for (const c of curves) {
         for (let i = 0; i < c.x.length; i += 2) {
-          const d = (c.x[i] - x0) ** 2 + (c.z[i] - z0) ** 2;
+          const d = (c.x[i] - x) ** 2 + (c.z[i] - z) ** 2;
           if (d < best) { best = d; nx = c.x[i]; nz = c.z[i]; }
         }
       }
-      const d = Math.sqrt(best) || 1;
-      // keep 5 m off the trail, clear of the camp wall, then step off the coast / ridge border until there is room
-      let x = d < 5 ? nx + ((x0 - nx) / d) * 5 : x0;
-      let z = d < 5 ? nz + ((z0 - nz) / d) * 5 : z0;
-      const c = Math.hypot(x - ISLAND.campX, z - ISLAND.campZ) || 1;
-      if (c < ISLAND.campR + 4) {
-        x = ISLAND.campX + ((x - ISLAND.campX) / c) * (ISLAND.campR + 4);
-        z = ISLAND.campZ + ((z - ISLAND.campZ) / c) * (ISLAND.campR + 4);
+      return { nx, nz, d: Math.sqrt(best) };
+    };
+    // room to stand (off the pond and other obstacles), 6+ m off every trail (the house is ~4 m across), clear of the camp wall
+    const ok = (x: number, z: number) => this.free(x, z, 3) && nearest(x, z).d >= 6
+      && Math.hypot(x - ISLAND.campX, z - ISLAND.campZ) >= ISLAND.campR + 4;
+    for (const [name, x0, z0, turn = 0] of kit) {
+      // the nearest such spot round the map mark (rings out to 20 m); no room — no house
+      let spot: { x: number; z: number } | null = null;
+      search: for (let d = 0; d <= 20; d += 1) {
+        const n = d ? Math.ceil((d * Math.PI * 2) / 2) : 1;
+        for (let k = 0; k < n; k++) {
+          const a = (k / n) * Math.PI * 2;
+          if (ok(x0 + Math.sin(a) * d, z0 + Math.cos(a) * d)) { spot = { x: x0 + Math.sin(a) * d, z: z0 + Math.cos(a) * d }; break search; }
+        }
       }
-      for (let k = 0; k < 20 && !walkable(x, z, 3); k++) {
-        const n = outside(x, z) > -3 ? inland(x, z) : ridgeAway(x, z);
-        x += n.x * 0.5;
-        z += n.z * 0.5;
-      }
-      this.place(name, x, z, 0.5, Math.atan2(nx - x, nz - z) + turn);
-      this.packCenters.push([x, z]);
+      if (!spot) continue;
+      const { nx, nz } = nearest(spot.x, spot.z);
+      this.place(name, spot.x, spot.z, 0.5, Math.atan2(nx - spot.x, nz - spot.z) + turn);
+      this.packCenters.push([spot.x, spot.z]);
     }
   }
 
-  /** Three single murlocs beside the trail next to the gloves elite, two bandit pairs in the trees by it. */
+  /** Two bandit pairs in the trees by the gloves elite. */
   private glovesGuards() {
-    const s0 = progressAt(24, -84);
-    GLOVES_MURLOCS.forEach((d, i) => {
-      const p = pathAt(s0 + (i - 1) * 9);
-      // the side of the trail facing the elite
-      const side = Math.sign((GLOVES_AT[0] - p.x) * p.tz - (GLOVES_AT[1] - p.z) * p.tx) || 1;
-      const x = p.x + p.tz * side * (PATH_W + 2);
-      const z = p.z - p.tx * side * (PATH_W + 2);
-      this.packCenters.push([x, z]);
-      this.addSpawn(`forest:gloves:m${i}`, d, x, z, 'forest', 0.3, 0);
-    });
     const packs = [[14, -74], [27, -76]];
     GLOVES_BANDITS.forEach((d, i) => {
       const [px, pz] = packs[i >> 1];
@@ -582,7 +593,8 @@ export class World {
       [27, -5.5], [28, -9], [29.5, -3.5], [30.5, -7], [32, -10],
     ]) {
       const { x, z } = at(uv);
-      if (!ok(x, z)) continue;
+      // single trees, crowns apart (a solid clump looked messy)
+      if (!ok(x, z) || trees.some((t) => Math.hypot(t.x - x, t.z - z) < 6.5)) continue;
       trees.push({ x, z, s: 0.6 + r() * 0.3, r: r() * 6, tint: leaf(r) });
       this.obstacles.push({ x, z, r: 0.5 });
     }
@@ -617,8 +629,8 @@ export class World {
     this.glovesGuards();
     this.buildZoo();
 
-    // Lumber camp in the north-east of the forest
-    const L = { x: 28, z: -68 };
+    // Lumber camp in the east of the forest, outside the trail's north-east loop (every piece 5+ m off the trail)
+    const L = { x: 38, z: -58 };
     this.place('wood_pile_big', L.x - 1.5, L.z + 6.5, 0.5, 0.3);
     this.place('elf_log_pile', L.x - 2, L.z - 3, 0.5, 1.2);
     this.place('saw', L.x + 1.5, L.z - 6, 0.45, 0.4, 0.8);
@@ -736,7 +748,25 @@ export class World {
         this.obstacles.push({ x, z, r: 1.1 * s });
       }
     }
-    this.scatter('elf_tree', trees);
+    // Some of the trees become static units (FOREST_TREES): by the trail where the hero passes, well apart;
+    // a looser second pass fills the list when the strict one finds too few.
+    const statics: Inst[] = [];
+    // (pathDist reads 99 once the trail is out of its grid cells: 99 = "anywhere it still sees the trail")
+    for (const [near, gap] of [[12, 12], [99, 9], [99, 6]]) {
+      for (const t of trees) {
+        if (statics.length >= FOREST_TREES.length) break;
+        const d = pathDist(t.x, t.z);
+        if (statics.includes(t) || d <= PATH_W + 2 || d >= near || statics.some((o) => Math.hypot(o.x - t.x, o.z - t.z) < gap)) continue;
+        statics.push(t);
+      }
+    }
+    statics.forEach((t, i) => {
+      this.addSpawn(`forest:tree:${i}`, FOREST_TREES[i], t.x, t.z, 'forest', 0, t.r ?? 0);
+      // the unit itself stands in the way while it lives; a felled tree leaves no invisible trunk behind
+      const k = this.obstacles.findIndex((o) => o.x === t.x && o.z === t.z);
+      if (k >= 0) this.obstacles.splice(k, 1);
+    });
+    this.scatter('elf_tree', trees.filter((t) => !statics.includes(t)));
     this.scatter('elf_foliage_small', tall);
     this.scatter('elf_foliage_mid', bushes);
     this.scatter('orc_stone_big', rocks.map((k) => ({ ...k, s: k.s * 2.6 })));
@@ -848,25 +878,9 @@ export class World {
 
     // Mausoleums, crypts and ruins, by angle (deg) and radius in the cemetery sector (slid inside the shore if needed)
     const pol = (deg: number, d: number) => ({ x: ISLAND.cx + Math.sin((deg * Math.PI) / 180) * d, z: ISLAND.cz + Math.cos((deg * Math.PI) / 180) * d });
-    // A spot off the island slides towards the nearest point of the cemetery trail (not the island centre: that
-    // would carry it over the ridge into the forest) and stops at the first cemetery spot with room, clear of the trail.
     const ins = (name: string, deg: number, d: number, scale: number, rot: number, pad = 3, collide: number | 'auto' = 'auto') => {
-      let { x, z } = pol(deg, d);
-      let q = pathAt(s0);
-      for (let s = s0; s <= s1; s += 1) {
-        const t = pathAt(s);
-        if ((t.x - x) ** 2 + (t.z - z) ** 2 < (q.x - x) ** 2 + (q.z - z) ** 2) q = t;
-      }
-      for (let i = 0; i < 80; i++) {
-        if (zoneIdAt(x, z) === 'cemetery' && walkable(x, z, pad) && pathDist(x, z) > 3) {
-          this.place(name, x, z, scale, rot, collide);
-          return;
-        }
-        const l = Math.hypot(q.x - x, q.z - z);
-        if (l < 1) return;
-        x += (q.x - x) / l;
-        z += (q.z - z) / l;
-      }
+      const p = pol(deg, d);
+      this.placeInside(name, p.x, p.z, scale, rot, pad, collide);
     };
     ins('undead_house_tower', 65, 85, 0.5, 0.4);
     ins('undead_tower_small', 100, 64, 0.55, -Math.PI / 2);

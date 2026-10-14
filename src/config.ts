@@ -263,8 +263,6 @@ export interface MobDef {
   speed: number;
   aggro: number;
   scale: number;
-  /** Damage type of its hits (the location's, see ZONE_FOES); the hero's armour resists it. */
-  attack: DamageType;
   resist: Partial<Record<DamageType, ResistTier>>;
   /** HP fraction per second once nobody has hit the mob for MOB_REGEN_DELAY s. */
   regen: number;
@@ -274,6 +272,11 @@ export interface MobDef {
   dodge?: number;
   /** GLB animal (Creature): `model` names a .glb with its own rig and clips, weapon is always null. */
   creature?: boolean;
+  /**
+   * Static unit (src/staticbody.ts): `model` names a level model (a tree, a crate…); it stands on its spawn
+   * point, never moves or attacks, and is hit, resists, drops and respawns like any mob.
+   */
+  static?: boolean;
   /** Recolour: body textures are swapped by the table SKINS[skin] (src/assets.ts). */
   skin?: string;
   /** Speed (m/s) the hit shoves the hero back with. */
@@ -338,25 +341,40 @@ const BOSS_BASE = {
 export const MOB_REGEN_DELAY = 5;
 
 /**
- * Each location's enemies share one profile: the damage type they hit with (red icon over the minimap),
- * what they are weak to (green icon) and what they resist. Mobs take it via `foes(zone)`.
+ * Each location's enemies share one profile: what they are weak to (green icon over the minimap) and what
+ * they resist. Mobs take it via `foes(zone)`. The starting forest has neither: every blow lands as it is.
  */
-export interface ZoneFoes { attack: DamageType; weak: DamageType[]; resist?: DamageType[] }
+export interface ZoneFoes { weak: DamageType[]; resist?: DamageType[] }
 export const ZONE_FOES: Partial<Record<ZoneId, ZoneFoes>> = {
-  forest: { attack: 'slash', weak: ['slash'] },
-  cemetery: { attack: 'slash', weak: ['crush'], resist: ['slash', 'chop'] },
-  peaks: { attack: 'slash', weak: ['crush'] },
-  hills: { attack: 'chop', weak: ['slash'] },
-  grove: { attack: 'slash', weak: ['crush'] },
-  swamp: { attack: 'crush', weak: ['slash'] },
-  dunes: { attack: 'chop', weak: ['crush'] },
+  forest: { weak: [] },
+  cemetery: { weak: ['crush'], resist: ['slash', 'chop'] },
+  peaks: { weak: ['crush'] },
+  hills: { weak: ['slash'] },
+  grove: { weak: ['crush'] },
+  swamp: { weak: ['slash'] },
+  dunes: { weak: ['crush'] },
 };
-function foes(zone: ZoneId): Pick<MobDef, 'attack' | 'resist'> {
+function foes(zone: ZoneId): Pick<MobDef, 'resist'> {
   const f = ZONE_FOES[zone]!;
   const resist: MobDef['resist'] = {};
   for (const t of f.resist ?? []) resist[t] = 'resist';
   for (const t of f.weak) resist[t] = 'weak';
-  return { attack: f.attack, resist };
+  return { resist };
+}
+
+/** Static trees of the forest (MobDef.static), 1K–4K HP, each with its own loot. */
+function staticTrees(): Record<string, MobDef> {
+  const tree = (id: string, name: string, hp: number, scale: number, loot: Pick<MobDef, 'reward' | 'drop'>): MobDef => ({
+    id, name, static: true, model: { human: ['elf_tree', null], orc: ['elf_tree', null] },
+    anim: 'SwordAttack', hp, dmg: 0, aps: 0, range: 0, speed: 0, aggro: 0, regen: 0, scale,
+    ...foes('forest'), respawn: 300, ...loot,
+  });
+  return {
+    tree_young: tree('tree_young', 'Молодое дерево', 1000, 0.6, { reward: { hp: 3 } }),
+    tree_birch: tree('tree_birch', 'Берёза', 2000, 0.7, { reward: { power: 2 } }),
+    tree_spring: tree('tree_spring', 'Родниковое дерево', 3000, 0.75, { reward: { regen: 1 } }),
+    tree_windy: tree('tree_windy', 'Ветреный дуб', 4000, 0.8, { reward: { speed: 3 } }),
+  };
 }
 
 /**
@@ -399,7 +417,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['orc_peon', 'sword_orc_warrior'], orc: ['peasant', 'sword_soldier'] },
     anim: 'SwordAttack', hp: 1800, dmg: 21, aps: 0.6, range: 1.8, speed: 3.0, aggro: 5.2, regen: 0.03, scale: 1.45,
     ...foes('forest'), reward: { regen: 1 }, respawn: 300,
-    drop: { kind: 'armor', def: 'guard_chest', rarity: 1 },
+    drop: { kind: 'armor', def: 'guard_chest', rarity: 0 },
   },
   // Reinforcements of the bandit chief: weak, no drops (they leave only a few orbs).
   bandit_runner: {
@@ -479,6 +497,8 @@ export const MOBS: Record<string, MobDef> = {
     anim: 'AxeAttack', hp: 520, dmg: 10, aps: 0.85, range: 1.6, speed: 1.9, aggro: 4.5, regen: 0.03, scale: 1.5,
     ...foes('cemetery'), reward: { hp: 1 }, respawn: 50,
   },
+  // ---------- static units of the forest: trees that only stand and drop their loot ----------
+  ...staticTrees(),
   // WoW creatures in the game palette, shown in the "zoo" by the camp gate (ZOO, src/world.ts); weak on purpose
   wild_bear: {
     id: 'wild_bear', name: 'Медведь', creature: true, push: 4,
@@ -666,7 +686,7 @@ export type OrbReward = { [K in OrbKind]: Record<K, number> & Partial<Record<Exc
 export const ORBS: Record<OrbKind, { color: number; css: string; label: string; value: number; unit: string }> = {
   power: { color: 0xff3b3b, css: '#ff4d4d', label: 'Урон', value: 1, unit: '' },
   hp: { color: 0x39e05a, css: '#4cff6a', label: 'Здоровье', value: 2, unit: '' },
-  regen: { color: 0x3cc8ff, css: '#4fd2ff', label: 'Реген', value: 1, unit: ' HP/с' },
+  regen: { color: 0x3cc8ff, css: '#4fd2ff', label: 'Реген', value: 1, unit: ' хп/с' },
   speed: { color: 0xffd23c, css: '#ffd84d', label: 'Скорость', value: 1, unit: '' },
 };
 export const fmtOrb = (k: OrbKind, n = 1) => `+${Math.round(ORBS[k].value * n)}`;
@@ -704,6 +724,8 @@ export const HERO = {
   baseSpeed: 4,
   /** In the camp HP comes back fast: % of max HP per second (on top of the normal regen). */
   campRegen: 10,
+  /** Share of max HP the hero is back with in the camp after a death (no death window). */
+  respawnHp: 0.1,
   radius: 0.45, acquireExtra: 0.4,
 };
 
@@ -826,8 +848,8 @@ const spawner = (id: string, charges?: number[]): SpawnerDef => ({ unit: 'mob', 
 /** Mob spawners by location, placed along the trail in list order (first = nearest the location's entrance). */
 export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
   forest: ([
-    'boar', 'bandit_thug', 'murloc', 'bandit_thug', 'boar', 'bandit_thug', 'bandit_fighter', 'bandit_veteran',
-    'bandit_thug', 'bandit_fighter', 'boar', 'bandit_warlord', 'bandit_thug', 'murloc', 'bandit_fighter', 'bandit_brute',
+    'boar', 'bandit_thug', 'bandit_thug', 'boar', 'bandit_thug', 'bandit_fighter', 'bandit_veteran',
+    'bandit_thug', 'bandit_fighter', 'boar', 'bandit_warlord', 'bandit_thug', 'bandit_fighter', 'bandit_brute',
     'bandit_thug', 'boar', 'bandit_fighter', 'bandit_fighter', 'bandit_lumberjack',
   ]).map((id) => spawner(id, FOREST_CHARGES)),
   // one endless charge with the mob's own respawn time
@@ -853,18 +875,25 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
 export const MINI_SPAWNER = spawner('bandit_warlord');
 /** Zones whose mini-bosses are a local variant instead of «Свирепый вожак». */
 export const MINI_SPAWNER_OF: Partial<Record<ZoneId, SpawnerDef>> = { hills: spawner('tauren_warlord') };
-/** Round the gloves elite (world.glovesGuards): single murlocs by the trail, two bandit pairs in the trees. */
-export const GLOVES_MURLOCS = [0, 1, 2].map(() => spawner('murloc', FOREST_CHARGES));
+/** Round the gloves elite (world.glovesGuards): two bandit pairs in the trees. */
 export const GLOVES_BANDITS = ['bandit_thug', 'bandit_fighter', 'bandit_fighter', 'bandit_thug'].map((id) => spawner(id, FOREST_CHARGES));
+/** Static trees of the forest (world.buildForest turns some of its trees into them), charges like the forest mobs. */
+export const FOREST_TREES = [
+  'tree_young', 'tree_birch', 'tree_young', 'tree_spring', 'tree_windy',
+  'tree_young', 'tree_birch', 'tree_spring', 'tree_windy',
+].map((id) => spawner(id, FOREST_CHARGES));
 /** Bandits in the wood between the settlement and the fort (world.campToFort). */
 export const MID_SPAWNERS = ['bandit_thug', 'bandit_fighter', 'bandit_thug', 'bandit_fighter', 'bandit_thug'].map((id) => spawner(id, FOREST_CHARGES));
 
-/** "Zoo" just outside the camp gate (src/world.ts buildZoo): the WoW creatures, one endless charge each. */
-export const ZOO: SpawnerDef[] = ['wild_bear', 'wild_direwolf', 'wild_dragon', 'wild_lion'].map((id) => spawner(id));
+/**
+ * "Zoo" just outside the camp gate (src/world.ts buildZoo): the WoW creatures, one endless charge each.
+ * Empty for now: the starting location has no animals (wild_bear, wild_direwolf… are still in MOBS).
+ */
+export const ZOO: SpawnerDef[] = [];
 
 /**
  * Breakable prop spawners (same SpawnerDef, unit 'prop'), spread over an area by group:
- * camp — supply crates inside the settlement; forest — a few crates right by the forest trail;
+ * camp, forest — none (the starting location has no breakables besides the fort tower);
  * cemetery — graves beside the cemetery trail; cemeteryField — graves in the cemetery's far end.
  */
 /** n prop spawners cycling through the given kinds. */
@@ -872,8 +901,8 @@ const props = (kinds: string[], n: number, charges?: number[]): SpawnerDef[] =>
   Array.from({ length: n }, (_, i) => ({ unit: 'prop', id: kinds[i % kinds.length], charges }));
 const GRAVES = ['tomb1', 'tomb2', 'tomb3', 'tomb4', 'tomb1', 'tomb2', 'coffin'];
 export const PROP_SPAWNERS: Record<'camp' | 'forest' | 'cemetery' | 'cemeteryField', SpawnerDef[]> = {
-  camp: props(['box', 'box_large', 'box'], 8, FOREST_CHARGES),
-  forest: props(['box', 'box_large', 'box'], 6, FOREST_CHARGES),
+  camp: [],
+  forest: [],
   cemetery: props(GRAVES, 18),
   cemeteryField: props(GRAVES, 6),
 };

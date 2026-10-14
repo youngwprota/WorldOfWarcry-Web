@@ -1,9 +1,8 @@
 // Full-screen world map: opened by tapping the minimap; drag to pan, pinch / wheel / buttons to zoom.
-import { ZONES } from './config';
 import { sfx } from './audio';
 import { drawMarks } from './ui';
 import type { Game } from './game';
-import { MAP_BOX, ZONE_LABEL } from './island';
+import { MAP_BOX } from './island';
 
 /** The minimap itself expands into a big pannable / zoomable panel; the game keeps running. */
 export class MapView {
@@ -18,7 +17,6 @@ export class MapView {
   private pinch = 0;
   private info!: ReturnType<Game['mapInfo']>;
   private raf = 0;
-  private t0 = performance.now();
   isOpen = false;
 
   constructor(private game: Game) {
@@ -146,7 +144,6 @@ export class MapView {
     const s = this.scale;
     const X = (x: number) => w / 2 + (x - this.cx) * s;
     const Y = (z: number) => h / 2 + (z - this.cz) * s;
-    const t = (performance.now() - this.t0) / 1000;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
     g.save();
@@ -171,18 +168,6 @@ export class MapView {
       g.fill();
     }
     world.fog.drawOnMap(g, X, Y, s);
-    // zone names
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.font = `900 ${Math.max(12, Math.min(22, s * 2.4))}px sans-serif`;
-    for (const z of ZONES) {
-      const [lx, lz] = ZONE_LABEL[z.id];
-      g.fillStyle = '#ffffffcc';
-      g.strokeStyle = '#000a';
-      g.lineWidth = 4;
-      g.strokeText(z.name, X(lx), Y(lz));
-      g.fillText(z.name, X(lx), Y(lz));
-    }
     // mobs and breakable props (one unit type); bosses, micro-bosses and elites get their own marks
     g.fillStyle = '#ff4a4a';
     for (const m of this.info.units) g.fillRect(X(m.x) - 2.5, Y(m.z) - 2.5, 5, 5);
@@ -200,28 +185,9 @@ export class MapView {
       g.strokeText(text, X(b.x), Y(b.z) + dy);
       g.fillText(text, X(b.x), Y(b.z) + dy);
     }
-    // goal: pulsing ring + dashed line from the hero
+    // hero arrow (no hint of where to go: the player finds the way himself)
     const hx = X(this.info.hero.x);
     const hy = Y(this.info.hero.z);
-    if (this.info.goal.x !== null) {
-      const gx = X(this.info.goal.x);
-      const gy = Y(this.info.goal.z!);
-      g.setLineDash([6, 6]);
-      g.strokeStyle = '#ffb238cc';
-      g.lineWidth = 2;
-      g.beginPath();
-      g.moveTo(hx, hy);
-      g.lineTo(gx, gy);
-      g.stroke();
-      g.setLineDash([]);
-      const pulse = 14 + Math.sin(t * 4) * 4;
-      g.strokeStyle = '#ffb238';
-      g.lineWidth = 3;
-      g.beginPath();
-      g.arc(gx, gy, pulse, 0, 7);
-      g.stroke();
-    }
-    // hero arrow
     g.save();
     g.translate(hx, hy);
     g.rotate(-this.info.hero.facing + Math.PI);

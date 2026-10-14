@@ -34,11 +34,14 @@ html, body { background: radial-gradient(circle at 50% 30%, #6e4527, #1e1008); }
 .xbtn::after { content: ''; position: absolute; left: 50%; top: 44%; width: 30px; height: 32px; transform: translate(-50%, -50%); background: url('/assets/ui/i-close.png') center / contain no-repeat; }
 .card-head .xbtn::after { width: 26px; height: 28px; }
 
-/* round HUD buttons: dark circle for settings, orange hexagon for the bag */
+/* round HUD buttons: dark circle for settings */
 .round-btn, .round-btn.bag { border: 0; box-shadow: none; border-radius: 0; background: url('/assets/ui/t-round.png') center / contain no-repeat; }
 .round-btn .svgi { width: 60%; height: 60%; margin-top: -6%; }
-#btn-bag { width: 84px; height: 100px; background-image: url('/assets/ui/t-hex.png'); }
-#btn-bag .svgi { width: 64px; height: 64px; margin-top: -8px; }
+/* the bag and the forge: just their icons, no plate, both the same size */
+#btn-bag, #btn-gacha { width: 63px; height: 63px; background: none; }
+/* the forge right above the bag (centred at 50%), a gap for the label between them */
+#btn-gacha { top: calc(50% - 31.5px - 63px - 14px); }
+#btn-bag .svgi, #btn-gacha .svgi { width: 54px; height: 54px; margin-top: -8px; filter: drop-shadow(0 3px 0 var(--ink)); }
 .round-btn.nav span { bottom: 2px; left: 50%; right: auto; transform: translateX(-50%); font-size: 14px; }
 .round-btn:active { transform: translateY(2px); }
 #btn-bag:active { transform: translateY(calc(-50% + 2px)); }
@@ -210,8 +213,7 @@ html, body { background: radial-gradient(circle at 50% 30%, #6e4527, #1e1008); }
 
 /* ---------- HUD ---------- */
 #equipbar { background: none; }
-.pill, #goal, #buffs div, .bw-time, #pro-quest { background: #3b2414e6; border: 3px solid var(--ink); box-shadow: inset 0 0 0 2px #ffffff14; }
-#goal, #pro-quest small { color: var(--cream); }
+.pill, #buffs div, .bw-time, #pro-quest { background: #3b2414e6; border: 3px solid var(--ink); box-shadow: inset 0 0 0 2px #ffffff14; }
 #minimap, #bigmap { border: 4px solid var(--ink); box-shadow: 0 0 0 5px #c48a52, 0 0 0 6px #e6b57e, 0 0 0 10px var(--ink), 0 6px 0 10px #0005; }
 #zone-foes .foe { border-color: var(--ink); }
 #combo i { border-color: var(--ink); background: #3b2414cc; }

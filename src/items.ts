@@ -1,7 +1,7 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
 import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type StatId } from './config';
 import { DAMAGE_TYPE_ICON, icon } from './icons';
-import { art } from './art';
+import { art, hasPng } from './art';
 
 export type ItemKind = 'weapon' | 'armor';
 export interface Item {
@@ -24,7 +24,7 @@ export const ARMOR_SLOTS: { id: ArmorSlot; name: string; icon: string }[] = [
   { id: 'head', name: 'Шлем', icon: 'head' },
   { id: 'chest', name: 'Нагрудник', icon: 'chest' },
   { id: 'arms', name: 'Перчатки', icon: 'arms' },
-  { id: 'legs', name: 'Поножи', icon: 'legs' },
+  { id: 'legs', name: 'Сапоги', icon: 'legs' },
   { id: 'ring', name: 'Кольцо', icon: 'ring' },
   { id: 'amulet', name: 'Амулет', icon: 'amulet' },
 ];
@@ -41,7 +41,7 @@ export const PART_PREFIXES: Record<VisualPart, string[]> = {
 };
 
 export const BONUS_NAME: Record<BonusStat, string> = {
-  hp: 'Здоровье', regen: 'Реген HP/с', power: 'Урон', speed: 'Скорость',
+  hp: 'Здоровье', regen: 'Реген, хп/с', power: 'Урон', speed: 'Скорость',
   defense: 'Защита', dodge: 'Уклонение', crit: 'Шанс крита', critDmg: 'Урон крита',
 };
 
@@ -67,7 +67,7 @@ const PIECES: { slot: VisualPart; noun: string; defense: number; bonus: { stat: 
   { slot: 'head', noun: 'Шлем', defense: 5, bonus: { stat: 'regen', value: 1 } },
   { slot: 'chest', noun: 'Нагрудник', defense: 9, bonus: { stat: 'hp', value: 18 } },
   { slot: 'arms', noun: 'Перчатки', defense: 3, bonus: { stat: 'power', value: 4 } },
-  { slot: 'legs', noun: 'Поножи', defense: 6, bonus: { stat: 'speed', value: 3 } },
+  { slot: 'legs', noun: 'Сапоги', defense: 6, bonus: { stat: 'speed', value: 3 } },
 ];
 
 export const ARMOR: Record<string, ArmorDef> = {};
@@ -139,7 +139,11 @@ export function itemIcon(it: Item, size = 24) {
 
 /** Butcher-style item cell: rarity background, damage-type badge, level, sharpening. Empty cells show a faded slot icon. */
 export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = '', extra = '', cls = '') {
-  if (!it) return `<button class="cell empty ${cls}" ${attrs}>${placeholder ? icon(placeholder, '#ffffff55', 30, 'ic') : ''}${extra}</button>`;
+  if (!it) {
+    // an empty slot shows the slot's own icon, faded (the game PNG when there is one)
+    const ph = !placeholder ? '' : hasPng(placeholder) ? art(placeholder, 30, 'ic ph') : icon(placeholder, '#ffffff55', 30, 'ic');
+    return `<button class="cell empty ${cls}" ${attrs}>${ph}${extra}</button>`;
+  }
   const badge = it.kind === 'weapon' ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#4a2a12', 12)}</span>` : '';
   return `<button class="cell r${it.rarity} ${cls}" ${attrs}>${art(itemIconId(it), 34, 'ic')}${badge}` +
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
