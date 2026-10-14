@@ -4,7 +4,7 @@ import { Trail } from './swing';
 import { swordPair, type Pair } from './offhand';
 import { Creature } from './creature';
 import {
-  COMBOS, DUAL, FACTIONS, TRAIL_COLOR, GACHA, LEFT_SWING, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  COMBOS, DUAL, FACTIONS, TRAIL_COLOR, GACHA, HAND_SWING, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
   mobRank, type DamageType, type ResistTier, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -671,14 +671,15 @@ export class Game {
     // up to 1 m further for facing, and swinging there was a whiff into thin air.
     const t = this.target;
     const inReach = !!t && this.inStrike(t, w.range);
-    if (inReach && h.atkCd <= 0) {
+    if (inReach && h.atkCd <= 0 && h.impact < 0 && this.handFree(h)) {
       const chained = !!combo && h.lastSwingHit && this.time - h.lastSwing <= period + window;
       h.combo = chained ? h.combo + 1 : combo ? 1 : 0;
       h.finisher = !!combo && h.combo >= combo.hits;
       h.lastSwing = this.time;
       const impactAt = Math.min(0.42, period * 0.4);
       h.impactAt = impactAt;
-      const kinds = w.swing ?? (h.i === 1 ? LEFT_SWING[w.anim] : null);
+      // two hands: both swing procedurally (a full-body clip of one hand fights the other hand's swing)
+      const kinds = w.swing ?? (h.i === 1 || this.dual ? HAND_SWING[w.anim] : null);
       // the series picks the polearm's swing; other weapons just alternate theirs
       h.swings++;
       if (kinds) this.hero.swing(kinds[(combo ? h.combo - 1 : h.swings) % kinds.length], h.i, period, impactAt);
@@ -690,6 +691,16 @@ export class Game {
       h.impact -= dt;
       if (h.impact < 0) this.heroStrike(h);
     }
+  }
+
+  /** Two hands take turns (DUAL): not right after the other hand's start, and the one that waited longer goes first. */
+  private handFree(h: Hand) {
+    if (!this.dual) return true;
+    const o = this.hands[1 - h.i];
+    if (this.time - o.lastSwing < DUAL.gap) return false;
+    const ow = WEAPONS[this.save.weapons[o.i]!.def];
+    const oReady = o.atkCd <= 0 && o.impact < 0 && !!this.target && this.inStrike(this.target, ow.range);
+    return !(oReady && o.lastSwing < h.lastSwing);
   }
 
   private damageFor(it: Item, resist: MobDef['resist'], mult = 1) {
@@ -1402,7 +1413,7 @@ export class Game {
     for (const h of this.hands) {
       const it = this.save.weapons[h.i];
       Object.assign(h, newHand(h.i));
-      if (h.i === 1 && it && this.dual && this.pair?.kind !== 'axe') h.atkCd = 0.5 / WEAPONS[it.def].aps;
+      if (h.i === 1 && it && this.dual) h.atkCd = 0.5 / WEAPONS[it.def].aps;
     }
   }
 

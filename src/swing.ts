@@ -53,6 +53,12 @@ export class Swinger {
   /** Call after the mixer update: the clips have just rewritten the bones' local rotations. */
   apply(dt: number) {
     let yaw = 0, lean = 0;
+    // the torso follows only the latest swing: two hands twisting it at once made it jerk back and forth
+    let lead = -1, leadT = Infinity;
+    for (let h = 0; h < 2; h++) {
+      const a = this.hands[h];
+      if (a && a.t + dt < a.dur && a.t < leadT) { lead = h; leadT = a.t; }
+    }
     for (let h = 0; h < 2; h++) {
       const a = this.hands[h];
       if (!a) continue;
@@ -61,8 +67,7 @@ export class Swinger {
       const phase = a.t < a.impact ? a.t / a.impact : 1 + (a.t - a.impact) / (a.dur - a.impact);
       sample(KEYS[a.kind], phase, pose);
       const m = h ? -1 : 1; // the left hand mirrors the twist and the sweep
-      yaw += pose[0] * m;
-      lean += pose[1];
+      if (h === lead) { yaw = pose[0] * m; lean = pose[1]; }
       const arm = this.arms[h];
       if (arm) {
         // fwd: hanging (−Y) towards +Z is a negative turn about X; out: right arm to −X is negative about Z

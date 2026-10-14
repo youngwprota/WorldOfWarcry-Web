@@ -21,7 +21,7 @@ export function pairText(def: string): string | null {
   const P = SWORD_PAIRS;
   switch (def) {
     case 'sword': return 'Меч в паре с топором или молотом даёт бонус пары — смотри подсказку того оружия.';
-    case 'axe': return `Руки бьют вместе, меч дополнительно отрывает <b>${pct(P.axe.pct)}</b> текущего HP врага (элиткам и боссам — ${pct(P.axe.boss)}).`;
+    case 'axe': return `Удар мечом дополнительно отрывает <b>${pct(P.axe.pct)}</b> текущего HP врага (элиткам и боссам — ${pct(P.axe.boss)}).`;
     case 'hammer': return `Молот перестаёт отбрасывать врагов и бьёт сильнее к центру удара — до <b>+${pct(P.hammer.center)}</b>.`;
     default: return null;
   }

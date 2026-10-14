@@ -7,8 +7,8 @@ export type ResistTier = 'weak' | 'normal' | 'resist' | 'immune';
 export type FactionId = 'human' | 'orc';
 export type ZoneId = 'forest' | 'cemetery' | 'peaks' | 'swamp' | 'grove' | 'dunes' | 'hills';
 export type AttackAnim = 'SwordAttack' | 'AxeAttack';
-/** The left hand has no clips: its swings by the right-hand clip the weapon uses. */
-export const LEFT_SWING: Record<AttackAnim, SwingKind[]> = { SwordAttack: ['slashLR', 'slashRL'], AxeAttack: ['overhead'] };
+/** Procedural swings by the clip the weapon uses: the left hand (no clips) and both hands when dual-wielding. */
+export const HAND_SWING: Record<AttackAnim, SwingKind[]> = { SwordAttack: ['slashLR', 'slashRL'], AxeAttack: ['overhead'] };
 /**
  * Hit markers: seconds into each attack clip at natural speed where the blow connects. Mob damage lands on this
  * frame if the hero is still in reach. Humanoid FBX clips by name, GLB creatures as `<model>:attack`.
@@ -105,15 +105,18 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
 };
 
-/** Two weapons at once: each hand hits for `mul` of its damage (both hands ≈ ×1.2 of one). */
-export const DUAL = { mul: 0.6 };
+/**
+ * Two weapons at once: each hand hits for `mul` of its damage (both hands ≈ ×1.2 of one). The hands take turns:
+ * one never starts within `gap` s of the other's start; when both are ready, the one that waited longer goes.
+ */
+export const DUAL = { mul: 0.6, gap: 0.3 };
 
 /**
  * A sword in one hand and weapon X in the other: the pair bonus (src/offhand.ts). The sword itself swings plainly
  * unless noted. Numbers are tuned by the balance bench (docs/features/new-weapons/handoff.md).
  */
 export const SWORD_PAIRS = {
-  /** Sword hits also cut `pct` of the mob's current HP (`boss` for elites, minis and bosses); hands swing together. */
+  /** Sword hits also cut `pct` of the mob's current HP (`boss` for elites, minis and bosses). */
   axe: { pct: 0.04, boss: 0.01 },
   /** Hammer: no knockback, damage × (1 + `center` × closeness to the centre of the blow). */
   hammer: { center: 0.6 },
