@@ -108,8 +108,9 @@ export const WEAPONS: Record<string, WeaponDef> = {
 /**
  * Two weapons at once: each hand hits for `mul` of its damage (both hands ≈ ×1.2 of one). The hands take turns:
  * one never starts within `gap` s of the other's start; when both are ready, the one that waited longer goes.
+ * `torso`: share of a swing's torso twist (bend: its square) with two weapons, so the body does not hunch over.
  */
-export const DUAL = { mul: 0.6, gap: 0.3 };
+export const DUAL = { mul: 0.6, gap: 0.3, torso: 0.55 };
 
 /**
  * A sword in one hand and weapon X in the other: the pair bonus (src/offhand.ts). The sword itself swings plainly

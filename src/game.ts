@@ -686,7 +686,7 @@ export class Game {
       const kinds = w.swing ?? (h.i === 1 || this.dual ? HAND_SWING[w.anim] : null);
       // the series picks the polearm's swing; other weapons just alternate theirs
       h.swings++;
-      if (kinds) this.hero.swing(kinds[(combo ? h.combo - 1 : h.swings) % kinds.length], h.i, period, impactAt);
+      if (kinds) this.hero.swing(kinds[(combo ? h.combo - 1 : h.swings) % kinds.length], h.i, period, impactAt, this.dual ? DUAL.torso : 1);
       else this.hero.attack(w.anim, period, impactAt);
       h.impact = impactAt;
       h.atkCd = period;

@@ -268,8 +268,8 @@ export class Character {
   }
 
   /** Procedural swing of one hand (no clip): the blow lands `impactAt` s after the start. */
-  swing(kind: SwingKind, hand: 0 | 1, period: number, impactAt: number) {
-    this.swinger.start(kind, hand, Math.min(period, impactAt * 2.4), impactAt);
+  swing(kind: SwingKind, hand: 0 | 1, period: number, impactAt: number, torso = 1) {
+    this.swinger.start(kind, hand, Math.min(period, impactAt * 2.4), impactAt, torso);
   }
 
   hit() {

@@ -29,23 +29,26 @@ const qb = new THREE.Quaternion();
 const qp = new THREE.Quaternion();
 const pose = [0, 0, 0, 0, 0];
 
-interface Active { kind: SwingKind; t: number; dur: number; impact: number }
+interface Active { kind: SwingKind; t: number; dur: number; impact: number; torso: number }
 
 /** Swing state of one character: up to one swing per hand. */
 export class Swinger {
   private hands: (Active | null)[] = [null, null];
   private spine: THREE.Object3D | null;
   private arms: (THREE.Object3D | null)[];
+  /** Smoothed torso twist and bend: the lead swing changes hands without a jump. */
+  private yaw = 0;
+  private lean = 0;
 
   constructor(private model: THREE.Object3D) {
     this.spine = model.getObjectByName('spine_01') ?? null;
     this.arms = [model.getObjectByName('upperarm_r') ?? null, model.getObjectByName('upperarm_l') ?? null];
   }
 
-  /** `impact` s after the start the blow lands; the whole swing takes `dur` s. */
-  start(kind: SwingKind, hand: 0 | 1, dur: number, impact: number) {
-    const a = this.hands[hand] ?? (this.hands[hand] = { kind, t: 0, dur, impact });
-    a.kind = kind; a.t = 0; a.dur = Math.max(dur, impact + 0.05); a.impact = impact;
+  /** `impact` s after the start the blow lands; the whole swing takes `dur` s; `torso` scales the twist and bend. */
+  start(kind: SwingKind, hand: 0 | 1, dur: number, impact: number, torso = 1) {
+    const a = this.hands[hand] ?? (this.hands[hand] = { kind, t: 0, dur, impact, torso });
+    a.kind = kind; a.t = 0; a.dur = Math.max(dur, impact + 0.05); a.impact = impact; a.torso = torso;
   }
 
   active(hand: 0 | 1) { return !!this.hands[hand]; }
@@ -67,7 +70,7 @@ export class Swinger {
       const phase = a.t < a.impact ? a.t / a.impact : 1 + (a.t - a.impact) / (a.dur - a.impact);
       sample(KEYS[a.kind], phase, pose);
       const m = h ? -1 : 1; // the left hand mirrors the twist and the sweep
-      if (h === lead) { yaw = pose[0] * m; lean = pose[1]; }
+      if (h === lead) { yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso * a.torso; }
       const arm = this.arms[h];
       if (arm) {
         // fwd: hanging (−Y) towards +Z is a negative turn about X; out: right arm to −X is negative about Z
@@ -75,8 +78,11 @@ export class Swinger {
         rotateInModel(arm, this.model, qa.setFromAxisAngle(AXIS_Y, pose[3] * m));
       }
     }
-    if (this.spine && (yaw || lean)) {
-      rotateInModel(this.spine, this.model, qa.setFromAxisAngle(AXIS_Y, Math.max(-1.2, Math.min(1.2, yaw))).multiply(qb.setFromAxisAngle(AXIS_X, Math.min(0.7, lean))));
+    const k = 1 - Math.exp(-dt * 16);
+    this.yaw += (yaw - this.yaw) * k;
+    this.lean += (lean - this.lean) * k;
+    if (this.spine && (Math.abs(this.yaw) > 1e-3 || Math.abs(this.lean) > 1e-3)) {
+      rotateInModel(this.spine, this.model, qa.setFromAxisAngle(AXIS_Y, Math.max(-1.2, Math.min(1.2, this.yaw))).multiply(qb.setFromAxisAngle(AXIS_X, Math.min(0.7, this.lean))));
     }
   }
 }
