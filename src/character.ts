@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { HIT_FLASH, applyHitFlash } from './hitflash';
-import { assets } from './assets';
+import { SKINS, assets } from './assets';
 import { attachWeapon } from './rig';
 import { Swinger, type SwingKind } from './swing';
 import { PART_PREFIXES, type VisualPart } from './items';
@@ -85,7 +85,7 @@ export class Character {
   private baseParts = new Map<VisualPart, THREE.Mesh[]>();
   private outfitParts = new Map<VisualPart, { model: string; meshes: THREE.Mesh[] }>();
 
-  constructor(modelName: string, weaponName: string | null, scale = 1) {
+  constructor(modelName: string, weaponName: string | null, scale = 1, skin?: string) {
     this.model = assets.clone(modelName);
     this.model.scale.multiplyScalar(scale);
     this.root.add(this.model);
@@ -99,7 +99,12 @@ export class Character {
       m.castShadow = true;
       const src = m.material as THREE.MeshLambertMaterial;
       let c = cache.get(src);
-      if (!c) { c = src.clone(); cache.set(src, c); this.materials.push(c); }
+      if (!c) {
+        c = src.clone();
+        if (skin && SKINS[skin][src.name]) c.map = assets.texture(SKINS[skin][src.name]);
+        cache.set(src, c);
+        this.materials.push(c);
+      }
       m.material = c;
       for (const [part, prefixes] of Object.entries(PART_PREFIXES) as [VisualPart, string[]][]) {
         if (prefixes.some((p) => m.name.startsWith(p))) {

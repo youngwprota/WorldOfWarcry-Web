@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { HIT_FLASH, applyHitFlash } from './hitflash';
+import { HIT_FLASH, addUnmaskedFlash, applyHitFlash } from './hitflash';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { ATTACK_HIT, type AttackAnim } from './config';
@@ -102,7 +102,12 @@ export class Creature {
       m.castShadow = true;
       const src = m.material as THREE.MeshStandardMaterial;
       let c = cache.get(src);
-      if (!c) { c = src.clone(); cache.set(src, c); this.materials.push(c); }
+      if (!c) {
+        c = src.clone();
+        if (c.emissiveMap) addUnmaskedFlash(c);
+        cache.set(src, c);
+        this.materials.push(c);
+      }
       m.material = c;
     });
 

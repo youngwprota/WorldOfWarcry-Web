@@ -412,7 +412,7 @@ export class Prologue {
     this.lich.update(dt, false);
     for (const f of this.floaters) f.obj.position.y = f.y + 0.6 + Math.sin(this.time * 1.2 + f.ph) * 0.35;
     this.particles.update(dt);
-    this.pickups.update(dt, this.hero.position, 6);
+    this.pickups.update(dt, this.hero.position);
     if (this.stage === 'return' && this.ghostT < 0 && this.hero.position.distanceTo(LICH) < TURN_IN_DIST) this.turnInTalk();
     this.updateCamera(dt);
     this.updateLabels(dt);

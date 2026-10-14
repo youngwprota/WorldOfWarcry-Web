@@ -67,7 +67,7 @@ function along(ranges: [number, number][], n: number): Spot[] {
     return { s, off: i % 4 < 2 ? 7 : 12 };
   });
 }
-const forestRanges: [number, number][] = [[progressAt(-3, -80), sFort - 16]];
+const forestRanges: [number, number][] = [[progressAt(-3, -80), sFort - 28]];
 const cemRange: [number, number][] = [[GATE.s + 12, sArena - ARENA.r - 3]];
 const graveRange: [number, number][] = [[GATE.s + 6, sArena - ARENA.r]];
 
@@ -99,10 +99,10 @@ function buildUnits(): Unit[] {
   add('prop', PROP_SPAWNERS.forest, along(forestRanges, PROP_SPAWNERS.forest.length).map((p) => ({ s: p.s + 3, off: 6 })), 'forest', 'pf', false);
   add('prop', PROP_SPAWNERS.cemetery, along(graveRange, PROP_SPAWNERS.cemetery.length).map((p) => ({ s: p.s, off: 9 })), 'cemetery', 'pc', false);
   add('prop', PROP_SPAWNERS.cemeteryField, PROP_SPAWNERS.cemeteryField.map(() => ({ s: sArena - 20, off: 35 })), 'cemetery', 'pcf', false);
-  for (const d of Object.values(MOBS)) {
-    if (!d.boss) continue;
-    const s = d.boss.zone === 'forest' ? sFort : sArena;
-    us.push({ id: d.id, kind: 'mob', def: d.id, zone: d.boss.zone, spot: { s, off: 0 }, depth: 0, charges: [d.respawn], n: 0, respawnAt: 0 });
+  for (const d of BOSSES) {
+    const zone = d.boss!.zone;
+    const s = zone === 'forest' ? sFort : sArena;
+    us.push({ id: d.id, kind: 'mob', def: d.id, zone, spot: { s, off: 0 }, depth: 0, charges: [d.respawn], n: 0, respawnAt: 0 });
   }
   return us;
 }
@@ -110,6 +110,8 @@ function buildUnits(): Unit[] {
 // ---------- hero ----------
 interface Hero extends HeroBuild { hp: number; bag: Item[]; pulls: number; pity: number; spot: Spot; kit: Record<ZoneId, HeroBuild['weapons']> }
 const stats = (h: Hero) => heroStats(h);
+/** The bot plays the forest and the cemetery only: their two bosses. */
+const BOSSES = Object.values(MOBS).filter((d) => d.boss && (d.boss.zone === 'forest' || d.boss.zone === 'cemetery'));
 // ---------- fight: ticks of 0.05 s ----------
 const DT = 0.05;
 interface FightOut { win: boolean; dur: number; swings: number; dealt: number; taken: number; hpEnd: number; slams: number; slamHits: number }
@@ -349,7 +351,6 @@ interface Snap { t: number; zone: string; power: number; maxHp: number; regen: n
 interface FightRec { def: string; depth: number; t: number; first: boolean; dur: number; swings: number; taken: number; maxHp: number; win: boolean }
 interface RunOut { snaps: Snap[]; bossAt: Record<string, number>; bossDur: Record<string, number>; fights: FightRec[]; pulls: number[]; deaths: number }
 
-const BOSSES = Object.values(MOBS).filter((d) => d.boss);
 const wname = (it: Item | null) => (it ? `${it.def}${'⁰¹²³⁴⁵'[it.rarity]}${it.lvl > 1 ? `×${it.lvl}` : ''}` : '—');
 
 function run(seed: number): RunOut {

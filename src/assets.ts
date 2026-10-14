@@ -18,8 +18,21 @@ const TEXTURE_OF: Record<string, string> = {
   undead_worker: 'undead_units_texture', undead_warrior: 'undead_units_texture',
   spear_undead_warrior: 'undead_units_texture', undead_assassin: 'undead_units_texture',
   undead_king: 'undead_units_texture', sword_undead_king: 'undead_units_texture',
+  orc_shaman: 'orc_shaman_albedo', staff_orc_shaman: 'orc_shaman_albedo',
+  elf_warrior: 'elf_warrior_tex', sword_elf_warrior: 'elf_warrior_tex', elf_assassin: 'elf_assassin_tex', elf_worker: 'elf_worker_tex',
+  elf_queen: 'elf_queen_tex', glaive_elf_queen: 'elf_queen_tex', elf_priestess: 'elf_priestess_tex', magic_ball: 'elf_priestess_tex',
 };
-const EMISSIVE_OF: Record<string, string> = { undead_units_texture: 'undead_units_glow' };
+/** Recolours (MobDef.skin): body texture → its recoloured copy. */
+export const SKINS: Record<string, Record<string, string>> = {
+  tauren: {
+    orc_peon_albedo: 'tauren_peon_albedo', orc_grunt_albedo: 'tauren_grunt_albedo', orc_warrior_albedo: 'tauren_warrior_albedo',
+    orc_chieftain_albedo: 'tauren_chieftain_albedo', orc_shaman_albedo: 'tauren_shaman_albedo',
+  },
+};
+
+const EMISSIVE_OF: Record<string, string> = {
+  undead_units_texture: 'undead_units_glow', elf_queen_tex: 'elf_queen_glow', elf_priestess_tex: 'elf_priestess_glow',
+};
 
 function textureFor(name: string): string {
   if (TEXTURE_OF[name]) return TEXTURE_OF[name];

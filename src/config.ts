@@ -271,6 +271,8 @@ export interface MobDef {
   dodge?: number;
   /** GLB animal (Creature): `model` names a .glb with its own rig and clips, weapon is always null. */
   creature?: boolean;
+  /** Recolour: body textures are swapped by the table SKINS[skin] (src/assets.ts). */
+  skin?: string;
   /** Speed (m/s) the hit shoves the hero back with. */
   push?: number;
   /** elite: drops `drop` on every kill; mini: micro-boss giving `bonus` stats. Main bosses have `boss`. */
@@ -304,7 +306,13 @@ export interface BossDef {
   chaseDelay: number;
   chaseGap: number; // s between blasts
   chaseRange: number; // blasts only when the hero is this close, m
+  /** Cone attacks aimed at the hero; the boss cycles slam → cones[0] → cones[1] … (phase 2 may swap any step for the chasing blasts). */
+  cones?: ConeDef[];
+  /** Packs of small mobs run in from the fort entrance when the boss HP first falls below each fraction in `at`. */
+  reinforce?: { at: number[]; pool: string[] };
 }
+/** One cone attack: `yaws` are offsets (rad) from the line to the hero, one cone each; damage = boss dmg × mul. */
+export interface ConeDef { half: number; len: number; mul: number; yaws: number[] }
 const BOSS_BASE = {
   slamMul: 2.2, slamDelay: 1.25, cd: 6.5, cdPhase2: 4.2, phase2At: 0.5, phase2Dmg: 1.2,
   chance: 0.55, chaseCount: 3, chaseRadius: 2.3, chaseMul: 1.4, chaseDelay: 1.0, chaseGap: 0.45, chaseRange: 11,
@@ -319,8 +327,13 @@ export const MOB_REGEN_DELAY = 5;
  */
 export interface ZoneFoes { attack: DamageType; weak: DamageType[]; resist?: DamageType[] }
 export const ZONE_FOES: Partial<Record<ZoneId, ZoneFoes>> = {
-  forest: { attack: 'chop', weak: ['slash', 'chop'] },
+  forest: { attack: 'slash', weak: ['slash'] },
   cemetery: { attack: 'slash', weak: ['crush'], resist: ['slash', 'chop'] },
+  peaks: { attack: 'slash', weak: ['crush'] },
+  hills: { attack: 'chop', weak: ['slash'] },
+  grove: { attack: 'slash', weak: ['crush'] },
+  swamp: { attack: 'crush', weak: ['slash'] },
+  dunes: { attack: 'chop', weak: ['crush'] },
 };
 function foes(zone: ZoneId): Pick<MobDef, 'attack' | 'resist'> {
   const f = ZONE_FOES[zone]!;
@@ -337,11 +350,11 @@ function foes(zone: ZoneId): Pick<MobDef, 'attack' | 'resist'> {
  * Main boss: big red skull on the map; its first kill opens the gates in `boss.unlocks`.
  */
 export const MOBS: Record<string, MobDef> = {
-  // ---------- Forest Edge: bandits hit with axes (chop), weak to swords (slash) ----------
+  // ---------- Forest Edge: bandits hit with swords (slash), weak to swords (slash) ----------
   bandit_thug: {
     id: 'bandit_thug', name: 'Разбойник',
-    model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['peasant', 'axe'] },
-    anim: 'AxeAttack', hp: 220, dmg: 5, aps: 0.7, range: 1.5, speed: 3.0, aggro: 4.5, regen: 0.04, scale: 1,
+    model: { human: ['orc_peon', 'sword_orc_warrior'], orc: ['peasant', 'sword_soldier'] },
+    anim: 'SwordAttack', hp: 220, dmg: 5, aps: 0.7, range: 1.5, speed: 3.0, aggro: 4.5, regen: 0.04, scale: 1,
     ...foes('forest'), reward: { hp: 2 }, respawn: 45,
   },
   bandit_fighter: {
@@ -353,7 +366,7 @@ export const MOBS: Record<string, MobDef> = {
   bandit_veteran: {
     id: 'bandit_veteran', name: 'Ветеран', rank: 'elite',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 1400, dmg: 11, aps: 0.9, range: 1.8, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.3,
+    anim: 'SwordAttack', hp: 1400, dmg: 16.5, aps: 0.9, range: 1.8, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.3,
     ...foes('forest'), reward: { power: 5 }, respawn: 300,
     // the hero's own starting sword: a copy levels it up
     drop: { kind: 'weapon', def: 'sword', rarity: 0 },
@@ -361,35 +374,73 @@ export const MOBS: Record<string, MobDef> = {
   bandit_brute: {
     id: 'bandit_brute', name: 'Громила', rank: 'elite',
     model: { human: ['orc_grunt', 'sword_orc_warrior'], orc: ['human_knight', 'sword_human_knight'] },
-    anim: 'SwordAttack', hp: 1600, dmg: 12, aps: 0.7, range: 1.8, speed: 3.2, aggro: 5.2, regen: 0.03, scale: 1.35,
+    anim: 'SwordAttack', hp: 2592, dmg: 14.4, aps: 0.7, range: 1.8, speed: 3.2, aggro: 5.2, regen: 0.03, scale: 1.35,
     ...foes('forest'), reward: { hp: 5 }, respawn: 300,
     drop: { kind: 'weapon', def: 'sword', rarity: 1 },
   },
   bandit_lumberjack: {
     id: 'bandit_lumberjack', name: 'Лесоруб', rank: 'elite',
-    model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['peasant', 'axe'] },
-    anim: 'AxeAttack', hp: 1800, dmg: 14, aps: 0.6, range: 1.8, speed: 3.0, aggro: 5.2, regen: 0.03, scale: 1.45,
+    model: { human: ['orc_peon', 'sword_orc_warrior'], orc: ['peasant', 'sword_soldier'] },
+    anim: 'SwordAttack', hp: 1800, dmg: 21, aps: 0.6, range: 1.8, speed: 3.0, aggro: 5.2, regen: 0.03, scale: 1.45,
     ...foes('forest'), reward: { regen: 1 }, respawn: 300,
     drop: { kind: 'armor', def: 'guard_chest', rarity: 1 },
   },
+  // Reinforcements of the bandit chief: weak, no drops (they leave only a few orbs).
+  bandit_runner: {
+    id: 'bandit_runner', name: 'Бегун',
+    model: { human: ['orc_peon', 'sword_orc_warrior'], orc: ['peasant', 'sword_soldier'] },
+    anim: 'SwordAttack', hp: 260, dmg: 5, aps: 0.9, range: 1.5, speed: 4.4, aggro: 8, regen: 0, scale: 0.95,
+    ...foes('forest'), reward: { speed: 1 }, respawn: 0,
+  },
+  bandit_hammerer: {
+    id: 'bandit_hammerer', name: 'Мечник',
+    model: { human: ['orc_grunt', 'sword_orc_warrior'], orc: ['human_knight', 'sword_human_knight'] },
+    anim: 'SwordAttack', hp: 450, dmg: 8, aps: 0.6, range: 1.7, speed: 3.2, aggro: 8, regen: 0, scale: 1.1,
+    ...foes('forest'), reward: { hp: 1 }, respawn: 0,
+  },
+  bandit_cutter: {
+    id: 'bandit_cutter', name: 'Рубака',
+    model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
+    anim: 'SwordAttack', hp: 340, dmg: 7, aps: 0.8, range: 1.6, speed: 3.6, aggro: 8, regen: 0, scale: 1,
+    ...foes('forest'), reward: { power: 1 }, respawn: 0,
+  },
+  // Guards of the hub boss camp and the Snow Pass gate: above every regular forest mob (max hp 1200, dmg 10), no unlocks.
+  boss_guard: {
+    id: 'boss_guard', name: 'Страж лагеря',
+    model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
+    anim: 'SwordAttack', hp: 3600, dmg: 20, aps: 0.8, range: 1.8, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.3,
+    ...foes('forest'), reward: { power: 5 }, respawn: 300,
+  },
+  gate_guard: {
+    id: 'gate_guard', name: 'Страж прохода',
+    model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
+    anim: 'SwordAttack', hp: 2400, dmg: 16, aps: 0.8, range: 1.7, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.2,
+    ...foes('forest'), reward: { power: 3 }, respawn: 300,
+  },
   bandit_warlord: {
     id: 'bandit_warlord', name: 'Свирепый вожак', rank: 'mini',
-    model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
-    anim: 'AxeAttack', hp: 4500, dmg: 24, aps: 0.65, range: 2.1, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.55,
+    model: { human: ['orc_chieftain', 'sword_orc_warrior'], orc: ['paladin', 'sword_human_knight'] },
+    anim: 'SwordAttack', hp: 4320, dmg: 24, aps: 0.65, range: 2.1, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.55,
     ...foes('forest'), reward: { hp: 6 }, respawn: 900,
     bonus: { hp: 500 },
   },
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
-    model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
-    anim: 'AxeAttack', hp: 4600, dmg: 12, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
+    model: { human: ['orc_chieftain', 'sword_orc_warrior'], orc: ['paladin', 'sword_human_knight'] },
+    anim: 'SwordAttack', hp: 4600, dmg: 12, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
     ...foes('forest'), reward: { power: 12 }, respawn: 900,
     // the forest's swords barely scratch him (−50%); his hammer is the key to the undead behind the gate
-    resist: { slash: 'resist', chop: 'weak' },
+    resist: { slash: 'resist' },
     drop: { kind: 'weapon', def: 'hammer', rarity: 0 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest', unlocks: ['forest-cemetery'],
       slamRadius: 4.2, slamMul: 2.4, chaseMul: 1.4, phase2Dmg: 1.2,
+      cones: [
+        { half: 0.18, len: 15, mul: 2.2, yaws: [0] }, // narrow and long
+        { half: 0.95, len: 6.5, mul: 2.4, yaws: [0] }, // wide and short
+        { half: 0.2, len: 11, mul: 1.8, yaws: [-0.65, 0, 0.65] }, // three-cone fan
+      ],
+      reinforce: { at: [0.5, 0.3, 0.2], pool: ['bandit_runner', 'bandit_hammerer', 'bandit_cutter', 'boar'] },
     },
   },
   // ---------- Old Cemetery: the undead hit with blades (slash), weak to hammers, resist blades and axes ----------
@@ -467,7 +518,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
     anim: 'SwordAttack', hp: 1280, dmg: 12, aps: 1.1, range: 1.5, speed: 4.5, aggro: 6.2, regen: 0.03, scale: 1.3,
     ...foes('cemetery'), reward: { speed: 5 }, respawn: 600,
-    drop: { kind: 'weapon', def: 'dagger', rarity: 2 },
+    drop: { kind: 'armor', def: 'lord_legs', rarity: 2 },
   },
   gravedigger: {
     id: 'gravedigger', name: 'Могильщик', rank: 'mini',
@@ -481,12 +532,107 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_king', 'reaper'], orc: ['undead_king', 'reaper'] },
     anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
     ...foes('cemetery'), reward: { power: 18 }, respawn: 1200,
-    drop: { kind: 'weapon', def: 'reaper', rarity: 3 },
+    drop: { kind: 'armor', def: 'ring_power', rarity: 3 },
     boss: {
-      ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['forest-peaks', 'cemetery-peaks'],
+      ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['cemetery-peaks'],
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
     },
   },
+  // ---------- outer lands, in map order after the cemetery (ZONE_TIER multiplies their HP and damage) ----------
+  // Snow Pass and Autumn Grove: elves
+  elf_lumberjack: {
+    id: 'elf_lumberjack', name: 'Эльф-лесоруб',
+    model: { human: ['elf_worker', 'axe'], orc: ['elf_worker', 'axe'] },
+    anim: 'AxeAttack', hp: 700, dmg: 14, aps: 0.8, range: 1.6, speed: 3.2, aggro: 5, regen: 0.03, scale: 1.05,
+    ...foes('peaks'), reward: { hp: 3 }, respawn: 60,
+  },
+  elf_sentinel: {
+    id: 'elf_sentinel', name: 'Эльф-страж',
+    model: { human: ['elf_warrior', 'sword_elf_warrior'], orc: ['elf_warrior', 'sword_elf_warrior'] },
+    anim: 'SwordAttack', hp: 900, dmg: 16, aps: 0.8, range: 1.8, speed: 3.2, aggro: 5, regen: 0.03, scale: 1.1,
+    ...foes('peaks'), reward: { power: 4 }, respawn: 60,
+  },
+  elf_assassin: {
+    id: 'elf_assassin', name: 'Эльф-убийца',
+    model: { human: ['elf_assassin', 'dagger'], orc: ['elf_assassin', 'dagger'] },
+    anim: 'SwordAttack', hp: 650, dmg: 18, aps: 1.2, range: 1.5, speed: 4.0, aggro: 5.5, regen: 0.03, scale: 1.05,
+    ...foes('peaks'), reward: { speed: 3 }, respawn: 60,
+  },
+  elf_queen: {
+    id: 'elf_queen', name: 'Королева перевала',
+    model: { human: ['elf_queen', 'glaive_elf_queen'], orc: ['elf_queen', 'glaive_elf_queen'] },
+    anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.0,
+    ...foes('peaks'), reward: { power: 20 }, respawn: 1200,
+    boss: {
+      ...BOSS_BASE, titles: { human: 'Королева льдов', orc: 'Королева льдов' }, zone: 'peaks', unlocks: ['forest-peaks', 'forest-hills'],
+      slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
+    },
+  },
+  elf_priestess: {
+    id: 'elf_priestess', name: 'Жрица рощи',
+    model: { human: ['elf_priestess', 'magic_ball'], orc: ['elf_priestess', 'magic_ball'] },
+    anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.0,
+    ...foes('grove'), reward: { regen: 3 }, respawn: 1200,
+    boss: {
+      ...BOSS_BASE, titles: { human: 'Жрица Осенней рощи', orc: 'Жрица Осенней рощи' }, zone: 'grove', unlocks: ['grove-swamp', 'forest-swamp'],
+      slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
+    },
+  },
+  // Rocky Hills: orcs
+  orc_laborer: {
+    id: 'orc_laborer', name: 'Таурен-батрак',
+    model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['orc_peon', 'axe_orc_peon'] },
+    skin: 'tauren', anim: 'AxeAttack', hp: 700, dmg: 14, aps: 0.75, range: 1.6, speed: 3.0, aggro: 5, regen: 0.03, scale: 1.05,
+    ...foes('hills'), reward: { hp: 3 }, respawn: 60,
+  },
+  orc_axeman: {
+    id: 'orc_axeman', name: 'Таурен-рубака',
+    model: { human: ['orc_grunt', 'axe_orc_grunt'], orc: ['orc_grunt', 'axe_orc_grunt'] },
+    skin: 'tauren', anim: 'AxeAttack', hp: 900, dmg: 16, aps: 0.75, range: 1.8, speed: 3.2, aggro: 5, regen: 0.03, scale: 1.15,
+    ...foes('hills'), reward: { power: 4 }, respawn: 60,
+  },
+  orc_blademaster: {
+    id: 'orc_blademaster', name: 'Таурен-воин',
+    model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['orc_warrior', 'sword_orc_warrior'] },
+    skin: 'tauren', anim: 'SwordAttack', hp: 1000, dmg: 17, aps: 0.8, range: 1.8, speed: 3.3, aggro: 5.2, regen: 0.03, scale: 1.15,
+    ...foes('hills'), reward: { speed: 3 }, respawn: 60,
+  },
+  orc_shaman: {
+    id: 'orc_shaman', name: 'Шаман Чёрной Скалы',
+    model: { human: ['orc_shaman', 'staff_orc_shaman'], orc: ['orc_shaman', 'staff_orc_shaman'] },
+    skin: 'tauren', anim: 'AxeAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.0,
+    ...foes('hills'), reward: { power: 20 }, respawn: 1200,
+    boss: {
+      ...BOSS_BASE, titles: { human: 'Шаман Чёрной Скалы', orc: 'Шаман Чёрной Скалы' }, zone: 'hills', unlocks: ['hills-grove'],
+      slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
+    },
+  },
+  // Rotten Swamp and Sand Dunes: only their bosses for now
+  murloc_king: {
+    id: 'murloc_king', name: 'Король мурлоков', creature: true,
+    model: { human: ['human_murloc', null], orc: ['human_murloc', null] },
+    anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.4,
+    ...foes('swamp'), reward: { hp: 20 }, respawn: 1200,
+    boss: {
+      ...BOSS_BASE, titles: { human: 'Король мурлоков', orc: 'Король мурлоков' }, zone: 'swamp', unlocks: ['swamp-dunes'],
+      slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
+    },
+  },
+  sand_boar: {
+    id: 'sand_boar', name: 'Песчаный вепрь', creature: true, push: 5,
+    model: { human: ['orc_boar', null], orc: ['orc_boar', null] },
+    anim: 'AxeAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 3,
+    ...foes('dunes'), reward: { speed: 20 }, respawn: 1200,
+    boss: {
+      ...BOSS_BASE, titles: { human: 'Песчаный вепрь', orc: 'Песчаный вепрь' }, zone: 'dunes', unlocks: [],
+      slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
+    },
+  },
+};
+/** «Свирепый вожак» of the Rocky Hills: a tauren chieftain for both factions. */
+MOBS.tauren_warlord = {
+  ...MOBS.bandit_warlord, ...foes('hills'), id: 'tauren_warlord', name: 'Вожак тауренов', skin: 'tauren', drop: undefined,
+  model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['orc_chieftain', 'axe_orc_chieftain'] }, anim: 'AxeAttack',
 };
 
 export type OrbKind = 'power' | 'hp' | 'regen' | 'speed';
@@ -585,6 +731,8 @@ export interface DepthDef { hp: number; dmg: number; reward: number; scale: numb
 export const DEPTH: Partial<Record<ZoneId, DepthDef>> = {
   forest: { hp: 2.2, dmg: 1.8, reward: 2, scale: 1.15 },
 };
+/** Outer lands: HP and damage multiplier of everything spawned there, doubling at each step of the map order. */
+export const ZONE_TIER: Partial<Record<ZoneId, number>> = { peaks: 2, hills: 4, grove: 8, swamp: 16, dunes: 32 };
 export function depthMul(zone: ZoneId, t: number) {
   const d = DEPTH[zone];
   t = d ? Math.min(1, Math.max(0, t)) : 0;
@@ -612,22 +760,27 @@ export interface BreakableDef {
   /** Respawn cooldown, seconds (GDD 7.3: 30–60 s). */
   respawn: number;
   onBreak?: BreakEvent[];
+  /** A turret: while the hero is within `range` it lobs a shot every `cd` s at his position; it lands after `delay` s, hits within `r` for `dmg`. */
+  shoot?: { dmg: number; range: number; cd: number; r: number; delay: number; height: number };
 }
 const GRAVE_RISE: BreakEvent[] = [{ type: 'spawnMob', mob: 'skeleton_worker', chance: 0.35, bark: 'Кто потревожил мой сон?!' }];
 // wood is easy to chop, stone needs a hammer
 const WOOD: BreakableDef['resist'] = { chop: 'weak', crush: 'resist' };
 const STONE: BreakableDef['resist'] = { slash: 'resist', chop: 'resist', crush: 'weak' };
+const TOWER_SHOT = { dmg: 10, range: 20, cd: 2.4, r: 1.5, delay: 1.3, height: 5 };
 export const BREAKABLES: Record<string, BreakableDef> = {
   barrel: { model: 'barrel', hits: 2, color: 0x8a5a2b, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
   orc_barrel: { model: 'orc_barrel', hits: 2, color: 0x7a4a22, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
-  box: { model: 'box_small_1', hits: 1, color: 0xa87a45, scale: 0.9, reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
-  box_large: { model: 'box_large_1', hits: 3, color: 0xa87a45, scale: 0.8, reward: { power: 2 }, resist: WOOD, r: 0.7, respawn: 60 },
-  orc_box: { model: 'orc_box_small_1', hits: 1, color: 0x8a5a2b, scale: 0.9, reward: { power: 1 }, resist: WOOD, r: 0.45, respawn: 30 },
+  box: { model: 'box_small_1', hits: 1, color: 0xa87a45, scale: 0.9, reward: { power: 1 }, resist: {}, r: 0.45, respawn: 30 },
+  box_large: { model: 'box_large_1', hits: 3, color: 0xa87a45, scale: 0.8, reward: { power: 2 }, resist: {}, r: 0.7, respawn: 60 },
+  orc_box: { model: 'orc_box_small_1', hits: 1, color: 0x8a5a2b, scale: 0.9, reward: { power: 1 }, resist: {}, r: 0.45, respawn: 30 },
   bush: { model: null, hits: 1, color: 0x3f8f2f, scale: 1, reward: { regen: 1 }, resist: { slash: 'weak', crush: 'resist' }, r: 0.6, respawn: 25 },
   tomb1: { model: 'undead_tomb_stone_1', hits: 2, color: 0x77748a, scale: 0.75, reward: { power: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   tomb2: { model: 'undead_tomb_stone_2', hits: 2, color: 0x77748a, scale: 0.75, reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   tomb3: { model: 'undead_tomb_stone_3', hits: 2, color: 0x77748a, scale: 0.75, reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   tomb4: { model: 'undead_tomb_stone_4', hits: 2, color: 0x77748a, scale: 0.75, reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  fort_tower_orc: { model: 'orc_tower_Lv2', hits: 30, color: 0x7a5a38, scale: 0.38, reward: { power: 3 }, resist: { slash: 'weak' }, r: 1.4, respawn: 900, shoot: TOWER_SHOT },
+  fort_tower_human: { model: 'tower_Lv2', hits: 30, color: 0x7a5a38, scale: 0.38, reward: { power: 3 }, resist: { slash: 'weak' }, r: 1.4, respawn: 900, shoot: TOWER_SHOT },
   coffin: { model: 'undead_coffin', hits: 3, color: 0x5a3c2c, scale: 0.34, reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
 };
 
@@ -647,28 +800,46 @@ const FOREST_CHARGES = [4 * MIN, 5 * MIN, 12 * HOUR];
 const spawner = (id: string, charges?: number[]): SpawnerDef => ({ unit: 'mob', id, charges });
 /** Mob spawners by location, placed along the trail in list order (first = nearest the location's entrance). */
 export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
-  // The forest is read from the camp to the ridge gate, one step after another: easy mobs, the Veteran
-  // (a common sword: levels up the starting one), the Brute (an uncommon sword), the orange micro-boss
-  // (+500 HP), the Lumberjack (a chest piece), then the fort with the main boss right before the gate.
   forest: ([
-    'boar', 'bandit_thug', 'boar', 'bandit_thug', 'murloc', 'bandit_veteran',
-    'bandit_thug', 'bandit_fighter', 'boar', 'bandit_thug', 'bandit_brute',
-    'bandit_fighter', 'murloc', 'bandit_thug', 'bandit_fighter', 'bandit_warlord',
-    'bandit_fighter', 'boar', 'bandit_lumberjack', 'bandit_fighter', 'bandit_fighter',
+    'boar', 'bandit_thug', 'murloc', 'bandit_thug', 'boar', 'bandit_thug', 'bandit_fighter', 'bandit_veteran',
+    'bandit_thug', 'bandit_fighter', 'boar', 'bandit_warlord', 'bandit_thug', 'murloc', 'bandit_fighter', 'bandit_brute',
+    'bandit_thug', 'boar', 'bandit_fighter', 'bandit_fighter', 'bandit_lumberjack',
   ]).map((id) => spawner(id, FOREST_CHARGES)),
   // one endless charge with the mob's own respawn time
   cemetery: ([
     'skeleton_worker', 'undead_boar', 'skeleton_worker', 'ghost', 'bone_guard', 'skeleton_warrior', 'undead_boar',
     'skeleton_worker', 'ghost', 'gravedigger', 'skeleton_warrior', 'undead_boar', 'skeleton_worker', 'shade', 'skeleton_warrior',
+    'skeleton_warrior', 'undead_boar',
+  ]).map((id) => spawner(id)),
+  peaks: ([
+    'elf_lumberjack', 'elf_sentinel', 'elf_lumberjack', 'elf_assassin', 'elf_sentinel', 'elf_lumberjack',
+    'elf_assassin', 'elf_sentinel', 'elf_lumberjack', 'elf_assassin', 'elf_sentinel', 'elf_assassin',
+  ]).map((id) => spawner(id)),
+  hills: ([
+    'orc_laborer', 'orc_axeman', 'orc_laborer', 'orc_blademaster', 'orc_axeman', 'orc_laborer',
+    'orc_blademaster', 'orc_axeman', 'orc_laborer', 'orc_blademaster', 'orc_axeman', 'orc_blademaster',
+  ]).map((id) => spawner(id)),
+  grove: ([
+    'elf_lumberjack', 'elf_assassin', 'elf_lumberjack', 'elf_sentinel', 'elf_assassin', 'elf_lumberjack',
+    'elf_sentinel', 'elf_assassin', 'elf_lumberjack', 'elf_sentinel', 'elf_assassin', 'elf_sentinel',
   ]).map((id) => spawner(id)),
 };
+/** «Свирепый вожак» mini-bosses of the cemetery and the outer lands. */
+export const MINI_SPAWNER = spawner('bandit_warlord');
+/** Zones whose mini-bosses are a local variant instead of «Свирепый вожак». */
+export const MINI_SPAWNER_OF: Partial<Record<ZoneId, SpawnerDef>> = { hills: spawner('tauren_warlord') };
+/** Round the gloves elite (world.glovesGuards): single murlocs by the trail, two bandit pairs in the trees. */
+export const GLOVES_MURLOCS = [0, 1, 2].map(() => spawner('murloc', FOREST_CHARGES));
+export const GLOVES_BANDITS = ['bandit_thug', 'bandit_fighter', 'bandit_fighter', 'bandit_thug'].map((id) => spawner(id, FOREST_CHARGES));
+/** Bandits in the wood between the settlement and the fort (world.campToFort). */
+export const MID_SPAWNERS = ['bandit_thug', 'bandit_fighter', 'bandit_thug', 'bandit_fighter', 'bandit_thug'].map((id) => spawner(id, FOREST_CHARGES));
 
 /** "Zoo" just outside the camp gate (src/world.ts buildZoo): the WoW creatures, one endless charge each. */
 export const ZOO: SpawnerDef[] = ['wild_bear', 'wild_direwolf', 'wild_dragon', 'wild_lion'].map((id) => spawner(id));
 
 /**
  * Breakable prop spawners (same SpawnerDef, unit 'prop'), spread over an area by group:
- * camp — crates by the settlement gate; forest — beside the forest trail;
+ * camp — supply crates inside the settlement; forest — a few crates right by the forest trail;
  * cemetery — graves beside the cemetery trail; cemeteryField — graves in the cemetery's far end.
  */
 /** n prop spawners cycling through the given kinds. */
@@ -676,8 +847,8 @@ const props = (kinds: string[], n: number, charges?: number[]): SpawnerDef[] =>
   Array.from({ length: n }, (_, i) => ({ unit: 'prop', id: kinds[i % kinds.length], charges }));
 const GRAVES = ['tomb1', 'tomb2', 'tomb3', 'tomb4', 'tomb1', 'tomb2', 'coffin'];
 export const PROP_SPAWNERS: Record<'camp' | 'forest' | 'cemetery' | 'cemeteryField', SpawnerDef[]> = {
-  camp: props(['barrel', 'box', 'box', 'barrel'], 4, FOREST_CHARGES),
-  forest: props(['barrel', 'box', 'bush', 'box_large', 'orc_barrel', 'box', 'orc_box'], 24, FOREST_CHARGES),
+  camp: props(['box', 'box_large', 'box'], 8, FOREST_CHARGES),
+  forest: props(['box', 'box_large', 'box'], 6, FOREST_CHARGES),
   cemetery: props(GRAVES, 18),
   cemeteryField: props(GRAVES, 6),
 };
@@ -731,4 +902,6 @@ export const FORGE3D = {
   bloom: { strength: 0.8, radius: 0.5, threshold: 0.85 },
 };
 /** Kill feel: the death clip starts on the lethal hit, holds `holdAt` s into the fall for `freeze` s (hit-stop), then the corpse is thrown back harder than a normal hit. */
-export const KILL_FX = { holdAt: 0.1, freeze: 0.1, knockMul: 2, shake: 0.31, blood: 14 };
+/** Every non-lethal hit holds the mob's pose (animation only) for this many seconds. */
+export const HIT_FREEZE = 0.15;
+export const KILL_FX ={ holdAt: 0.1, freeze: 0.3, knockMul: 2, shake: 0.31, blood: 14 };

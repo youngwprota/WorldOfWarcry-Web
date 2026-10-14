@@ -1,8 +1,9 @@
-// Island layout. The world is a roughly round island in the ocean. The forest edge («Лесная опушка») is the
-// hub in the middle, with the hero's settlement at its centre; a ring of locations surrounds it, each a
-// sector of the ring with noisy borders (some wider, some narrower). The cemetery sector is walled off by a
-// rocky ridge with a single gate (the magic barrier). One narrow trail winds from the settlement gate through
-// the forest and the bandit fort to that gate, then through the cemetery to the arena.
+// Island layout. The forest edge («Лесная опушка») is the round hub in the middle, with the hero's settlement at
+// its centre; the cemetery is the sector east of it, out to the sea. The other locations are hand-drawn polygons
+// around them (the designer's map). Land is the union of all locations; their borders are rocky ridges with
+// gates (magic barriers). One narrow trail winds from the settlement gate round the forest to the bandit fort (east,
+// in front of the cemetery gate) and on through the cemetery to the arena; spurs lead to the other forest doors, and
+// the other locations have worn paths of their own.
 // Everything here is pure maths (no three.js), so terrain, world placement, maps and gameplay share it.
 import { ZONES, type ZoneDef, type ZoneId } from './config';
 
@@ -38,9 +39,17 @@ export const smooth = (a: number, b: number, x: number) => {
 
 // ---------- shape ----------
 /** Island centre, water level and the settlement (spawn) at the centre of the forest. */
-export const ISLAND = { cx: 0, cz: -52, water: -0.3, campX: 0, campZ: -52, campR: 19 };
+export const ISLAND = { cx: 0, cz: -52, water: -0.3, campX: 0, campZ: -52, campR: 16.5 };
+/** Palisade radius of the settlement and the angle of its gate (0 = +Z/south, π = north): turned a bit to the east, towards the trail. */
+export const CAMP_WALL = 14;
+const CAMP_GATE_A = 2.75;
+/** The settlement exit: centre of the gap in the palisade and the unit direction of walking out. */
+export const CAMP_EXIT = {
+  x: ISLAND.campX + Math.sin(CAMP_GATE_A) * CAMP_WALL, z: ISLAND.campZ + Math.cos(CAMP_GATE_A) * CAMP_WALL,
+  dirX: Math.sin(CAMP_GATE_A), dirZ: Math.cos(CAMP_GATE_A),
+};
 /** Square that holds the ground mesh, the baked ground/map textures and the zone grid. */
-export const MAP_BOX = { x: -142, z: -194, size: 284 };
+export const MAP_BOX = { x: -172, z: -200, size: 340 };
 /** Hero spawn / respawn point (settlement plaza). */
 export const SPAWN = { x: ISLAND.campX, z: ISLAND.campZ + 3 };
 /** Trail width, metres (about 1.1–1.25 hero widths). */
@@ -89,105 +98,315 @@ export const ZONE_INDEX = Object.fromEntries(ZONE_IDS.map((id, i) => [id, i])) a
 
 /** Radius of the central forest (noisy). */
 export const forestR = lut((a) => 53 + (ring(a, 2.2, 31) - 0.5) * 8);
-/**
- * Ring sectors, counter-clockwise from the east-north-east (angles: 0 = +Z/south, π/2 = +X/east).
- * `from` is the sector's first border; widths differ so locations are of different size.
- */
-const SECTORS = ([
+/** The cemetery sector's two borders (angles: 0 = +Z/south, π/2 = +X/east). */
+const CEM_BORDERS = [57, 123].map((d) => (d * Math.PI) / 180);
+/** Angle of cemetery border k at radius r (wobbles with the radius so borders are not straight spokes). */
+const borderA = (k: number, r: number) => CEM_BORDERS[k] + (fbm(r * 0.05 + k * 7.3, k * 3.1) - 0.5) * 0.35;
+function inCemeterySector(x: number, z: number) {
+  const r = Math.hypot(x - ISLAND.cx, z - ISLAND.cz);
+  const TAU = Math.PI * 2;
+  const base = borderA(0, r);
+  const rel = (v: number) => (((v - base) % TAU) + TAU * 2) % TAU;
+  return rel(angleOf(x, z)) < rel(borderA(1, r)) && r < shoreR(angleOf(x, z));
+}
 
-  { id: 'cemetery', from: 57 }, { id: 'peaks', from: 123 }, { id: 'swamp', from: 181 },
-  { id: 'grove', from: 253 }, { id: 'dunes', from: 303 }, { id: 'hills', from: 365 },
-] as { id: ZoneId; from: number }[]).map((d) => ({ ...d, from: (d.from * Math.PI) / 180 }));
-/** Angle of border k at radius r (wobbles with the radius so borders are not straight spokes). */
-const borderA = (k: number, r: number) => SECTORS[k].from + (fbm(r * 0.05 + k * 7.3, k * 3.1) - 0.5) * 0.35;
+/** The other locations, drawn by hand (world metres); the forest and the cemetery win where they overlap. */
+const POLYS: { id: ZoneId; pts: [number, number][] }[] = [
+  // the cemetery grows south-east beyond its sector
+  { id: 'cemetery', pts: [[50, -35], [75, 0], [100, 8], [121, -5], [116, -35], [110, -60], [80, -60]] },
+  { id: 'peaks', pts: [[-10, -152.5], [-5, -165], [20, -171], [60, -167.5], [95, -160], [112.5, -145], [116, -130], [95, -126], [80, -132.5],
+    [50, -142.5], [25, -145], [10, -150]] },
+  { id: 'peaks', pts: [[-62, -131], [-45, -147.5], [-10, -152.5], [10, -150], [25, -145], [50, -142.5], [80, -132.5], [95, -126], [92.5, -100],
+    [90, -60], [60, -55], [30, -75], [-25, -90], [-50, -125]] },
+  { id: 'hills', pts: [[-147.5, -55], [-130, -77.5], [-110, -90], [-90, -105], [-72.5, -122.5], [-62, -131], [-50, -125], [-25, -90], [-40, -20],
+    [-55, -5], [-70, -3], [-95, -12], [-125, -20], [-135, -40]] },
+  { id: 'grove', pts: [[-140, -2], [-125, -20], [-95, -12], [-70, -3], [-55, -5], [-40, -20], [-25, -15], [-25, 25], [-40, 45], [-60, 52.5],
+    [-90, 42.5], [-122.5, 45], [-135, 20]] },
+  { id: 'swamp', pts: [[-25, -15], [-3, -10], [5, 20], [2.5, 65], [-10, 107.5], [-40, 110], [-70, 107.5], [-100, 85], [-122.5, 60], [-122.5, 45],
+    [-90, 42.5], [-60, 52.5], [-40, 45], [-25, 25]] },
+  { id: 'dunes', pts: [[-3, -10], [20, -15], [40, -25], [70, -10], [100, -5], [118, 15], [125, 30], [110, 50], [90, 70], [60, 85], [30, 100],
+    [-10, 107.5], [2.5, 65], [5, 20]] },
+];
+const BOXES = POLYS.map(({ pts }) => {
+  const xs = pts.map((q) => q[0]);
+  const zs = pts.map((q) => q[1]);
+  return [Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs)];
+});
+function inPoly(pts: [number, number][], x: number, z: number) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, zi] = pts[i];
+    const [xj, zj] = pts[j];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+/** Location at a point from the shapes alone (polygon borders and coasts wobble with a domain warp); null = sea. */
+function zoneOfShape(x: number, z: number): ZoneId | null {
+  if (Math.hypot(x - ISLAND.cx, z - ISLAND.cz) < forestR(angleOf(x, z))) return 'forest';
+  if (inCemeterySector(x, z)) return 'cemetery';
+  const wx = x + (fbm(x * 0.04, z * 0.04) - 0.5) * 16;
+  const wz = z + (fbm(x * 0.04 + 31, z * 0.04 - 17) - 0.5) * 16;
+  for (let k = 0; k < POLYS.length; k++) {
+    const b = BOXES[k];
+    if (wx < b[0] || wz < b[1] || wx > b[2] || wz > b[3]) continue;
+    if (inPoly(POLYS[k].pts, wx, wz)) return POLYS[k].id;
+  }
+  return null;
+}
+
+// ---------- 1 m raster: location per cell, distance to the coast and to the ridges ----------
+const RN = MAP_BOX.size;
+/** Squared-distance transform along one row (Felzenszwalb & Huttenlocher). */
+function edt1d(f: Float32Array, n: number, d: Float32Array, v: Int32Array, zb: Float32Array) {
+  let k = 0;
+  v[0] = 0;
+  zb[0] = -Infinity;
+  zb[1] = Infinity;
+  for (let q = 1; q < n; q++) {
+    let t = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (t <= zb[k]) { k--; t = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+    k++;
+    v[k] = q;
+    zb[k] = t;
+    zb[k + 1] = Infinity;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) {
+    while (zb[k + 1] < q) k++;
+    d[q] = (q - v[k]) ** 2 + f[v[k]];
+  }
+}
+/** Euclidean distance (cells) from every cell to the nearest source cell. */
+function edt(src: Uint8Array) {
+  const n = RN;
+  const g = new Float32Array(n * n);
+  for (let i = 0; i < n * n; i++) g[i] = src[i] ? 0 : 1e12;
+  const f = new Float32Array(n);
+  const d = new Float32Array(n);
+  const v = new Int32Array(n);
+  const zb = new Float32Array(n + 1);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) f[i] = g[j * n + i];
+    edt1d(f, n, d, v, zb);
+    for (let i = 0; i < n; i++) g[j * n + i] = d[i];
+  }
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) f[j] = g[j * n + i];
+    edt1d(f, n, d, v, zb);
+    for (let j = 0; j < n; j++) g[j * n + i] = Math.sqrt(d[j]);
+  }
+  return g;
+}
+const raster = (() => {
+  const n = RN;
+  const zone = new Int8Array(n * n).fill(-1);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const id = zoneOfShape(MAP_BOX.x + i + 0.5, MAP_BOX.z + j + 0.5);
+      if (id) zone[j * n + i] = ZONE_INDEX[id];
+    }
+  }
+  const land = new Uint8Array(n * n);
+  const water = new Uint8Array(n * n);
+  const ridge = new Uint8Array(n * n);
+  for (let c = 0; c < n * n; c++) { land[c] = zone[c] >= 0 ? 1 : 0; water[c] = 1 - land[c]; }
+  for (let j = 1; j < n - 1; j++) {
+    for (let i = 1; i < n - 1; i++) {
+      const c = j * n + i;
+      if (zone[c] < 0) continue;
+      for (const o of [c - 1, c + 1, c - n, c + n]) if (zone[o] >= 0 && zone[o] !== zone[c]) { ridge[c] = 1; break; }
+    }
+  }
+  const toWater = edt(water);
+  const toLand = edt(land);
+  const coast = new Float32Array(n * n);
+  for (let c = 0; c < n * n; c++) coast[c] = land[c] ? toWater[c] - 0.5 : 0.5 - toLand[c];
+  const ridgeD = edt(ridge);
+  // the sea belongs to the nearest land's location (fog, colours and mist blend out over the water)
+  const near = Int8Array.from(zone);
+  let front: number[] = [];
+  for (let c = 0; c < n * n; c++) if (zone[c] >= 0) front.push(c);
+  while (front.length) {
+    const next: number[] = [];
+    for (const c of front) {
+      const i = c % n;
+      for (const o of [i > 0 ? c - 1 : -1, i < n - 1 ? c + 1 : -1, c - n, c + n]) {
+        if (o < 0 || o >= n * n || near[o] >= 0) continue;
+        near[o] = near[c];
+        next.push(o);
+      }
+    }
+    front = next;
+  }
+  return { zone, near, coast, ridgeD, ridge };
+})();
+const cellOf = (x: number, z: number) => {
+  const i = Math.min(RN - 1, Math.max(0, Math.floor(x - MAP_BOX.x)));
+  const j = Math.min(RN - 1, Math.max(0, Math.floor(z - MAP_BOX.z)));
+  return j * RN + i;
+};
+/** Bilinear lookup in a 1 m raster. */
+function sample(f: Float32Array, x: number, z: number) {
+  const fx = Math.min(RN - 1.001, Math.max(0, x - MAP_BOX.x - 0.5));
+  const fz = Math.min(RN - 1.001, Math.max(0, z - MAP_BOX.z - 0.5));
+  const i = Math.floor(fx);
+  const j = Math.floor(fz);
+  const u = fx - i;
+  const v = fz - j;
+  const c = j * RN + i;
+  return (f[c] * (1 - u) + f[c + 1] * u) * (1 - v) + (f[c + RN] * (1 - u) + f[c + RN + 1] * u) * v;
+}
+/** Signed distance to the coastline: > 0 inland, < 0 out at sea. */
+export const coastDist = (x: number, z: number) => sample(raster.coast, x, z);
+/** How far inside the coastline the walkable land ends (beach: near the water; trees/cliffs: further in). */
+function walkInset(x: number, z: number) {
+  const e = rimKind(angleOf(x, z));
+  return 4.5 + 2 * treesOf(e) + 3 * cliffOf(e);
+}
+/** Metres beyond the walkable edge (< 0 inside the walkable land). */
+export const outside = (x: number, z: number) => walkInset(x, z) - coastDist(x, z);
+/** Unit direction inland (up the coast distance). */
+export function inland(x: number, z: number) {
+  const gx = coastDist(x + 1, z) - coastDist(x - 1, z);
+  const gz = coastDist(x, z + 1) - coastDist(x, z - 1);
+  const l = Math.hypot(gx, gz) || 1;
+  return { x: gx / l, z: gz / l };
+}
 
 /** The settlement in the middle of the forest (palisade + yard). */
 export function inCamp(x: number, z: number, pad = 0) {
   return Math.hypot(x - ISLAND.campX, z - ISLAND.campZ) < ISLAND.campR + pad;
 }
-export function zoneIdAt(x: number, z: number): ZoneId {
-  const r = Math.hypot(x - ISLAND.cx, z - ISLAND.cz);
-  const a = angleOf(x, z);
-  if (r < forestR(a)) return 'forest';
-  // angles measured from the first border, in [0, 2π); borders are far enough apart to stay in order
-  const TAU = Math.PI * 2;
-  const base = borderA(0, r);
-  const rel = (v: number) => (((v - base) % TAU) + TAU * 2) % TAU;
-  const ra = rel(a);
-  let id = SECTORS[0].id;
-  for (let k = 1; k < SECTORS.length; k++) if (ra >= rel(borderA(k, r))) id = SECTORS[k].id;
-  return id;
-}
+export function zoneIdAt(x: number, z: number): ZoneId { return ZONE_IDS[raster.near[cellOf(x, z)]]; }
 export function zoneAt(x: number, z: number): ZoneDef { return ZONE_BY_ID[zoneIdAt(x, z)]; }
 
 // ---------- ridges: every location is walled off ----------
-// Rocky ridges run round the forest edge and along every border between neighbouring ring sectors
-// (from the forest out to the sea). Each line is sampled every ~0.5 m and queried through a spatial hash.
-const at = (a: number, r: number): [number, number] => [ISLAND.cx + Math.sin(a) * r, ISLAND.cz + Math.cos(a) * r];
-export const RIDGES: [number, number][][] = (() => {
-  const lines: [number, number][][] = [];
-  const ring: [number, number][] = [];
-  for (let a = -Math.PI; a <= Math.PI + 1e-9; a += 0.004) ring.push(at(a, forestR(a)));
-  lines.push(ring);
-  for (let k = 0; k < SECTORS.length; k++) {
-    const spoke: [number, number][] = [];
-    for (let r = forestR(SECTORS[k].from); r < 132; r += 0.5) spoke.push(at(borderA(k, r), r));
-    lines.push(spoke);
-  }
-  return lines;
-})();
-const RIDGE_PTS = RIDGES.flat();
-const RCELL = 4;
-const rgrid = new Map<number, number[]>();
-const rkey = (cx: number, cz: number) => (cx + 500) * 1000 + (cz + 500);
-RIDGE_PTS.forEach(([x, z], i) => {
-  const k = rkey(Math.floor(x / RCELL), Math.floor(z / RCELL));
-  let a = rgrid.get(k);
-  if (!a) rgrid.set(k, (a = []));
-  a.push(i);
-});
-/** Distance to the ridge line (capped: far points report 99). */
-export function ridgeDist(x: number, z: number) {
-  const cx = Math.floor(x / RCELL);
-  const cz = Math.floor(z / RCELL);
-  let best = 99 * 99;
-  for (let dx = -1; dx <= 1; dx++) {
-    for (let dz = -1; dz <= 1; dz++) {
-      const a = rgrid.get(rkey(cx + dx, cz + dz));
-      if (!a) continue;
-      for (const i of a) {
-        const d = (RIDGE_PTS[i][0] - x) ** 2 + (RIDGE_PTS[i][1] - z) ** 2;
-        if (d < best) best = d;
+/** Distance to the ridge line between two locations. */
+export function ridgeDist(x: number, z: number) { return Math.max(0, sample(raster.ridgeD, x, z) - 0.5); }
+/** Points along every ridge ~1.7 m apart, with the unit normal across it. */
+export const RIDGE_POINTS: { x: number; z: number; nx: number; nz: number }[] = (() => {
+  const out: { x: number; z: number; nx: number; nz: number }[] = [];
+  const hashed = new Map<number, number[]>();
+  const hkey = (x: number, z: number) => Math.floor(x / 2) * 1000 + Math.floor(z / 2);
+  const n = RN;
+  for (let c = 0; c < n * n; c++) {
+    if (!raster.ridge[c]) continue;
+    const x = MAP_BOX.x + (c % n) + 0.5;
+    const z = MAP_BOX.z + Math.floor(c / n) + 0.5;
+    let close = false;
+    for (let a = -1; a <= 1 && !close; a++) {
+      for (let b = -1; b <= 1 && !close; b++) {
+        for (const q of hashed.get(hkey(x + a * 2, z + b * 2)) ?? []) if ((out[q].x - x) ** 2 + (out[q].z - z) ** 2 < 1.7 * 1.7) { close = true; break; }
       }
     }
+    if (close) continue;
+    // normal: towards the cells of the other location nearby
+    let nx = 0;
+    let nz = 0;
+    for (let b = -2; b <= 2; b++) {
+      for (let a = -2; a <= 2; a++) {
+        const o = c + b * n + a;
+        if (o >= 0 && o < n * n && raster.zone[o] >= 0 && raster.zone[o] !== raster.zone[c]) { nx += a; nz += b; }
+      }
+    }
+    const l = Math.hypot(nx, nz) || 1;
+    const k = hkey(x, z);
+    if (!hashed.has(k)) hashed.set(k, []);
+    hashed.get(k)!.push(out.length);
+    out.push({ x, z, nx: nx / l, nz: nz / l });
   }
-  return Math.sqrt(best);
-}
+  return out;
+})();
 
 // ---------- trail ----------
+/** A forest door slid onto the actual border of two locations (hub exits are slid so the trail can meet them). */
+function snapGate(from: ZoneId, to: ZoneId, x0: number, z0: number) {
+  const n = RN;
+  const fi = (id: ZoneId) => ZONE_INDEX[id];
+  let best = Infinity;
+  let bc = -1;
+  for (let c = n; c < n * n - n; c++) {
+    if (raster.zone[c] !== fi(from) || ![c - 1, c + 1, c - n, c + n].some((o) => raster.zone[o] === fi(to))) continue;
+    const d = (MAP_BOX.x + (c % n) + 0.5 - x0) ** 2 + (MAP_BOX.z + Math.floor(c / n) + 0.5 - z0) ** 2;
+    if (d < best) { best = d; bc = c; }
+  }
+  if (bc < 0) throw new Error(`no border ${from} → ${to}`);
+  const x = MAP_BOX.x + (bc % n) + 0.5;
+  const z = MAP_BOX.z + Math.floor(bc / n) + 0.5;
+  // direction: from the `from` cells towards the `to` cells around the spot
+  let tx = 0;
+  let tz = 0;
+  for (let b = -4; b <= 4; b++) {
+    for (let a = -4; a <= 4; a++) {
+      const k = raster.zone[bc + b * n + a];
+      if (k === fi(to)) { tx += a; tz += b; } else if (k === fi(from)) { tx -= a; tz -= b; }
+    }
+  }
+  const l = Math.hypot(tx, tz) || 1;
+  return { x, z, tx: tx / l, tz: tz / l };
+}
+const DOOR_HILLS = snapGate('forest', 'hills', -52.5, -55);
+const DOOR_SWAMP = snapGate('forest', 'swamp', -6, 14);
+const DOOR_PEAKS = snapGate('forest', 'peaks', 5, -104);
+
 /**
- * Trail waypoints: settlement gate (north) → round the west and south of the forest → bandit fort (boss 1,
- * see FORT) → ridge gate (east) → cemetery → arena (boss 2).
+ * Main trail (user's drawing): settlement exit → east, north round the pond → north-west → down the west side
+ * → south → bandit fort (east, in front of the cemetery gate) → ridge gate → cemetery → arena (boss 2).
  */
 const WAY: [number, number][] = [
-  [0, -72], [-3, -80], [-12, -86], [-22, -75], [-30, -64], [-38, -50], [-34, -34], [-22, -22], [-4, -16],
-  [14, -18], [24, -28], [32, -36], [44, -40], [56, -45], [72, -56], [80, -68], [84, -80],
+  // from the camp yard through the gate, curving straight onto the east branch (user's drawing)
+  [CAMP_EXIT.x - CAMP_EXIT.dirX * 6, CAMP_EXIT.z - CAMP_EXIT.dirZ * 6], [CAMP_EXIT.x, CAMP_EXIT.z], [10.5, -66.5],
+  [16, -66], [24, -64.5], [33, -66], [38.5, -71], [38, -77], [31, -80], [24, -84], [20, -89], [13, -92.5], [6, -91],
+  [0, -88.5], [-6, -89], [-12, -88], [-17, -84.5], [-21, -78.5], [-26, -72], [-30.5, -65], [-35, -58], [-38.5, -50],
+  [-39, -41], [-38, -35], [-35, -28.5], [-28.7, -22], [-19, -17.5], [-9.5, -15], [0, -14], [9, -15], [16, -19],
+  [20.5, -23.6], [28.4, -30], [34, -35],
+  [40, -40.5], [58, -40], [70, -34], [88, -24], [98, -32], [98, -52], [92, -70], [84, -80],
 ];
-/** Where the world map writes each zone's name: the middle of each sector (the forest: above the settlement). */
-export const ZONE_LABEL = Object.fromEntries(ZONE_IDS.map((id) => {
-  if (id === 'forest') return [id, [ISLAND.cx, ISLAND.cz - 28]];
-  const k = SECTORS.findIndex((d) => d.id === id);
-  const a = (SECTORS[k].from + (k + 1 < SECTORS.length ? SECTORS[k + 1].from : SECTORS[0].from + Math.PI * 2)) / 2;
-  return [id, [ISLAND.cx + Math.sin(a) * 80, ISLAND.cz + Math.cos(a) * 80]];
-})) as Record<ZoneId, [number, number]>;
+const FORT_I = 33;
+const inside = (d: { x: number; z: number; tx: number; tz: number }): [number, number] => [d.x - d.tx * 1.5, d.z - d.tz * 1.5];
+/** Branches from the main trail to the hub doors (north, west), as drawn. */
+const BRANCH_WAYS: [number, number][][] = [
+  [[3, -89.5], [4, -96], inside(DOOR_PEAKS)],
+  [[-37.5, -53], [-44, -55], inside(DOOR_HILLS)],
+];
+/** Where the world map writes each zone's name: the middle of each location (the forest: above the settlement). */
+export const ZONE_LABEL = (() => {
+  const sum = ZONE_IDS.map(() => [0, 0, 0]);
+  for (let c = 0; c < RN * RN; c += 7) {
+    const k = raster.zone[c];
+    if (k < 0) continue;
+    sum[k][0] += MAP_BOX.x + (c % RN);
+    sum[k][1] += MAP_BOX.z + Math.floor(c / RN);
+    sum[k][2]++;
+  }
+  return Object.fromEntries(ZONE_IDS.map((id, k) => (
+    [id, id === 'forest' ? [ISLAND.cx, ISLAND.cz - 28] : [sum[k][0] / (sum[k][2] || 1), sum[k][1] / (sum[k][2] || 1)]]
+  ))) as Record<ZoneId, [number, number]>;
+})();
+/**
+ * Paths through the outer locations (map drawing): worn decor, and the line their mobs stand along.
+ * Order: Rocky Hills, Autumn Grove, Rotten Swamp, Sand Dunes, Snow Pass.
+ */
+export const LAND_TRAILS: [number, number][][] = [
+  [[-72.5, -10], [-92.5, -35], [-105, -60], [-97.5, -90], [-77.5, -102.5], [-57.5, -97.5], [-55, -70], [-52.5, -55]],
+  [[-115, -10], [-110, 5], [-90, 15], [-60, 15], [-47.5, 20], [-37, 34]],
+  [[-95, 55], [-75, 65], [-70, 85], [-50, 95], [-30, 87.5], [-25, 70], [-10, 55], [-6, 18]],
+  [[110, 20], [90, 40], [65, 30], [40, 30], [25, 50], [30, 72.5], [10, 75], [5, 62.5]],
+  [[69.5, -96], [60, -106], [50, -115], [35, -120], [-10, -115], [-20, -125], [-12.5, -140], [10, -150], [17.5, -162.5]],
+];
+/** The enemy boss camp (bandit fort): the east edge of the hub, in front of the cemetery gate. */
+export const FORT = { x: WAY[FORT_I][0], z: WAY[FORT_I][1], r: 11 };
+/** «Свирепый вожак» of the forest. */
+export const FOREST_MINI: [number, number] = [-10.6, -11.6];
 export const ARENA = { x: WAY[WAY.length - 1][0], z: WAY[WAY.length - 1][1], r: 15 };
 
 const STEP = 0.5;
-function buildPath() {
+function buildCurve(way: [number, number][]) {
   const xs: number[] = [];
   const zs: number[] = [];
-  const P = (i: number) => WAY[Math.max(0, Math.min(WAY.length - 1, i))];
-  for (let i = 0; i < WAY.length - 1; i++) {
+  const P = (i: number) => way[Math.max(0, Math.min(way.length - 1, i))];
+  for (let i = 0; i < way.length - 1; i++) {
     const [p0, p1, p2, p3] = [P(i - 1), P(i), P(i + 1), P(i + 2)];
     const n = Math.max(2, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 0.25));
     for (let k = 0; k < n; k++) {
@@ -200,8 +419,8 @@ function buildPath() {
       zs.push(cr(p0[1], p1[1], p2[1], p3[1]));
     }
   }
-  xs.push(WAY[WAY.length - 1][0]);
-  zs.push(WAY[WAY.length - 1][1]);
+  xs.push(way[way.length - 1][0]);
+  zs.push(way[way.length - 1][1]);
   // resample at an even STEP so index ↔ arc length
   const ox: number[] = [xs[0]];
   const oz: number[] = [zs[0]];
@@ -223,7 +442,8 @@ function buildPath() {
   }
   return { x: ox, z: oz, length: (ox.length - 1) * STEP };
 }
-export const PATH = buildPath();
+export const PATH = buildCurve(WAY);
+export const BRANCH_PATHS = BRANCH_WAYS.map(buildCurve);
 
 /** Point and unit tangent on the trail at arc length s. */
 export function pathAt(s: number) {
@@ -242,8 +462,10 @@ export function pathAt(s: number) {
 const CELL = 4;
 const grid = new Map<number, number[]>();
 const key = (cx: number, cz: number) => (cx + 500) * 1000 + (cz + 500);
-PATH.x.forEach((x, i) => {
-  const k = key(Math.floor(x / CELL), Math.floor(PATH.z[i] / CELL));
+const TRAIL_X = PATH.x.concat(...BRANCH_PATHS.map((c) => c.x));
+const TRAIL_Z = PATH.z.concat(...BRANCH_PATHS.map((c) => c.z));
+TRAIL_X.forEach((x, i) => {
+  const k = key(Math.floor(x / CELL), Math.floor(TRAIL_Z[i] / CELL));
   let a = grid.get(k);
   if (!a) grid.set(k, (a = []));
   a.push(i);
@@ -258,7 +480,7 @@ export function pathDist(x: number, z: number) {
       const a = grid.get(key(cx + dx, cz + dz));
       if (!a) continue;
       for (const i of a) {
-        const d = (PATH.x[i] - x) ** 2 + (PATH.z[i] - z) ** 2;
+        const d = (TRAIL_X[i] - x) ** 2 + (TRAIL_Z[i] - z) ** 2;
         if (d < best) best = d;
       }
     }
@@ -276,6 +498,20 @@ export function progressAt(x: number, z: number) {
   return bi * STEP;
 }
 
+/** Two spots flanking a trail point (`gap` m either side of it). */
+const flank = (x: number, z: number, tx: number, tz: number, gap: number) => [
+  { x: x + tz * gap, z: z - tx * gap }, { x: x - tz * gap, z: z + tx * gap },
+];
+/** Elite guards of the boss camp: on the trail just before the fort's west entrance. */
+export const BOSS_GUARDS = (() => {
+  let s = progressAt(FORT.x, FORT.z);
+  while (s > 0 && Math.hypot(pathAt(s).x - FORT.x, pathAt(s).z - FORT.z) < FORT.r) s -= STEP;
+  const p = pathAt(s - 4);
+  return flank(p.x, p.z, p.tx, p.tz, 2.4);
+})();
+/** Guards just inside the north gate (hub → Snow Pass), either side of the door. */
+export const GATE_GUARDS = flank(DOOR_PEAKS.x - DOOR_PEAKS.tx * 2.5, DOOR_PEAKS.z - DOOR_PEAKS.tz * 2.5, DOOR_PEAKS.tx, DOOR_PEAKS.tz, 2.6);
+
 /** The ridge gate: where the trail crosses from the forest into the cemetery. */
 export const GATE = (() => {
   for (let i = 1; i < PATH.x.length; i++) {
@@ -286,58 +522,31 @@ export const GATE = (() => {
   throw new Error('trail never enters the cemetery');
 })();
 
-/**
- * Bandit fort (boss 1) on the trail at the far end of the forest, right before the ridge gate it opens:
- * the forest is crossed first, the boss guards the way on.
- */
-export const FORT = (() => {
-  const r = 11;
-  const p = pathAt(GATE.s - r - 7);
-  return { x: p.x, z: p.z, r };
-})();
-
 /** A passage through a ridge. (tx, tz) is the unit direction of travel from `from` into `to`. */
 export interface Gate { id: string; from: ZoneId; to: ZoneId; x: number; z: number; tx: number; tz: number }
 /**
- * Passages: one from the forest into every ring location (the cemetery's is where the trail crosses)
- * and one through every border between two neighbouring locations, halfway out to the shore.
+ * Passages: the cemetery one is where the trail crosses; the others are placed by hand (map drawing) and slid
+ * onto the nearest stretch of the actual border, facing from `from` into `to`.
  */
 export const GATES: Gate[] = (() => {
-  const out: Gate[] = [];
-  const n = SECTORS.length;
-  const TAU = Math.PI * 2;
-  for (let k = 0; k < n; k++) {
-    const to = SECTORS[k].id;
-    if (to === 'cemetery') {
-      out.push({ id: `forest-${to}`, from: 'forest', to, x: GATE.x, z: GATE.z, tx: GATE.tx, tz: GATE.tz });
-      continue;
-    }
-    const next = k + 1 < n ? SECTORS[k + 1].from : SECTORS[0].from + TAU;
-    const a = (SECTORS[k].from + next) / 2;
-    const [x, z] = at(a, forestR(a));
-    out.push({ id: `forest-${to}`, from: 'forest', to, x, z, tx: Math.sin(a), tz: Math.cos(a) });
-  }
-  for (let k = 0; k < n; k++) {
-    const from = SECTORS[(k + n - 1) % n].id;
-    const to = SECTORS[k].id;
-    const a0 = SECTORS[k].from;
-    const r = (forestR(a0) + walkR(a0)) / 2;
-    const [x, z] = at(borderA(k, r), r);
-    const [x0, z0] = at(borderA(k, r - 1), r - 1);
-    const [x1, z1] = at(borderA(k, r + 1), r + 1);
-    // across the spoke, towards growing angle (from sector k-1 into sector k)
-    let tx = z1 - z0;
-    let tz = -(x1 - x0);
-    const l = Math.hypot(tx, tz) || 1;
-    tx /= l;
-    tz /= l;
-    const ax = Math.cos(borderA(k, r));
-    const az = -Math.sin(borderA(k, r));
-    if (tx * ax + tz * az < 0) { tx = -tx; tz = -tz; }
-    out.push({ id: `${from}-${to}`, from, to, x, z, tx, tz });
-  }
+  const out: Gate[] = [{ id: 'forest-cemetery', from: 'forest', to: 'cemetery', x: GATE.x, z: GATE.z, tx: GATE.tx, tz: GATE.tz }];
+  const manual: [ZoneId, ZoneId, number, number][] = [
+    ['forest', 'hills', DOOR_HILLS.x, DOOR_HILLS.z], ['hills', 'grove', -66.5, -1.5], ['forest', 'swamp', DOOR_SWAMP.x, DOOR_SWAMP.z],
+    ['grove', 'swamp', -30, 40], ['swamp', 'dunes', 5, 62.5], ['cemetery', 'peaks', 69.5, -96], ['forest', 'peaks', DOOR_PEAKS.x, DOOR_PEAKS.z],
+  ];
+  for (const [from, to, x0, z0] of manual) out.push({ id: `${from}-${to}`, from, to, ...snapGate(from, to, x0, z0) });
   return out;
 })();
+/** Main boss and «Свирепый вожак» spots of the cemetery and the outer locations (map drawing; slid onto walkable land). */
+export const LAND_BOSSES: { zone: ZoneId; boss?: [number, number]; minis: [number, number][] }[] = [
+  { zone: 'cemetery', minis: [[81.5, -17.5]] },
+  { zone: 'peaks', boss: [-40, -130], minis: [[36.5, -131], [63.5, -85]] },
+  { zone: 'hills', boss: [-122.5, -52.5], minis: [[-70, -87.5]] },
+  { zone: 'grove', boss: [-113.5, -18.5], minis: [[-61.5, 30]] },
+  { zone: 'swamp', boss: [-107.5, 52.5], minis: [[-47.5, 72.5]] },
+  { zone: 'dunes', boss: [74, 61], minis: [[111.5, 20]] },
+];
+
 /** Distance to the nearest passage. */
 export function gateDist(x: number, z: number) {
   let best = Infinity;
@@ -356,39 +565,47 @@ export function ridgeH(x: number, z: number) {
 
 /** Ground height: 0 on the walkable island, a rim (beach / tree bank / cliffs) and the sea floor around it. */
 export function heightAt(x: number, z: number) {
-  const a = angleOf(x, z);
-  const r = Math.hypot(x - ISLAND.cx, z - ISLAND.cz);
-  const rw = walkR(a);
-  const rs = shoreR(a);
-  const ridge = r < rs ? ridgeH(x, z) : 0;
-  if (r <= rw) return ridge;
-  if (r < rs) {
-    const t = (r - rw) / (rs - rw);
-    const e = rimKind(a);
+  const d = coastDist(x, z);
+  const e = rimKind(angleOf(x, z));
+  const inset = 4.5 + 2 * treesOf(e) + 3 * cliffOf(e);
+  const ridge = d > 0 ? ridgeH(x, z) : 0;
+  if (d >= inset) return ridge;
+  if (d > 0) {
+    const t = (inset - d) / inset;
     const cliff = cliffOf(e);
     const trees = treesOf(e) * (1 - cliff);
     const hump = smooth(0, 0.35, t) * (1 - smooth(0.72, 1, t));
     const h = -0.9 * t ** 1.2 + trees * 1.6 * Math.sin(Math.PI * t) + cliff * (3 + 6 * fbm(x * 0.05 + 10, z * 0.05)) * hump;
     return ridge > 0 ? Math.max(h, ridge) : h;
   }
-  return Math.max(-6, -0.9 - (r - rs) * 0.3);
+  return Math.max(-6, -0.9 + d * 0.3);
 }
 
 /** Inside the walkable island and off the ridges (the passages are walkable). */
+/** No-go band along every ridge between locations (m from the ridge line), open only round the gates. */
+export const BORDER = 5.5;
+export const BORDER_GATE_R = 6;
 export function walkable(x: number, z: number, pad = 0) {
-  const r = Math.hypot(x - ISLAND.cx, z - ISLAND.cz);
-  if (r > walkR(angleOf(x, z)) - pad) return false;
-  return ridgeDist(x, z) > 3.2 + pad || gateDist(x, z) < 5;
+  if (outside(x, z) > -pad) return false;
+  return ridgeDist(x, z) > BORDER + pad || gateDist(x, z) < BORDER_GATE_R - 1;
+}
+/** Unit direction away from the nearest ridge. */
+export function ridgeAway(x: number, z: number) {
+  const gx = ridgeDist(x + 1, z) - ridgeDist(x - 1, z);
+  const gz = ridgeDist(x, z + 1) - ridgeDist(x, z - 1);
+  const l = Math.hypot(gx, gz) || 1;
+  return { x: gx / l, z: gz / l };
 }
 
-/** A point on the walkable edge at angle a, `inset` metres inside. */
+/** A point on the walkable edge at angle a, `inset` metres inside (along the ray from the island centre). */
 export function edgePoint(a: number, inset = 0) {
-  const r = walkR(a) - inset;
+  let r = 20;
+  while (r < 200 && outside(ISLAND.cx + Math.sin(a) * r, ISLAND.cz + Math.cos(a) * r) < -inset) r += 0.5;
   return { x: ISLAND.cx + Math.sin(a) * r, z: ISLAND.cz + Math.cos(a) * r };
 }
 
 // ---------- zone weight grid (smooth borders for colours, fog and mist) ----------
-export const ZGRID = { n: 142, cell: MAP_BOX.size / 142 };
+export const ZGRID = { n: 170, cell: MAP_BOX.size / 170 };
 /** w: NZ weights per cell (blurred zone membership, in ZONES order); land: 1 on land … 0 in deep sea. */
 export const zoneGrid = (() => {
   const { n, cell } = ZGRID;

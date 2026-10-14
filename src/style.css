@@ -838,3 +838,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .g-result .g-btns { margin-top: 12px; }
 /* prop hit labels stay small over the bigger weak/resist numbers of later layouts */
 .ftext.dmg.weak.small, .ftext.dmg.resist.small { font-size: 16px; }
+
+/* friendly camp NPC: name and the talk button over its head */
+.npcui { position: absolute; left: 0; top: 0; display: none; flex-direction: column; align-items: center; gap: 4px; }
+.npcui.show { display: flex; }
+.npcname { font-size: 14px; font-weight: 900; color: #7fe08a; text-shadow: 0 2px 0 #000, 0 0 4px #000; white-space: nowrap; }
+.npcbtn { pointer-events: auto; flex: none; min-height: 24px; font-size: 8px; padding: 4px 5px; border-width: 2px; border-radius: 7px; }
