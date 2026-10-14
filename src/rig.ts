@@ -19,14 +19,8 @@ export const WEAPON_GRIPS: Record<string, { tilt?: number; out?: number; grip?: 
   hammer_human_paladin: { scale: 0.75, grip: 0.16 },
   dagger: { scale: 1.15, grip: 0.15 },
   reaper: { scale: 1.05, grip: 0.3, tilt: 0.1, out: 0.2 },
-  nagamaki: { scale: 1.0, grip: 0.22, tilt: 0.15, out: 0.3 },
-  scythe: { scale: 1.0, grip: 0.42 },
   // `face`: lay the disc across the fist axis (its face looks forward), grip at its back
   shield: { scale: 0.9, grip: 0.02, tilt: 0, out: 0.2, face: Math.PI / 2 },
-  pan: { scale: 1.0, grip: 0.1 },
-  hidden_blade: { scale: 1.6, grip: 0.1, tilt: 0, out: 0.1 },
-  sickle: { scale: 1.5, grip: 0.12 },
-  kitchen_knife: { scale: 1.6, grip: 0.12 },
   spear_undead_warrior: { scale: 0.7, grip: 0.4, tilt: 0.1, out: 0.15 },
 };
 
