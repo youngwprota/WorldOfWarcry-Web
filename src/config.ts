@@ -310,9 +310,19 @@ export interface BossDef {
   cones?: ConeDef[];
   /** Packs of small mobs run in from the fort entrance when the boss HP first falls below each fraction in `at`. */
   reinforce?: { at: number[]; pool: string[] };
+  souls?: SoulsDef;
 }
-/** One cone attack: `yaws` are offsets (rad) from the line to the hero, one cone each; damage = boss dmg × mul. */
-export interface ConeDef { half: number; len: number; mul: number; yaws: number[] }
+/**
+ * One cone attack: `yaws` are offsets (rad) from the line to the hero, one cone each; damage = boss dmg × mul.
+ * `reap`: a slow scythe sweep (`delay` s telegraph) — each of the boss's souls caught in it dies and heals the boss by reap × max HP.
+ */
+export interface ConeDef { half: number; len: number; mul: number; yaws: number[]; reap?: number; delay?: number }
+/**
+ * Death's souls: one `mob` rises every `every` s of the fight, `burst` more at each HP fraction in `burstAt`
+ * (the boss raises its scythe for `ritual` s). They rise `ring` m from the boss, never in the `backHalf` (rad)
+ * cone behind it; HP = `hits` plain blows of the hero's weapon; the hero walks through them.
+ */
+export interface SoulsDef { mob: string; every: number; burstAt: number[]; burst: number; ritual: number; hits: number; ring: [number, number]; backHalf: number }
 const BOSS_BASE = {
   slamMul: 2.2, slamDelay: 1.25, cd: 6.5, cdPhase2: 4.2, phase2At: 0.5, phase2Dmg: 1.2,
   chance: 0.55, chaseCount: 3, chaseRadius: 2.3, chaseMul: 1.4, chaseDelay: 1.0, chaseGap: 0.45, chaseRange: 11,
@@ -536,7 +546,16 @@ export const MOBS: Record<string, MobDef> = {
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['cemetery-peaks'],
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
+      cones: [{ half: Math.PI / 3, len: 6, mul: 3.2, yaws: [0], reap: 0.05, delay: 1.8 }],
+      souls: { mob: 'skeleton_soul', every: 3, burstAt: [0.5, 0.1], burst: 6, ritual: 2.2, hits: 3, ring: [2.5, 6], backHalf: Math.PI / 6 },
     },
+  },
+  // Death's souls (BossDef.souls): HP is set from the hero's hit on spawn, no orbs
+  skeleton_soul: {
+    id: 'skeleton_soul', name: 'Душа',
+    model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
+    anim: 'SwordAttack', hp: 100, dmg: 2.5, aps: 0.8, range: 1.4, speed: 3.2, aggro: 30, regen: 0, scale: 0.9,
+    ...foes('cemetery'), reward: { hp: 0 }, respawn: 0,
   },
   // ---------- outer lands, in map order after the cemetery (ZONE_TIER multiplies their HP and damage) ----------
   // Snow Pass and Autumn Grove: elves
@@ -779,8 +798,8 @@ export const BREAKABLES: Record<string, BreakableDef> = {
   tomb2: { model: 'undead_tomb_stone_2', hits: 2, color: 0x77748a, scale: 0.75, reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   tomb3: { model: 'undead_tomb_stone_3', hits: 2, color: 0x77748a, scale: 0.75, reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   tomb4: { model: 'undead_tomb_stone_4', hits: 2, color: 0x77748a, scale: 0.75, reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  fort_tower_orc: { model: 'orc_tower_Lv2', hits: 30, color: 0x7a5a38, scale: 0.38, reward: { power: 3 }, resist: { slash: 'weak' }, r: 1.4, respawn: 900, shoot: TOWER_SHOT },
-  fort_tower_human: { model: 'tower_Lv2', hits: 30, color: 0x7a5a38, scale: 0.38, reward: { power: 3 }, resist: { slash: 'weak' }, r: 1.4, respawn: 900, shoot: TOWER_SHOT },
+  fort_tower_orc: { model: 'orc_tower_Lv2', hits: 30, color: 0x7a5a38, scale: 0.57, reward: { power: 3 }, resist: { slash: 'weak' }, r: 2.1, respawn: 900, shoot: TOWER_SHOT },
+  fort_tower_human: { model: 'tower_Lv2', hits: 30, color: 0x7a5a38, scale: 0.57, reward: { power: 3 }, resist: { slash: 'weak' }, r: 2.1, respawn: 900, shoot: TOWER_SHOT },
   coffin: { model: 'undead_coffin', hits: 3, color: 0x5a3c2c, scale: 0.34, reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
 };
 

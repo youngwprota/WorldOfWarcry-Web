@@ -142,6 +142,8 @@ export class DebugPanel {
     this.el.id = 'debug';
     this.el.className = 'ui-block hidden';
     this.el.innerHTML = `<div class="dbg-head"><b>🛠 Дебаг</b><span><button data-min title="Свернуть">–</button> <button data-close>✕</button></span></div><pre class="dbg-info"></pre>` +
+      '<div class="dbg-sec"><span>Билд героя</span><div class="dbg-build"><label>Атака <input data-build="power" type="number" min="0"></label>' +
+      '<label>HP <input data-build="hp" type="number" min="1"></label><button data-apply>Применить</button></div></div>' +
       SECTIONS.map(([title, actions], si) => `<div class="dbg-sec"><span>${title}</span><div class="dbg-btns">` +
         actions.map(([label, , cls], ai) => `<button class="${cls ?? ''}" data-a="${si}:${ai}">${label}</button>`).join('') +
         '</div></div>').join('');
@@ -154,6 +156,7 @@ export class DebugPanel {
       if (!b) return;
       sfx.click();
       if (b.dataset.close !== undefined) { this.toggle(false); return; }
+      if (b.dataset.apply !== undefined) { this.applyBuild(); return; }
       if (b.dataset.min !== undefined) { this.el.classList.toggle('min'); b.textContent = this.el.classList.contains('min') ? '+' : '–'; return; }
       const [si, ai] = b.dataset.a!.split(':').map(Number);
       const a = SECTIONS[si][1][ai];
@@ -169,9 +172,26 @@ export class DebugPanel {
     this.el.classList.toggle('hidden', !on);
     clearInterval(this.timer);
     if (on) {
+      this.fillBuild();
       this.render();
       this.timer = window.setInterval(() => this.render(), 250);
     }
+  }
+
+  private inputs() { return [...this.el.querySelectorAll<HTMLInputElement>('[data-build]')]; }
+
+  private fillBuild() {
+    const s = this.game.stats;
+    for (const i of this.inputs()) i.value = String(Math.round(i.dataset.build === 'hp' ? s.maxHp : s.power));
+  }
+
+  private applyBuild() {
+    for (const i of this.inputs()) {
+      const v = Number(i.value);
+      if (i.value !== '' && Number.isFinite(v)) this.game.debugSetStat(i.dataset.build as 'power' | 'hp', Math.max(i.dataset.build === 'hp' ? 1 : 0, v));
+    }
+    this.fillBuild();
+    this.render();
   }
 
   private render() {

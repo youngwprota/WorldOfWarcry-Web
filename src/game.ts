@@ -7,7 +7,7 @@ import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from '.
 import { Creature } from './creature';
 import {
   COMBOS, DUAL, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
-  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StatId, type WeaponDef, type ZoneDef, isPctStat,
+  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, isPctStat,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
@@ -23,9 +23,12 @@ import { UI, type MapMark } from './ui';
 import { CampNpc } from './npc';
 import { fmtK, icon, resistIcons, rewardChips } from './icons';
 import { heroDeaths, logFight, logSnap } from './balancelog';
-import { addPct, addStat, armorMul, critAvg, critChance, critMul, dodgeChance, gearOf, guardMul, handMulOf, heroDps, heroStats } from './balance';
+import { addPct, addStat, armorMul, critAvg, critChance, critMul, dodgeChance, gearOf, guardMul, handMulOf, heroDps, heroStats, statBreakdown } from './balance';
 
 /** Debris colour of hits and kills: bone dust for skeletons and spirits, blood for the rest. */
+/** Death's souls: rise spots, the ritual aura, the reap. */
+const SOUL_GREEN = 0x6cff7a;
+const SOUL_BARKS = ['Восстаньте, души!', 'Служите мне вечно!', 'Ваши кости — мои!'];
 const bloodColor = (m: Mob) => m.def.id.startsWith('skel') || m.def.id === 'ghost' || m.def.id === 'death' ? 0xd8d4c8 : 0xc0392b;
 /** White-yellow sparks of a non-lethal hit (blood is for the kill). */
 const HIT_SPARK = 0xfff3a8;
@@ -168,6 +171,11 @@ class Mob extends Unit {
   cycle = 0;
   /** Reinforcement of this boss: removed when the fight resets, pays no gacha pull. */
   owner: Mob | null = null;
+  /** Death's soul: the hero walks through it. */
+  passable = false;
+  /** Death: seconds since the last soul rose, and seconds left of the summoning ritual. */
+  soulT = 0;
+  ritual = 0;
   awake = true;
   /** Damage type of the mob's hits (its location's, config ZONE_FOES); the hero's armour resists it. */
   dmgType: DamageType;
@@ -183,7 +191,7 @@ class Mob extends Unit {
     // Bosses, micro-bosses and elites get a bigger HP bar with their name and HP numbers: a boss's name is
     // coloured by difficulty, a micro-boss's is orange with its stat bonus, an elite's has its drop's quality colour and icon.
     const reward: Partial<Record<OrbKind, number>> = {};
-    for (const [k, n] of Object.entries(def.reward) as [OrbKind, number][]) reward[k] = Math.round(n * mul.reward);
+    for (const [k, n] of Object.entries(def.reward) as [OrbKind, number][]) if (n) reward[k] = Math.round(n * mul.reward);
     const named = !!(def.boss || def.rank);
     // a main boss also shows the item it drops under its name
     const bossDrop = def.boss && def.drop
@@ -240,6 +248,8 @@ class Mob extends Unit {
     this.hp = this.maxHp;
     this.phase2 = false;
     this.adds = 0;
+    this.soulT = 0;
+    this.ritual = 0;
     this.cycle = 0;
     this.special = 4;
     this.casting = 0;
@@ -629,7 +639,7 @@ export class Game {
     }
     // soft push from living mobs
     for (const m of this.mobs) {
-      if (!m.alive || !m.awake || m.rise > 0) continue;
+      if (!m.alive || !m.awake || m.rise > 0 || m.passable) continue;
       const dx = p.x - m.pos.x;
       const dz = p.z - m.pos.z;
       const rr = m.radius + HERO.radius;
@@ -1396,6 +1406,7 @@ export class Game {
       const def = m.def;
       let moving = false;
       if (m.hp < m.maxHp && this.time - m.hurtAt > MOB_REGEN_DELAY) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * def.regen * dt);
+      if (def.boss?.souls && m.state === 'chase') this.raiseSouls(m, def.boss.souls, dt);
       if (m.air > 0) {
         // nagamaki launch: up and down, the blow lands with the mob
         m.air -= dt;
@@ -1440,14 +1451,14 @@ export class Game {
           if (this.dead || heroInCamp || dSpawn > leash || hp.distanceTo(m.spawn) > leash + 4) {
             m.state = 'return';
             this.endFight(m, 'reset');
-            if (def.boss) { m.adds = 0; this.despawnMinions(m); }
+            if (def.boss) { m.adds = 0; m.soulT = 0; m.ritual = 0; this.despawnMinions(m); }
           } else {
             const reach = def.range + m.radius * 0.5 + HERO.radius;
             if (def.boss) {
               // A boss on your tail keeps you in combat: no out-of-combat regen while kiting.
               this.bossLogic(m, dt, dHero);
             }
-            if (m.casting <= 0) {
+            if (m.casting <= 0 && m.ritual <= 0) {
               const back = m.ch instanceof Creature ? m.ch.backstep() : 0;
               if (back > 0) {
                 m.pos.x -= Math.sin(m.ch.facing) * back;
@@ -1581,7 +1592,7 @@ export class Game {
       this.callReinforcements(m, b.reinforce.pool);
     }
     m.special -= dt;
-    if (m.special > 0 || m.impact >= 0) return;
+    if (m.special > 0 || m.impact >= 0 || m.ritual > 0) return;
     // Specials wait until the hero is in reach: no slams into thin air while the hero runs off.
     const chase = m.phase2 && dHero < b.chaseRange && Math.random() < b.chance;
     // cycle step 0 = the slam around the boss, 1.. = the cones in order
@@ -1614,13 +1625,16 @@ export class Game {
         }, i * b.chaseGap * 1000);
       }
     } else if (cone) {
-      m.casting = 1.35;
-      m.ch.attack('AxeAttack', 1.35, 1.25);
+      const delay = cone.delay ?? b.slamDelay;
+      m.casting = delay + 0.1;
+      // the reaping cone is a slow scythe sweep across the whole sector
+      if (cone.reap && m.ch instanceof Character) m.ch.swing('slashRL', 0, delay + 0.6, delay);
+      else m.ch.attack('AxeAttack', 1.35, 1.25);
       const yaw = Math.atan2(this.hero.position.x - m.pos.x, this.hero.position.z - m.pos.z);
       m.ch.facing = yaw;
       for (const off of cone.yaws) {
-        const tag: ConeTag = { boss: m, at: m.pos.clone(), yaw: yaw + off, half: cone.half, len: cone.len, mul: cone.mul };
-        this.telegraphs.addCone(tag.at, tag.yaw, cone.half, cone.len, b.slamDelay, this.coneHit, tag);
+        const tag: ConeTag = { boss: m, at: m.pos.clone(), yaw: yaw + off, half: cone.half, len: cone.len, mul: cone.mul, reap: cone.reap };
+        this.telegraphs.addCone(tag.at, tag.yaw, cone.half, cone.len, delay, this.coneHit, tag);
       }
     } else {
       m.casting = 1.35;
@@ -1637,18 +1651,73 @@ export class Game {
     this.particles.burst(v2.set(c.at.x + Math.sin(c.yaw) * c.len * 0.5, 0.2, c.at.z + Math.cos(c.yaw) * c.len * 0.5), 0x8a7a6a, 10, 0.18, 7, 0.7);
     const f = this.fightOf(c.boss);
     f.slams++;
-    if (this.dead) return;
-    const dx = this.hero.position.x - c.at.x;
-    const dz = this.hero.position.z - c.at.z;
-    const d = Math.hypot(dx, dz);
-    if (d > c.len + HERO.radius) return;
-    const a = Math.atan2(dx, dz) - c.yaw;
-    const off = Math.atan2(Math.sin(a), Math.cos(a));
-    // the hero's body widens the cone a little
-    if (Math.abs(off) > c.half + Math.asin(Math.min(1, HERO.radius / Math.max(d, HERO.radius)))) return;
+    if (c.reap) this.reapSouls(c);
+    if (this.dead || !inCone(c, this.hero.position, HERO.radius)) return;
     f.slamHits++;
     this.hurtHero(c.boss.dmg * c.mul, c.at, c.boss);
   };
+
+  /** Scythe sweep: every soul of the boss inside the cone dies, each heals the boss by `reap` of its max HP. */
+  private reapSouls(c: ConeTag) {
+    let n = 0;
+    for (const m of this.mobs) {
+      if (m.owner !== c.boss || !m.alive || !inCone(c, m.pos, m.radius)) continue;
+      this.particles.burst(v2.copy(m.pos).setY(1), SOUL_GREEN, 6, 0.1, 4, 0.5);
+      this.killMob(m);
+      n++;
+    }
+    if (!n) return;
+    const b = c.boss;
+    const heal = Math.min(b.maxHp - b.hp, Math.round(b.maxHp * c.reap! * n));
+    b.hp += heal;
+    this.fx.spawn(this.unitTextAt(b), `+${fmtK(heal)}`, 'loot', 1.2, { color: '#6cff7a', lift: b.uiEl.offsetHeight });
+    this.fx.spawn(v1.copy(b.pos).setY(5.6), 'Ваша жизнь — моя!', 'bark', 1.8);
+    this.waves.add(b.pos, 2.5, SOUL_GREEN, 0.5);
+  }
+
+  /** Death's souls: one every `every` s of the fight; at each HP threshold the scythe goes up and a burst rises. */
+  private raiseSouls(m: Mob, s: SoulsDef, dt: number) {
+    if (m.adds < s.burstAt.length && m.hp < m.maxHp * s.burstAt[m.adds]) {
+      while (m.adds < s.burstAt.length && m.hp < m.maxHp * s.burstAt[m.adds]) m.adds++;
+      m.ritual = s.ritual;
+      this.fx.spawn(v1.copy(m.pos).setY(5.6), SOUL_BARKS[Math.floor(Math.random() * SOUL_BARKS.length)], 'bark', 2.2);
+      sfx.telegraph();
+      for (let i = 0; i < s.burst; i++) this.raiseSoul(m, s);
+    }
+    if (m.ritual > 0) {
+      const before = m.ritual;
+      m.ritual -= dt;
+      // the green aura pulses under the boss every 0.4 s of the ritual
+      if (Math.ceil(before / 0.4) !== Math.ceil(Math.max(0, m.ritual) / 0.4)) this.waves.add(m.pos, s.ring[1], SOUL_GREEN, 0.7);
+    }
+    m.soulT += dt;
+    if (m.soulT >= s.every) {
+      m.soulT = 0;
+      this.raiseSoul(m, s);
+    }
+  }
+
+  /** One soul crawls out `ring` m from the boss, anywhere but the cone behind it; HP = `hits` weakest blows of the hero. */
+  private raiseSoul(boss: Mob, s: SoulsDef) {
+    const a = boss.ch.facing + (Math.random() * 2 - 1) * (Math.PI - s.backHalf);
+    const r = s.ring[0] + Math.random() * (s.ring[1] - s.ring[0]);
+    const at = new THREE.Vector3(boss.pos.x + Math.sin(a) * r, 0, boss.pos.z + Math.cos(a) * r);
+    this.world.collide(at, 0.45);
+    const m = this.addMob(MOBS[s.mob], at, this.labels);
+    const it = this.weaponItem;
+    const blow = this.itemDamage(it) * this.handMulOf(it) * RESIST_MULT[m.def.resist[WEAPONS[it.def].type] ?? 'normal'];
+    // damageFor rolls 0.9-1.1: `hits` blows always kill, one fewer never does
+    m.maxHp = m.hp = Math.max(1, Math.floor(blow * 0.9 * s.hits));
+    m.temp = true;
+    m.owner = boss;
+    m.passable = true;
+    m.state = 'chase';
+    m.atkCd = 0.8;
+    m.rise = 1.3;
+    m.pos.y = -1.9;
+    this.waves.add(at, 1.1, SOUL_GREEN, 1.3);
+    this.particles.burst(v1.copy(at).setY(0.2), SOUL_GREEN, 10, 0.12, 4, 0.9);
+  }
 
   /** 3–4 mobs of different kinds run in from the fort entrance and go for the hero. */
   private callReinforcements(boss: Mob, pool: string[]) {
@@ -1666,6 +1735,17 @@ export class Game {
     }
   }
 
+  /** The hero died: the boss is back to full HP and its fight starts over. */
+  private resetBoss(m: Mob) {
+    m.hp = m.maxHp;
+    m.phase2 = false;
+    m.adds = 0;
+    m.cycle = 0;
+    m.soulT = 0;
+    m.ritual = 0;
+    this.despawnMinions(m);
+  }
+
   private despawnMinions(boss: Mob) {
     for (const m of this.mobs) {
       if (m.owner !== boss || m.removed) continue;
@@ -1680,11 +1760,17 @@ export class Game {
     const hp = this.hero.position;
     b.shootCd -= dt;
     if (b.shootCd > 0) return;
-    if (this.dead || inCamp(hp.x, hp.z) || b.pos.distanceTo(hp) > s.range) { b.shootCd = 0.5; return; }
+    if (this.dead || inCamp(hp.x, hp.z) || b.pos.distanceTo(hp) > s.range || !this.bossFightNear(b)) { b.shootCd = 0.5; return; }
     b.shootCd = s.cd;
     sfx.telegraph();
     const tag: ShotTag = { at: hp.clone().setY(0), dmg: s.dmg, r: s.r };
     this.telegraphs.add(tag.at, s.r, s.delay, this.towerHit, tag, v1.copy(b.pos).setY(s.height));
+  }
+
+  /** The boss of the tower's location is fighting the hero (the tower only backs it up). */
+  private bossFightNear(b: Prop) {
+    const zone = this.world.zoneAt(b.pos.x, b.pos.z).id;
+    return this.mobs.some((m) => m.def.boss?.zone === zone && m.state === 'chase');
   }
 
   private towerHit = (tag?: unknown) => {
@@ -1719,7 +1805,10 @@ export class Game {
     if (this.hp <= 0 && this.god) this.hp = 1; // debug
     if (this.hp <= 0) {
       this.hp = 0;
-      for (const m of this.mobs) this.endFight(m, 'death');
+      for (const m of this.mobs) {
+        this.endFight(m, 'death');
+        if (m.def.boss && m.alive) this.resetBoss(m);
+      }
       this.dead = true;
       this.deadT = 0;
       this.target = null;
@@ -2076,6 +2165,19 @@ export class Game {
     this.persist();
   }
 
+  /** Sets the debug points of `k` so the stat's total becomes `total`; hp counts after the other sources' percents. */
+  debugSetStat(k: 'power' | 'hp', total: number) {
+    const hpFrac = this.hp / this.maxHp;
+    const pts = (this.save.src.debug ??= {});
+    delete this.save.pct.debug?.[k];
+    pts[k] = 0;
+    const b = statBreakdown(this.save, k);
+    pts[k] = (k === 'hp' ? total / b.mult : total) - b.sum;
+    this.hp = Math.max(1, hpFrac * this.maxHp);
+    this.refreshHud(true);
+    this.persist();
+  }
+
   /** Removes every debug stat point and percent. */
   debugClearStats() {
     delete this.save.src.debug;
@@ -2273,7 +2375,17 @@ export class Game {
 }
 
 /** A boss cone in flight (Telegraphs tag). */
-interface ConeTag { boss: Mob; at: THREE.Vector3; yaw: number; half: number; len: number; mul: number }
+interface ConeTag { boss: Mob; at: THREE.Vector3; yaw: number; half: number; len: number; mul: number; reap?: number }
+/** A body of radius `r` at `p` is inside the cone (its width widens the cone a little). */
+function inCone(c: ConeTag, p: THREE.Vector3, r: number) {
+  const dx = p.x - c.at.x;
+  const dz = p.z - c.at.z;
+  const d = Math.hypot(dx, dz);
+  if (d > c.len + r) return false;
+  const a = Math.atan2(dx, dz) - c.yaw;
+  const off = Math.atan2(Math.sin(a), Math.cos(a));
+  return Math.abs(off) <= c.half + Math.asin(Math.min(1, r / Math.max(d, r)));
+}
 /** A tower shot in flight (Telegraphs tag). */
 interface ShotTag { at: THREE.Vector3; dmg: number; r: number }
 
