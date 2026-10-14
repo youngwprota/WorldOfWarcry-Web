@@ -58,9 +58,9 @@ const BLADE = 0.7;
 /** s from the blow to the end of the follow-through. */
 const FOLLOW_TIME = 0.12;
 /** s at least for the way back to the windup. */
-const BACK_TIME = 0.12;
+const BACK_TIME = 0.3;
 /** With no swing of the other hand: s before the next swing of the same hand to get back to the windup. */
-const OWN_BACK = 0.25;
+const OWN_BACK = 0.4;
 
 const DEG = Math.PI / 180;
 const dirOf = (az: number, el: number) =>
@@ -249,10 +249,11 @@ export class Swinger {
         hd.w = 1;
       }
       if (hd.anim && (!a || a.hit)) {
-        // back to the windup together with the other hand's swing (from its start, fast at first); with no other
-        // hand, over the last OWN_BACK s of the own swing; never before the own follow-through is done
+        // back to the windup together with the other hand's swing, over its whole way to the blow (fast at first
+        // snapped the weapon back); with no other hand, over the last OWN_BACK s of the own swing; never before the
+        // own follow-through is done
         let to = 0;
-        if (o?.clip && !o.hit) to = 1 - (1 - o.t / o.impact) ** 2;
+        if (o?.clip && !o.hit) to = o.t / o.impact;
         if (a) to = Math.max(to, 1 - (a.dur - a.t) / OWN_BACK);
         if (a && a.t - a.impact < FOLLOW_TIME) to = 0;
         hd.back = Math.min(1, Math.max(hd.back, Math.min(to, hd.back + dt / BACK_TIME)));
