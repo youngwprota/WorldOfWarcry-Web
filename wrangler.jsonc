@@ -1,0 +1,10 @@
+// Cloudflare Workers: раздаём собранную игру (npm run build → dist/) как статический сайт.
+// Без этого файла `wrangler deploy` пытается настроить проект сам и требует Vite 6+.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "worldofwarcry-web",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "./dist"
+  }
+}
