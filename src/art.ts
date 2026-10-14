@@ -147,7 +147,7 @@ const ART: Record<string, string> = {
 };
 
 /** Sprite of each stat: HUD stats panel and kill-reward chips. */
-export const STAT_ICON: Record<OrbKind, string> = { power: 'fist', hp: 'heart', regen: 'regen', speed: 'run' };
+export const STAT_ICON: Record<OrbKind, string> = { power: 'sword', hp: 'heart', regen: 'regen', speed: 'run' };
 
 /**
  * Simplified stat sprites for the small over-head chips: one flat silhouette, outlined in a darker shade of its own
@@ -166,7 +166,8 @@ const MINI: Record<string, { fill: string; line: string; shapes: string; detail?
 export function mini(id: string, size = 14) {
   if (PNG[id]) return png(id, size, 'mini');
   const m = MINI[id];
-  if (!m) return '';
+  // no simplified sprite (the sword of the damage stat): the full coloured icon
+  if (!m) return art(id, size, 'mini');
   return `<svg class="svgi mini" width="${size}" height="${size}" viewBox="0 0 64 64" stroke-linejoin="round">` +
     `<g fill="${m.line}" stroke="${m.line}" stroke-width="10">${m.shapes}</g><g fill="${m.fill}">${m.shapes}</g>${m.detail ?? ''}</svg>`;
 }

@@ -67,7 +67,7 @@ function along(ranges: [number, number][], n: number): Spot[] {
     return { s, off: i % 4 < 2 ? 7 : 12 };
   });
 }
-const forestRanges: [number, number][] = [[progressAt(-3, -80), sFort - 16], [sFort + 15, GATE.s - 10]];
+const forestRanges: [number, number][] = [[progressAt(-3, -80), sFort - 16]];
 const cemRange: [number, number][] = [[GATE.s + 12, sArena - ARENA.r - 3]];
 const graveRange: [number, number][] = [[GATE.s + 6, sArena - ARENA.r]];
 

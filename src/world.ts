@@ -492,10 +492,10 @@ export class World {
   private buildForest() {
     const r = rng(23);
     const H = this.faction === 'human';
+    // mobs from the settlement gate up to the fort (boss 1) by the ridge gate
     const sFort = progressAt(FORT.x, FORT.z);
     const s0 = progressAt(-3, -80);
-    const s1 = sFort - 16;
-    this.mobsAlong([[s0, s1], [sFort + 15, GATE.s - 10]], SPAWNERS.forest ?? [], 'forest', r);
+    this.mobsAlong([[s0, sFort - 16]], SPAWNERS.forest ?? [], 'forest', r);
     this.buildZoo();
 
     // Lumber camp in the north-east of the forest

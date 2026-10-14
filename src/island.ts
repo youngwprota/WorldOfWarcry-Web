@@ -166,8 +166,8 @@ export function ridgeDist(x: number, z: number) {
 
 // ---------- trail ----------
 /**
- * Trail waypoints: settlement gate (north) → bandit fort (boss 1, north-west) → round the west and south of
- * the forest → ridge gate (east) → cemetery → arena (boss 2).
+ * Trail waypoints: settlement gate (north) → round the west and south of the forest → bandit fort (boss 1,
+ * see FORT) → ridge gate (east) → cemetery → arena (boss 2).
  */
 const WAY: [number, number][] = [
   [0, -72], [-3, -80], [-12, -86], [-22, -75], [-30, -64], [-38, -50], [-34, -34], [-22, -22], [-4, -16],
@@ -180,7 +180,6 @@ export const ZONE_LABEL = Object.fromEntries(ZONE_IDS.map((id) => {
   const a = (SECTORS[k].from + (k + 1 < SECTORS.length ? SECTORS[k + 1].from : SECTORS[0].from + Math.PI * 2)) / 2;
   return [id, [ISLAND.cx + Math.sin(a) * 80, ISLAND.cz + Math.cos(a) * 80]];
 })) as Record<ZoneId, [number, number]>;
-export const FORT = { x: WAY[3][0], z: WAY[3][1], r: 11 };
 export const ARENA = { x: WAY[WAY.length - 1][0], z: WAY[WAY.length - 1][1], r: 15 };
 
 const STEP = 0.5;
@@ -285,6 +284,16 @@ export const GATE = (() => {
     }
   }
   throw new Error('trail never enters the cemetery');
+})();
+
+/**
+ * Bandit fort (boss 1) on the trail at the far end of the forest, right before the ridge gate it opens:
+ * the forest is crossed first, the boss guards the way on.
+ */
+export const FORT = (() => {
+  const r = 11;
+  const p = pathAt(GATE.s - r - 7);
+  return { x: p.x, z: p.z, r };
 })();
 
 /** A passage through a ridge. (tx, tz) is the unit direction of travel from `from` into `to`. */

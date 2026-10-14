@@ -239,7 +239,7 @@ export const FACTIONS: Record<FactionId, FactionDef> = {
     campfire: 'campfire',
   },
   orc: {
-    id: 'orc', name: 'Орки', fantasy: 'Ярость, натиск, сила', hero: 'orc_peon', preview: ['orc_chieftain', 'axe_orc_chieftain'], startWeapon: 'axe',
+    id: 'orc', name: 'Орки', fantasy: 'Ярость, натиск, сила', hero: 'orc_peon', preview: ['orc_chieftain', 'axe_orc_chieftain'], startWeapon: 'sword',
     color: '#c0392b',
     campBuildings: ['orc_house_Lv1', 'orc_house_Lv2', 'orc_tower_Lv1', 'orc_barrack_Lv1'],
     campProps: ['orc_banner', 'orc_tusk_standing', 'orc_practice_dummy', 'orc_skull'],
@@ -355,14 +355,15 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
     anim: 'SwordAttack', hp: 1400, dmg: 11, aps: 0.9, range: 1.8, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.3,
     ...foes('forest'), reward: { power: 5 }, respawn: 300,
-    drop: { kind: 'weapon', def: 'sword', rarity: 1 },
+    // the hero's own starting sword: a copy levels it up
+    drop: { kind: 'weapon', def: 'sword', rarity: 0 },
   },
   bandit_brute: {
     id: 'bandit_brute', name: 'Громила', rank: 'elite',
-    model: { human: ['orc_grunt', 'axe_orc_grunt'], orc: ['human_knight', 'sword_human_knight'] },
-    anim: 'AxeAttack', hp: 1600, dmg: 12, aps: 0.7, range: 1.8, speed: 3.2, aggro: 5.2, regen: 0.03, scale: 1.35,
+    model: { human: ['orc_grunt', 'sword_orc_warrior'], orc: ['human_knight', 'sword_human_knight'] },
+    anim: 'SwordAttack', hp: 1600, dmg: 12, aps: 0.7, range: 1.8, speed: 3.2, aggro: 5.2, regen: 0.03, scale: 1.35,
     ...foes('forest'), reward: { hp: 5 }, respawn: 300,
-    drop: { kind: 'weapon', def: 'hammer', rarity: 1 },
+    drop: { kind: 'weapon', def: 'sword', rarity: 1 },
   },
   bandit_lumberjack: {
     id: 'bandit_lumberjack', name: 'Лесоруб', rank: 'elite',
@@ -374,16 +375,18 @@ export const MOBS: Record<string, MobDef> = {
   bandit_warlord: {
     id: 'bandit_warlord', name: 'Свирепый вожак', rank: 'mini',
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
-    anim: 'AxeAttack', hp: 4500, dmg: 16, aps: 0.65, range: 2.1, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.55,
+    anim: 'AxeAttack', hp: 4500, dmg: 24, aps: 0.65, range: 2.1, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.55,
     ...foes('forest'), reward: { hp: 6 }, respawn: 900,
-    bonus: { hp: 60 },
+    bonus: { hp: 500 },
   },
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
     model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['paladin', 'hammer_human_paladin'] },
     anim: 'AxeAttack', hp: 4600, dmg: 12, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
     ...foes('forest'), reward: { power: 12 }, respawn: 900,
-    drop: { kind: 'weapon', def: 'hammer', rarity: 2 },
+    // the forest's swords barely scratch him (−50%); his hammer is the key to the undead behind the gate
+    resist: { slash: 'resist', chop: 'weak' },
+    drop: { kind: 'weapon', def: 'hammer', rarity: 0 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest', unlocks: ['forest-cemetery'],
       slamRadius: 4.2, slamMul: 2.4, chaseMul: 1.4, phase2Dmg: 1.2,
@@ -522,7 +525,8 @@ export const HERO = {
    * All stats are whole numbers. power: flat damage added to the weapon's base (before its type
    * multiplier), regen: HP per second, speed: points (100 = base run speed, see STAT_CURVE.speed).
    */
-  power: 0, hp: 100, regen: 1, speed: 100,
+  // regen benchmark at every stage of the game: about 2% of max HP per second (sources are tuned to it)
+  power: 0, hp: 100, regen: 2, speed: 100,
   /** Speed points per metre per second (prologue only: 100 points = 5 m/s). */
   speedPerMs: 20,
   /** Run speed at 100 speed points, m/s. Mobs run 2.8–4.3. */
@@ -643,10 +647,14 @@ const FOREST_CHARGES = [4 * MIN, 5 * MIN, 12 * HOUR];
 const spawner = (id: string, charges?: number[]): SpawnerDef => ({ unit: 'mob', id, charges });
 /** Mob spawners by location, placed along the trail in list order (first = nearest the location's entrance). */
 export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
+  // The forest is read from the camp to the ridge gate, one step after another: easy mobs, the Veteran
+  // (a common sword: levels up the starting one), the Brute (an uncommon sword), the orange micro-boss
+  // (+500 HP), the Lumberjack (a chest piece), then the fort with the main boss right before the gate.
   forest: ([
-    'boar', 'bandit_thug', 'murloc', 'bandit_thug', 'boar', 'bandit_thug', 'bandit_fighter', 'bandit_veteran',
-    'bandit_thug', 'bandit_fighter', 'boar', 'bandit_warlord', 'bandit_thug', 'murloc', 'bandit_fighter', 'bandit_brute',
-    'bandit_thug', 'boar', 'bandit_fighter', 'bandit_fighter', 'bandit_lumberjack',
+    'boar', 'bandit_thug', 'boar', 'bandit_thug', 'murloc', 'bandit_veteran',
+    'bandit_thug', 'bandit_fighter', 'boar', 'bandit_thug', 'bandit_brute',
+    'bandit_fighter', 'murloc', 'bandit_thug', 'bandit_fighter', 'bandit_warlord',
+    'bandit_fighter', 'boar', 'bandit_lumberjack', 'bandit_fighter', 'bandit_fighter',
   ]).map((id) => spawner(id, FOREST_CHARGES)),
   // one endless charge with the mob's own respawn time
   cemetery: ([
