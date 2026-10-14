@@ -40,12 +40,13 @@ const IK: Record<AttackAnim, IkSwing> = {
     pole: [-0.7, -1, -0.3], lift: 0,
     body: [[0, -0.6, 0, -0.04], [1, 0.1, 0.05, 0.12], [1.3, 0.5, 0.05, 0.08]],
   },
-  // chop: the hand above and behind the head, the axe cocked up and back, the whole arm comes down in front; the arc
-  // runs by the right side of the head (straight over the top, the fist passed in front of the big head)
+  // diagonal chop: the hand high behind the right shoulder, the axe cocked up and back, the whole arm cuts down across
+  // to the front-left, the torso turning with it (straight down from above read as a vertical chop; over the top of
+  // the head the fist passed in front of the big head)
   AxeAttack: {
-    arm: [[0, -150, 65, 0.78, -170, 30], [0.6, -50, 70, 0.9, -150, 70], [1, -25, -10, 0.97, -15, -25], [1.3, -15, -30, 0.92, -10, -45]],
-    pole: [-1, -0.2, 0], lift: 0.2,
-    body: [[0, -0.3, -0.06, -0.05], [1, 0.1, 0.06, 0.14], [1.3, 0.1, 0.06, 0.1]],
+    arm: [[0, -130, 50, 0.8, -165, 45], [0.6, -75, 45, 0.92, -120, 55], [0.85, -55, 10, 0.97, -40, 5], [1, -5, -8, 0.97, 20, -20], [1.3, 30, -30, 0.92, 55, -40]],
+    pole: [-1, -0.4, 0], lift: 0.15,
+    body: [[0, -0.4, -0.04, -0.05], [1, 0.15, 0.06, 0.14], [1.3, 0.35, 0.06, 0.1]],
   },
 };
 const FOLLOW_P = 1.3;
