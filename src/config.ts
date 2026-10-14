@@ -104,11 +104,13 @@ export const WEAPONS: Record<string, WeaponDef> = {
     id: 'dagger', name: 'Кинжалы', type: 'slash', dmgMul: 0.38, aps: 2.4, shape: 'arc', arc: 90, range: 1.9,
     anim: 'SwordAttack', model: { human: 'dagger', orc: 'dagger' }, icon: '🔪', single: true,
     stack: { add: 0.06, max: 10, decay: 2.5 },
+    swing: ['slashRL', 'slashLR'],
   },
   reaper: {
     id: 'reaper', name: 'Жнец', type: 'slash', dmgMul: 1.1, aps: 0.8, shape: 'arc', arc: 200, range: 2.6,
     anim: 'AxeAttack', model: { human: 'reaper', orc: 'reaper' }, icon: '🌙',
     pull: { radius: 5, ahead: 1.5, force: 0.85, perEnemy: 0.15, max: 2 },
+    swing: ['reap'],
   },
   shield: {
     id: 'shield', name: 'Щит', type: 'crush', dmgMul: 0.5, aps: 0.8, shape: 'arc', arc: 120, range: 1.8,
