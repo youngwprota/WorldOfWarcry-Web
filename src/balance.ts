@@ -1,6 +1,6 @@
 // Combat and hero-stat formulas without three/DOM: the game and the balance simulator (tools/sim.ts) share them.
 import { DUAL, HERO, RESIST_MULT, WEAPONS, type DamageType, type FactionId, type ResistTier } from './config';
-import { armorStats, weaponDamage, type ArmorSlot, type BonusStat, type Item } from './items';
+import { armorDefense, weaponDamage, type ArmorSlot, type BonusStat, type Item } from './items';
 
 /** What the hero is made of: base stats, armour and both hands (a slice of SaveData). */
 export interface HeroBuild {
@@ -16,30 +16,25 @@ export const BLOODLUST = 0.3;
 export const HUMAN_SHIELD = 0.15;
 export const SHIELD_DELAY = 6;
 
-/** Totals from equipped armour and jewellery. */
+/** Totals from equipped armour and jewellery: defense only. */
 export function gearOf(equip: HeroBuild['equip']) {
-  const g = { defense: 0, hp: 0, regen: 0, power: 0, speed: 0 } as { defense: number } & Record<BonusStat, number>;
-  for (const it of Object.values(equip)) {
-    if (!it) continue;
-    const s = armorStats(it);
-    g.defense += s.defense;
-    if (s.bonus) g[s.bonus.stat] += s.bonus.value;
-  }
-  return g;
+  let defense = 0;
+  for (const it of Object.values(equip)) if (it) defense += armorDefense(it);
+  return { defense };
 }
 
 /** Final hero stats with gear and racials. */
 export function heroStats(b: HeroBuild) {
   const g = gearOf(b.equip);
   const human = b.faction === 'human';
-  const maxHp = Math.round((b.stats.hp + g.hp) * (human ? 1.1 : 1));
-  const speedStat = Math.round(Math.min(HERO.speedCap, b.stats.speed + g.speed) * (b.faction === 'orc' ? 1.05 : 1));
+  const maxHp = Math.round(b.stats.hp * (human ? 1.1 : 1));
+  const speedStat = Math.round(Math.min(HERO.speedCap, b.stats.speed) * (b.faction === 'orc' ? 1.05 : 1));
   return {
-    power: b.stats.power + g.power,
+    power: b.stats.power,
     defense: g.defense,
     maxHp,
     shieldMax: human ? Math.round(maxHp * HUMAN_SHIELD) : 0,
-    regen: Math.round(Math.min(HERO.regenCap, (b.stats.regen + g.regen) * (human ? 1.1 : 1))),
+    regen: Math.round(Math.min(HERO.regenCap, b.stats.regen * (human ? 1.1 : 1))),
     speedStat,
     /** Running speed, m/s (100 points = 4 m/s). */
     speed: (speedStat / HERO.speedPerMs) * HERO.speedMul,

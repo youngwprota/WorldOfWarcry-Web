@@ -293,7 +293,7 @@ export class Inventory {
       const pt = pairText(it.def);
       if (pt) ability += `<div class="ab-title">С мечом в другой руке</div><p>${pt}</p>`;
     } else {
-      ability = `<div class="ab-title">Комплект</div><p>${it.rarity > 0 || rest.length ? 'Бонус к стату действует, пока предмет надет.' : 'У обычных предметов нет бонуса. Ищи <b>необычные</b> и выше.'}</p>`;
+      ability = `<p>Броня даёт только защиту: чем выше редкость и уровень, тем больше.${['ring', 'amulet'].includes(it.def) ? '' : ' Вид на герое меняется с редкостью.'}</p>`;
     }
     const btn = (act: string, label: string, cls = '') => `<button class="btn ${cls}" data-act="${act}">${label}</button>`;
     let actions = '';

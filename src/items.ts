@@ -38,48 +38,35 @@ export const PART_PREFIXES: Record<VisualPart, string[]> = {
   legs: ['legs_', 'hip_', 'hips_'],
 };
 
-export const BONUS_NAME: Record<BonusStat, string> = { hp: 'Здоровье', regen: 'Реген HP/с', power: 'Урон', speed: 'Скорость' };
-
 export interface ArmorDef {
   id: string;
   slot: ArmorSlot;
-  name: Record<FactionId, string>;
-  /** Character model whose body part is shown on the hero. */
-  source?: Record<FactionId, string>;
+  /** Item name for each quality (RARITY index): one piece per slot and quality, 36 in all. */
+  names: string[];
+  /** Defense at common quality, level 1. Armour gives only defense (the board card: not hero stats). */
   defense: number;
-  bonus: { stat: BonusStat; value: number };
-  alwaysBonus?: boolean;
 }
 
-// Armour sets reuse other characters of the hero's own race as "outfits". The hero itself is the plainest
-// model (peasant / peon, FACTIONS.hero), so every piece visibly changes it.
-const SETS = [
-  { id: 'guard', of: { human: 'стражника', orc: 'рубаки' }, src: { human: 'soldier', orc: 'orc_warrior' }, mult: 1 },
-  { id: 'knight', of: { human: 'рыцаря', orc: 'громилы' }, src: { human: 'human_knight', orc: 'orc_grunt' }, mult: 1.2 },
-  { id: 'lord', of: { human: 'паладина', orc: 'вождя' }, src: { human: 'paladin', orc: 'orc_chieftain' }, mult: 1.45 },
-] as const;
-const PIECES: { slot: VisualPart; noun: string; defense: number; bonus: { stat: BonusStat; value: number } }[] = [
-  { slot: 'head', noun: 'Шлем', defense: 5, bonus: { stat: 'regen', value: 1 } },
-  { slot: 'chest', noun: 'Нагрудник', defense: 9, bonus: { stat: 'hp', value: 18 } },
-  { slot: 'arms', noun: 'Перчатки', defense: 3, bonus: { stat: 'power', value: 4 } },
-  { slot: 'legs', noun: 'Поножи', defense: 6, bonus: { stat: 'speed', value: 3 } },
+// Body pieces borrow a part of another character of the hero's own race; the rarer the piece, the grander the
+// outfit. The hero itself is the plainest model (peasant / peon, FACTIONS.hero), so every piece visibly changes it.
+const OUTFITS: Record<FactionId, string>[] = [
+  { human: 'soldier', orc: 'orc_warrior' }, { human: 'human_knight', orc: 'orc_grunt' }, { human: 'paladin', orc: 'orc_chieftain' },
 ];
 
-export const ARMOR: Record<string, ArmorDef> = {};
-for (const s of SETS) {
-  for (const p of PIECES) {
-    ARMOR[`${s.id}_${p.slot}`] = {
-      id: `${s.id}_${p.slot}`, slot: p.slot,
-      name: { human: `${p.noun} ${s.of.human}`, orc: `${p.noun} ${s.of.orc}` },
-      source: s.src, defense: Math.round(p.defense * s.mult),
-      bonus: { stat: p.bonus.stat, value: Math.max(1, Math.round(p.bonus.value * s.mult)) },
-    };
-  }
+/** The board card (docs/features/weapons-six): one piece per armour slot and quality. */
+export const ARMOR: Record<string, ArmorDef> = {
+  head: { id: 'head', slot: 'head', defense: 5, names: ['Кожаный шлем', 'Шлем стражника', 'Рыцарский шлем', 'Шлем героя', 'Шлем королей', 'Шлем бездны'] },
+  chest: { id: 'chest', slot: 'chest', defense: 9, names: ['Кожаная куртка', 'Нагрудник стражника', 'Рыцарская кираса', 'Кираса героя', 'Доспех королей', 'Доспех бездны'] },
+  arms: { id: 'arms', slot: 'arms', defense: 3, names: ['Кожаные перчатки', 'Перчатки стражника', 'Рыцарские рукавицы', 'Рукавицы героя', 'Рукавицы королей', 'Рукавицы бездны'] },
+  legs: { id: 'legs', slot: 'legs', defense: 6, names: ['Кожаные поножи', 'Поножи стражника', 'Рыцарские поножи', 'Поножи героя', 'Поножи королей', 'Поножи бездны'] },
+  ring: { id: 'ring', slot: 'ring', defense: 2, names: ['Медное кольцо', 'Серебряное кольцо', 'Золотое кольцо', 'Кольцо героя', 'Кольцо королей', 'Кольцо бездны'] },
+  amulet: { id: 'amulet', slot: 'amulet', defense: 3, names: ['Костяной амулет', 'Медный амулет', 'Серебряный амулет', 'Амулет героя', 'Амулет королей', 'Амулет бездны'] },
+};
+
+/** Character model whose body part an armour piece shows on the hero (none for rings and amulets). */
+export function armorSource(it: Item, f: FactionId): string | undefined {
+  return it.def in PART_PREFIXES ? OUTFITS[Math.min(OUTFITS.length - 1, it.rarity >> 1)][f] : undefined;
 }
-ARMOR.ring_power = { id: 'ring_power', slot: 'ring', name: { human: 'Кольцо силы', orc: 'Кольцо ярости' }, defense: 0, bonus: { stat: 'power', value: 5 }, alwaysBonus: true };
-ARMOR.ring_swift = { id: 'ring_swift', slot: 'ring', name: { human: 'Кольцо ветра', orc: 'Кольцо следопыта' }, defense: 0, bonus: { stat: 'speed', value: 4 }, alwaysBonus: true };
-ARMOR.amulet_life = { id: 'amulet_life', slot: 'amulet', name: { human: 'Амулет жизни', orc: 'Клык предков' }, defense: 2, bonus: { stat: 'hp', value: 20 }, alwaysBonus: true };
-ARMOR.amulet_spring = { id: 'amulet_spring', slot: 'amulet', name: { human: 'Амулет родника', orc: 'Тотем крови' }, defense: 2, bonus: { stat: 'regen', value: 1 }, alwaysBonus: true };
 
 export const BAG_SIZE = 128;
 
@@ -100,14 +87,8 @@ export function copyGain(it: Item) {
 /** Same item for merging copies: same weapon / armour piece and the same quality. */
 export const sameItem = (a: Item, b: Item) => a.kind === b.kind && a.def === b.def && a.rarity === b.rarity;
 
-export function armorStats(it: Item) {
-  const d = ARMOR[it.def];
-  const r = RARITY[it.rarity].mult;
-  const defense = Math.round(d.defense * r * lvlMult(it.lvl));
-  // GDD 8.3: common armour has no bonus; rarer pieces get a bigger one.
-  const has = d.alwaysBonus || it.rarity > 0;
-  const value = has ? Math.max(1, Math.round(d.bonus.value * (0.6 + 0.4 * (it.rarity + 1)) * lvlMult(it.lvl))) : 0;
-  return { defense, bonus: has ? { stat: d.bonus.stat, value } : null };
+export function armorDefense(it: Item) {
+  return Math.round(ARMOR[it.def].defense * RARITY[it.rarity].mult * lvlMult(it.lvl));
 }
 
 export function slotOf(it: Item): ArmorSlot | 'weapon' {
@@ -115,7 +96,8 @@ export function slotOf(it: Item): ArmorSlot | 'weapon' {
 }
 
 export function itemName(it: Item, f: FactionId) {
-  return it.name ?? (it.kind === 'weapon' ? WEAPONS[it.def].names[it.rarity] : ARMOR[it.def].name[f]);
+  void f;
+  return it.name ?? (it.kind === 'weapon' ? WEAPONS[it.def] : ARMOR[it.def]).names[it.rarity];
 }
 
 /** Icon id for icon(): weapon id or armour slot. */
@@ -151,10 +133,7 @@ export function itemLines(it: Item): [string, string][] {
       ['Дальность', `${w.range} м`],
     ];
   }
-  const s = armorStats(it);
-  const out: [string, string][] = [['Защита', String(s.defense)]];
-  if (s.bonus) out.push([BONUS_NAME[s.bonus.stat], `+${s.bonus.value}`]);
-  return out;
+  return [['Защита', String(armorDefense(it))]];
 }
 
 let uidSeq = Date.now() % 1e9;
@@ -175,9 +154,9 @@ const GONE_WEAPONS: Record<string, string> = {
 };
 
 export function normalizeItem(it: Partial<Item> & { def: string }): Item {
-  // the old peasant set is gone (the hero looks like a peasant already): its pieces become guard pieces
-  // weapons off the board card (docs/features/weapons-six) become the closest of the 4 types, same quality and level
+  // weapons off the board card (docs/features/weapons-six) become the closest of the 4 types, same quality and level;
+  // old set pieces (guard_head, ring_power, …) become the piece of their slot
   const gone = GONE_WEAPONS[it.def];
-  const def = gone ?? (it.def.startsWith('peasant_') ? it.def.replace('peasant_', 'guard_') : it.def);
+  const def = gone ?? (it.kind === 'armor' && !ARMOR[it.def] ? it.def.split('_').find((p) => p in ARMOR) ?? 'chest' : it.def);
   return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name && !gone ? { name: it.name } : {}) };
 }

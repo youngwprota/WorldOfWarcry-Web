@@ -9,7 +9,7 @@ import {
   WEAPONS, depthMul, mobImpact, mobRank, type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type ZoneId,
 } from '../src/config';
 import { armorMul, handMulOf, heroStats, powerMult, type HeroBuild } from '../src/balance';
-import { ARMOR, armorStats, dropItem, makeItem, sameItem, weaponDamage, type Item } from '../src/items';
+import { ARMOR, armorDefense, dropItem, makeItem, sameItem, weaponDamage, type Item } from '../src/items';
 import { swordPair, type Pair } from '../src/offhand';
 import { pull } from '../src/gacha';
 import { ARENA, FORT, GATE, SPAWN, pathAt, progressAt } from '../src/island';
@@ -270,8 +270,8 @@ function regear(h: Hero) {
     }
   }
   h.weapons = h.kit.forest;
-  // armour: the best piece per slot by defense + bonus
-  const score = (it: Item) => { const s = armorStats(it); return s.defense + (s.bonus ? s.bonus.value * VALUE[s.bonus.stat] * 2 : 0); };
+  // armour: the best piece per slot by defense
+  const score = armorDefense;
   for (const it of [...h.bag]) {
     if (it.kind !== 'armor') continue;
     const slot = ARMOR[it.def].slot;

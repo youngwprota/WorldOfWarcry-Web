@@ -298,7 +298,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['orc_peon', 'axe_orc_peon'], orc: ['peasant', 'axe'] },
     anim: 'AxeAttack', hp: 1800, dmg: 14, aps: 0.6, range: 1.8, speed: 3.0, aggro: 5.2, regen: 0.03, scale: 1.45,
     ...foes('forest'), reward: { regen: 1 }, respawn: 300,
-    drop: { kind: 'armor', def: 'guard_chest', rarity: 1 },
+    drop: { kind: 'armor', def: 'chest', rarity: 1 },
   },
   bandit_warlord: {
     id: 'bandit_warlord', name: 'Свирепый вожак', rank: 'mini',
@@ -361,7 +361,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
     anim: 'SwordAttack', hp: 1640, dmg: 13, aps: 0.75, range: 2.1, speed: 3.0, aggro: 5.5, regen: 0.03, scale: 1.4,
     ...foes('cemetery'), reward: { hp: 6 }, respawn: 600,
-    drop: { kind: 'armor', def: 'lord_head', rarity: 2 },
+    drop: { kind: 'armor', def: 'head', rarity: 2 },
   },
   shade: {
     id: 'shade', name: 'Тень', rank: 'elite',

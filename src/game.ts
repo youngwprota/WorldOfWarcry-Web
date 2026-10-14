@@ -9,7 +9,7 @@ import {
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
-  ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemName, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, armorSource, copyGain, dropIconId, dropItem, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
@@ -454,7 +454,7 @@ export class Game {
     const o: Partial<Record<VisualPart, string>> = {};
     for (const part of ['head', 'chest', 'arms', 'legs'] as VisualPart[]) {
       const it = this.save.equip[part];
-      const src = it ? ARMOR[it.def].source?.[this.faction] : undefined;
+      const src = it ? armorSource(it, this.faction) : undefined;
       if (src) o[part] = src;
     }
     return o;
