@@ -1,0 +1,17 @@
+{
+  "title": "WorldOfWarcry — задачи",
+  "columns": [
+    { "id": "todo", "name": "TODO" },
+    { "id": "backlog", "name": "BACKLOG" },
+    { "id": "manual-test", "name": "Manual test" },
+    { "id": "grisha", "name": "Гриша", "member": "grisha" },
+    { "id": "lesha", "name": "Леша", "member": "lesha" },
+    { "id": "dasha", "name": "Даша", "member": "dasha" },
+    { "id": "done", "name": "Done" }
+  ],
+  "members": [
+    { "id": "grisha", "name": "Гриша", "color": "#2563eb", "git": ["youngwprota", "grolevich-hc"] },
+    { "id": "lesha", "name": "Леша", "color": "#16a34a", "git": ["Alex Takun"] },
+    { "id": "dasha", "name": "Даша", "color": "#9333ea", "git": ["dar-astrouskaya"] }
+  ]
+}
