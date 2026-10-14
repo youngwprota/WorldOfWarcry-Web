@@ -6,3 +6,4 @@ dist/
 AGENTS.md
 CLAUDE.md
 .sim/
+.board/

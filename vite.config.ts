@@ -7,7 +7,7 @@ export default defineConfig({
     target: 'es2022',
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
-      input: { main: resolve(__dirname, 'index.html'), viewer: resolve(__dirname, 'viewer.html'), roster: resolve(__dirname, 'roster.html') },
+      input: { main: resolve(__dirname, 'index.html'), viewer: resolve(__dirname, 'viewer.html'), roster: resolve(__dirname, 'roster.html'), board: resolve(__dirname, 'board.html') },
     },
   },
   esbuild: { target: 'es2022' },

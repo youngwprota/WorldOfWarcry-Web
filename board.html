@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Доска задач</title>
+<style>
+  :root {
+    --bg: #f3f4f6; --col: #e5e7eb; --card: #fff; --text: #111827; --muted: #6b7280;
+    --border: #d1d5db; --accent: #2563eb; --danger: #dc2626; --shadow: 0 1px 2px rgba(0,0,0,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --col: #1a1d24; --card: #252a33; --text: #e5e7eb; --muted: #9ca3af;
+      --border: #374151; --accent: #60a5fa; --danger: #f87171; --shadow: 0 1px 2px rgba(0,0,0,.5); }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 18px; margin: 0 12px 0 0; }
+  .spacer { flex: 1; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--danger); }
+  select, input, textarea { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+  .status { color: var(--muted); font-size: 12px; }
+  .status.dirty { color: #d97706; }
+  main { display: flex; gap: 12px; padding: 16px; overflow-x: auto; align-items: flex-start; min-height: calc(100vh - 60px); }
+  .column { background: var(--col); border-radius: 10px; width: 280px; flex: 0 0 280px; display: flex; flex-direction: column; max-height: calc(100vh - 100px); }
+  .column h2 { font-size: 13px; margin: 0; padding: 10px 12px; display: flex; justify-content: space-between; text-transform: uppercase; letter-spacing: .03em; }
+  .column h2 span { color: var(--muted); }
+  .list { padding: 0 8px 4px; overflow-y: auto; min-height: 40px; flex: 1; }
+  .list.over { outline: 2px dashed var(--accent); outline-offset: -4px; border-radius: 8px; }
+  .add { margin: 4px 8px 8px; background: transparent; border: none; text-align: left; color: var(--muted); }
+  .add:hover { color: var(--text); background: var(--card); }
+  .card { background: var(--card); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; box-shadow: var(--shadow); cursor: grab; border-left: 3px solid transparent; }
+  .card.p-high { border-left-color: #ef4444; } .card.p-med { border-left-color: #f59e0b; } .card.p-low { border-left-color: #10b981; }
+  .card.dragging { opacity: .4; }
+  .card .t { font-weight: 500; word-break: break-word; }
+  .card .meta { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 6px; }
+  .label { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--col); color: var(--muted); }
+  .avatar { margin-left: auto; width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+  .desc-ico { color: var(--muted); font-size: 12px; }
+  dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text); width: min(560px, calc(100vw - 32px)); padding: 16px; }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog form { display: grid; gap: 10px; }
+  dialog label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  dialog .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  dialog .actions { display: flex; gap: 8px; }
+  dialog a { color: var(--accent); }
+  [hidden] { display: none !important; }
+  dialog textarea { min-height: 180px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  #title-in { font-size: 16px; font-weight: 600; }
+  .small { font-size: 11px; color: var(--muted); }
+  pre#synclog { white-space: pre-wrap; font-size: 12px; max-height: 50vh; overflow: auto; background: var(--col); padding: 8px; border-radius: 6px; }
+  @media (max-width: 600px) { dialog .row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="board-title">Доска</h1>
+  <select id="filter-who"><option value="">Все участники</option></select>
+  <input id="filter-q" placeholder="Поиск…" size="14">
+  <div class="spacer"></div>
+  <span id="status" class="status"></span>
+  <button id="login-btn" hidden>🔑 Войти для редактирования</button>
+  <button id="sync-btn" class="primary" hidden title="commit → pull --rebase → push ветки board; код не затрагивается">⟳ Синхронизировать</button>
+</header>
+<main id="board"><p class="status" style="padding:16px">Загрузка…</p></main>
+
+<dialog id="dlg">
+  <form method="dialog" id="card-form">
+    <input id="title-in" placeholder="Название задачи" required>
+    <div class="row">
+      <label>Колонка <select id="col-in"></select></label>
+      <label>Исполнитель <select id="who-in"></select></label>
+      <label>Приоритет
+        <select id="prio-in"><option value="">—</option><option value="high">высокий</option><option value="med">средний</option><option value="low">низкий</option></select>
+      </label>
+    </div>
+    <label>Метки (через запятую) <input id="labels-in" placeholder="ui, баг, арт"></label>
+    <label>Описание (markdown, чек-листы: - [ ] пункт) <textarea id="body-in"></textarea></label>
+    <div class="small" id="card-meta"></div>
+    <div class="actions">
+      <button type="button" class="danger" id="del-btn">Удалить</button>
+      <div class="spacer"></div>
+      <button type="button" id="cancel-btn">Отмена</button>
+      <button type="submit" class="primary" id="save-btn">Сохранить</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="sync-dlg">
+  <h3 id="sync-title" style="margin-top:0">Синхронизация</h3>
+  <pre id="synclog"></pre>
+  <div class="actions"><div class="spacer"></div><button onclick="this.closest('dialog').close()">Закрыть</button></div>
+</dialog>
+
+<dialog id="login-dlg">
+  <form method="dialog" id="login-form">
+    <h3 style="margin:0">Редактирование доски</h3>
+    <p class="small" style="margin:0">Нужен ваш личный GitHub-токен с доступом к репозиторию. Создайте
+      <a id="pat-link" target="_blank" rel="noopener">fine-grained token</a>: Repository access → только этот репозиторий,
+      Permissions → Contents: <b>Read and write</b>. Токен хранится только в этом браузере; изменения коммитятся в ветку <code>board</code> от вашего имени.</p>
+    <label>Токен <input id="token-in" type="password" autocomplete="off" required></label>
+    <div class="small" id="login-err" style="color:var(--danger)"></div>
+    <div class="actions">
+      <button type="button" class="danger" id="logout-btn">Выйти</button>
+      <div class="spacer"></div>
+      <button type="button" onclick="this.closest('dialog').close()">Отмена</button>
+      <button type="submit" class="primary">Войти</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module">
+import { parseCard, serializeCard, sortCards, makeCard, patchCard, renderReadme } from './tools/board/core.mjs';
+
+// ---------- бэкенды: локальный сервер (npm run board) или GitHub API (Pages) ----------
+
+async function json(r) {
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || data.message || r.statusText);
+  return data;
+}
+
+/** npm run board: файлы в .board/, синхронизация кнопкой. */
+const localBackend = {
+  kind: 'local',
+  canEdit: () => true,
+  async load() { return json(await fetch('/api/board', { cache: 'no-store' })); },
+  async create(fields) { await json(await fetch('/api/cards', { method: 'POST', body: JSON.stringify(fields) })); },
+  async update(id, patch) { await json(await fetch(`/api/cards/${id}`, { method: 'PUT', body: JSON.stringify(patch) })); },
+  async remove(id) { await json(await fetch(`/api/cards/${id}`, { method: 'DELETE' })); },
+  async sync() { return json(await fetch('/api/sync', { method: 'POST' })); },
+};
+
+/** GitHub Pages: читает ветку board через API, пишет атомарными коммитами (карточка + README). */
+function githubBackend(owner, repo) {
+  const BRANCH = 'board';
+  const API = `https://api.github.com/repos/${owner}/${repo}`;
+  const blobCache = new Map(); // blob sha → текст (неизменяем)
+  let token = '';
+  try { token = localStorage.getItem('board-token') || ''; } catch {}
+  let snapshot = null; // { config, cards }
+
+  const gh = async (path, opts = {}) => {
+    const headers = { Accept: 'application/vnd.github+json', ...(opts.body ? { 'Content-Type': 'application/json' } : {}) };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const r = await fetch(path.startsWith('http') ? path : API + path, { ...opts, headers, cache: token ? 'no-store' : 'default' });
+    if (r.status === 403 && r.headers.get('x-ratelimit-remaining') === '0') throw new Error('лимит GitHub API без токена исчерпан — войдите или подождите');
+    return json(r);
+  };
+  const raw = async (commit, path, sha) => {
+    if (blobCache.has(sha)) return blobCache.get(sha);
+    const r = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${commit}/${path}`);
+    if (!r.ok) throw new Error(`не удалось прочитать ${path}`);
+    const text = await r.text();
+    blobCache.set(sha, text);
+    return text;
+  };
+
+  async function read() {
+    const head = await gh(`/commits/${BRANCH}`);
+    const tree = await gh(`/git/trees/${head.commit.tree.sha}?recursive=1`);
+    const files = tree.tree.filter(f => f.type === 'blob');
+    const cfg = files.find(f => f.path === 'config.json');
+    const cardFiles = files.filter(f => /^cards\/[\w-]+\.md$/.test(f.path));
+    const [config, ...cards] = await Promise.all([
+      raw(head.sha, cfg.path, cfg.sha).then(JSON.parse),
+      ...cardFiles.map(f => raw(head.sha, f.path, f.sha).then(t => parseCard(t, f.path.slice(6, -3)))),
+    ]);
+    snapshot = { config, cards: sortCards(cards), head: head.sha };
+    return snapshot;
+  }
+
+  // Один коммит: изменённая карточка + пересобранный README. При гонке с другим участником — повтор поверх свежей ветки.
+  async function commit(message, change) {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { config, cards } = await read();
+      const { path, card } = change(config, cards);
+      const next = sortCards(card ? [...cards.filter(c => c.id !== card.id), card] : cards.filter(c => `cards/${c.id}.md` !== path));
+      const ref = await gh(`/git/ref/heads/${BRANCH}`);
+      const base = await gh(`/git/commits/${ref.object.sha}`);
+      const tree = await gh('/git/trees', { method: 'POST', body: JSON.stringify({
+        base_tree: base.tree.sha,
+        tree: [
+          card ? { path, mode: '100644', type: 'blob', content: serializeCard(card) } : { path, mode: '100644', type: 'blob', sha: null },
+          { path: 'README.md', mode: '100644', type: 'blob', content: renderReadme(config, next) },
+        ],
+      }) });
+      const c = await gh('/git/commits', { method: 'POST', body: JSON.stringify({ message, tree: tree.sha, parents: [ref.object.sha] }) });
+      try {
+        await gh(`/git/refs/heads/${BRANCH}`, { method: 'PATCH', body: JSON.stringify({ sha: c.sha, force: false }) });
+        return;
+      } catch (e) {
+        if (!/fast.forward|Update is not a fast/i.test(e.message)) throw e;
+      }
+    }
+    throw new Error('ветку board одновременно меняют другие — попробуйте ещё раз');
+  }
+
+  return {
+    kind: 'github',
+    repoUrl: `https://github.com/${owner}/${repo}`,
+    canEdit: () => !!token,
+    async load() {
+      const s = await read();
+      return { ...s, status: { github: true, editing: !!token } };
+    },
+    async create(fields) {
+      await commit(`board: + ${fields.title}`, (config, cards) => {
+        const card = makeCard(config, cards, fields);
+        return { path: `cards/${card.id}.md`, card };
+      });
+    },
+    async update(id, patch) {
+      await commit(`board: ${patch.title ?? id}`, (config, cards) => {
+        const cur = cards.find(c => c.id === id);
+        if (!cur) throw new Error('карточку уже удалили');
+        return { path: `cards/${id}.md`, card: patchCard(config, cards, cur, patch) };
+      });
+    },
+    async remove(id) {
+      await commit(`board: − ${id}`, () => ({ path: `cards/${id}.md`, card: null }));
+    },
+    async login(t) {
+      const prev = token;
+      token = t;
+      try {
+        const r = await gh('');
+        if (!r.permissions?.push) throw new Error('у токена нет права записи в репозиторий');
+        try { localStorage.setItem('board-token', t); } catch {}
+      } catch (e) { token = prev; throw e; }
+    },
+    logout() { token = ''; try { localStorage.removeItem('board-token'); } catch {} },
+  };
+}
+
+function pickBackend() {
+  if (location.port === '5199') return localBackend;
+  // youngwprota.github.io/WorldOfWarcry-Web/board.html → owner/repo
+  const m = location.hostname.match(/^([\w-]+)\.github\.io$/);
+  const owner = m ? m[1] : 'youngwprota';
+  const repo = (m && location.pathname.split('/')[1]) || 'WorldOfWarcry-Web';
+  return githubBackend(owner, repo);
+}
+
+const backend = pickBackend();
+
+// ---------- интерфейс ----------
+
+let state = { config: null, cards: [], status: {} };
+let editing = null; // id редактируемой карточки, null — новая
+let lastSnapshot = '';
+let busy = false;
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function showError(e) {
+  $('#sync-title').textContent = 'Ошибка';
+  $('#synclog').textContent = e.message || String(e);
+  $('#sync-dlg').showModal();
+}
+
+async function load(force) {
+  const data = await backend.load();
+  const snap = JSON.stringify({ c: data.config, k: data.cards, s: data.status });
+  if (!force && snap === lastSnapshot) return;
+  lastSnapshot = snap;
+  state = data;
+  render();
+}
+
+async function mutate(fn) {
+  busy = true;
+  document.body.style.cursor = 'progress';
+  try { await fn(); } catch (e) { showError(e); }
+  busy = false;
+  document.body.style.cursor = '';
+  await load(true).catch(showError);
+}
+
+function member(id) { return state.config.members.find(m => m.id === id); }
+
+function renderHeader() {
+  const { config, status } = state;
+  $('#board-title').textContent = config.title;
+  document.title = config.title;
+  const sel = $('#filter-who');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Все участники</option><option value="__none">Без исполнителя</option>' +
+    config.members.map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
+  sel.value = cur;
+  const st = $('#status');
+  if (backend.kind === 'github') {
+    st.textContent = backend.canEdit() ? 'правки сразу уходят в GitHub' : 'только просмотр';
+    st.className = 'status';
+    $('#login-btn').hidden = false;
+    $('#login-btn').textContent = backend.canEdit() ? '🔑 Токен' : '🔑 Войти для редактирования';
+    return;
+  }
+  $('#sync-btn').hidden = false;
+  const pending = status.dirty || status.unpushed;
+  st.textContent = status.unpushed === null ? 'ветка board ещё не опубликована'
+    : pending ? `несинхронизировано: ${status.dirty + status.unpushed}` : 'всё синхронизировано';
+  st.className = 'status' + (pending || status.unpushed === null ? ' dirty' : '');
+}
+
+function render() {
+  renderHeader();
+  const edit = backend.canEdit();
+  const who = $('#filter-who').value;
+  const q = $('#filter-q').value.trim().toLowerCase();
+  const visible = state.cards.filter(c =>
+    (!who || (who === '__none' ? !c.assignee : c.assignee === who)) &&
+    (!q || (c.title + ' ' + c.body + ' ' + c.labels.join(' ')).toLowerCase().includes(q)));
+  const board = $('#board');
+  board.innerHTML = '';
+  for (const col of state.config.columns) {
+    const list = visible.filter(c => c.column === col.id);
+    const el = document.createElement('section');
+    el.className = 'column';
+    el.innerHTML = `<h2>${esc(col.name)} <span>${list.length}</span></h2><div class="list" data-col="${esc(col.id)}"></div>` +
+      (edit ? '<button class="add">+ Добавить карточку</button>' : '');
+    const listEl = el.querySelector('.list');
+    for (const c of list) listEl.appendChild(cardEl(c, edit));
+    if (edit) {
+      el.querySelector('.add').onclick = () => openCard(null, col.id);
+      setupDrop(listEl);
+    }
+    board.appendChild(el);
+  }
+}
+
+function cardEl(c, edit) {
+  const el = document.createElement('div');
+  el.className = 'card' + (c.priority ? ` p-${c.priority}` : '');
+  el.draggable = edit;
+  el.dataset.id = c.id;
+  const m = member(c.assignee);
+  const checks = (c.body.match(/- \[[ xX]\]/g) || []).length;
+  const done = (c.body.match(/- \[[xX]\]/g) || []).length;
+  el.innerHTML = `<div class="t">${esc(c.title || '(без названия)')}</div>
+    <div class="meta">
+      ${c.labels.map(l => `<span class="label">${esc(l)}</span>`).join('')}
+      ${checks ? `<span class="desc-ico">☑ ${done}/${checks}</span>` : c.body ? '<span class="desc-ico">≡</span>' : ''}
+      ${m ? `<span class="avatar" style="background:${esc(m.color)}" title="${esc(m.name)}">${esc(m.name.slice(0, 2))}</span>` : ''}
+    </div>`;
+  el.onclick = () => openCard(c.id);
+  el.ondragstart = e => { el.classList.add('dragging'); e.dataTransfer.setData('text/plain', c.id); };
+  el.ondragend = () => el.classList.remove('dragging');
+  return el;
+}
+
+function setupDrop(listEl) {
+  listEl.ondragover = e => {
+    e.preventDefault();
+    listEl.classList.add('over');
+    const dragging = document.querySelector('.card.dragging');
+    const after = [...listEl.querySelectorAll('.card:not(.dragging)')].find(c => e.clientY < c.getBoundingClientRect().top + c.offsetHeight / 2);
+    if (dragging) after ? listEl.insertBefore(dragging, after) : listEl.appendChild(dragging);
+  };
+  listEl.ondragleave = () => listEl.classList.remove('over');
+  listEl.ondrop = e => {
+    e.preventDefault();
+    listEl.classList.remove('over');
+    const id = e.dataTransfer.getData('text/plain');
+    const els = [...listEl.querySelectorAll('.card')];
+    const idx = els.findIndex(x => x.dataset.id === id);
+    const ord = i => state.cards.find(c => c.id === els[i]?.dataset.id)?.order;
+    const prev = idx > 0 ? ord(idx - 1) : undefined;
+    const next = idx < els.length - 1 ? ord(idx + 1) : undefined;
+    const order = prev === undefined && next === undefined ? 1 : prev === undefined ? next - 1 : next === undefined ? prev + 1 : (prev + next) / 2;
+    mutate(() => backend.update(id, { column: listEl.dataset.col, order }));
+  };
+}
+
+function openCard(id, column) {
+  const { config } = state;
+  const edit = backend.canEdit();
+  const c = id ? state.cards.find(x => x.id === id) : { title: '', column, assignee: '', priority: '', labels: [], body: '' };
+  editing = id;
+  $('#col-in').innerHTML = config.columns.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+  $('#who-in').innerHTML = '<option value="">—</option>' + config.members.map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
+  $('#title-in').value = c.title;
+  $('#col-in').value = c.column;
+  $('#who-in').value = c.assignee;
+  $('#prio-in').value = c.priority;
+  $('#labels-in').value = c.labels.join(', ');
+  $('#body-in').value = c.body;
+  $('#card-meta').textContent = id ? `${c.id} · создана ${c.created} · обновлена ${c.updated}` : '';
+  $('#card-form').querySelectorAll('input, select, textarea').forEach(x => (x.disabled = !edit));
+  $('#del-btn').hidden = !id || !edit;
+  $('#save-btn').hidden = !edit;
+  $('#cancel-btn').textContent = edit ? 'Отмена' : 'Закрыть';
+  $('#dlg').showModal();
+  if (edit) $('#title-in').focus();
+}
+
+$('#card-form').onsubmit = e => {
+  e.preventDefault();
+  const data = {
+    title: $('#title-in').value.trim(),
+    column: $('#col-in').value,
+    assignee: $('#who-in').value,
+    priority: $('#prio-in').value,
+    labels: $('#labels-in').value.split(',').map(s => s.trim()).filter(Boolean),
+    body: $('#body-in').value,
+  };
+  $('#dlg').close();
+  mutate(() => (editing ? backend.update(editing, data) : backend.create(data)));
+};
+$('#cancel-btn').onclick = () => $('#dlg').close();
+$('#del-btn').onclick = () => {
+  if (!confirm('Удалить карточку?')) return;
+  $('#dlg').close();
+  mutate(() => backend.remove(editing));
+};
+$('#filter-who').onchange = render;
+$('#filter-q').oninput = render;
+
+$('#sync-btn').onclick = async () => {
+  const btn = $('#sync-btn');
+  btn.disabled = true; btn.textContent = '⟳ Синхронизация…';
+  try {
+    const r = await backend.sync();
+    $('#sync-title').textContent = r.ok ? 'Синхронизировано ✓' : 'Ошибка синхронизации';
+    $('#synclog').textContent = r.log.join('\n\n');
+    if (!r.ok) $('#sync-dlg').showModal();
+  } catch (err) { showError(err); }
+  btn.disabled = false; btn.textContent = '⟳ Синхронизировать';
+  load(true);
+};
+
+if (backend.kind === 'github') {
+  $('#pat-link').href = 'https://github.com/settings/personal-access-tokens/new';
+  $('#login-btn').onclick = () => { $('#login-err').textContent = ''; $('#token-in').value = ''; $('#logout-btn').hidden = !backend.canEdit(); $('#login-dlg').showModal(); };
+  $('#logout-btn').onclick = () => { backend.logout(); $('#login-dlg').close(); render(); };
+  $('#login-form').onsubmit = async e => {
+    e.preventDefault();
+    try {
+      await backend.login($('#token-in').value.trim());
+      $('#login-dlg').close();
+      render();
+    } catch (err) { $('#login-err').textContent = err.message; }
+  };
+}
+
+// Подхватываем чужие изменения без перезагрузки. Без токена GitHub даёт 60 запросов в час — опрашиваем реже.
+const POLL = backend.kind === 'local' ? 3000 : backend.canEdit() ? 15000 : 60000;
+setInterval(() => {
+  if (busy || document.hidden || document.querySelector('dialog[open]') || document.querySelector('.card.dragging')) return;
+  load().catch(() => {});
+}, POLL);
+load(true).catch(e => { $('#board').innerHTML = `<p class="status" style="padding:16px">Не удалось загрузить доску: ${esc(e.message)}</p>`; });
+</script>
+</body>
+</html>
