@@ -44,16 +44,10 @@ const ART: Record<string, string> = {
     ${P(rect(8, 6, 48, 20, 5), STEEL_D)}${N(rect(11, 8, 42, 7, 3), STEEL)}
     ${P(rect(3, 8, 9, 16, 3), STEEL)}${P(rect(52, 8, 9, 16, 3), STEEL)}
     ${P(rect(26, 3, 12, 26, 3), GOLD)}${N(rect(28.5, 6, 3, 20), GOLD_L)}${P(rect(27, 57, 10, 6, 2), GOLD)}</g>`,
-  dagger: `<g transform="rotate(40 32 32)">
-    ${P('M32 3L38 14L37 38H27L26 14Z', STEEL)}${N('M32 3L38 14L37 38H32Z', STEEL_D)}${H('M29.5 14L29 33', 2)}
-    ${P(rect(19, 37, 26, 6, 3), GOLD)}${N(rect(21, 40, 22, 2), GOLD_D)}${P(circ(32, 40, 3.2), RED)}
-    ${P(rect(28.5, 43, 7, 13, 1.5), LEATHER_D)}${N(rect(28.5, 47, 7, 1.6), '#4e1f14')}${N(rect(28.5, 51, 7, 1.6), '#4e1f14')}
-    ${P(circ(32, 59, 4), GOLD)}</g>`,
-  reaper: `<g transform="rotate(20 32 32)">
-    ${P(rect(29, 6, 6, 56, 3), WOOD_D)}${N(rect(32, 9, 3, 50), '#5e321c')}
-    ${P(rect(28, 46, 8, 10, 2), '#efe6cf')}
-    ${P('M33 8C24 1 9 3 2 16C12 10 22 11 31 18Z', STEEL)}${N('M31 18C22 11 12 10 2 16C10 13 20 14 31 13Z', STEEL_DD)}${H('M8 9C14 6 20 6 25 7', 2.2)}
-    ${P(rect(27, 5, 10, 9, 2), STEEL_DD)}${P('M37 8L46 6L37 13Z', STEEL_D)}</g>`,
+  polearm: `<g transform="rotate(40 32 32)">
+    ${P('M33 1C37 9 37 20 35 31H29C30 20 31 10 33 1Z', STEEL)}${N('M33 1C37 9 37 20 35 31H32C33 20 33 10 33 1Z', STEEL_D)}${H('M31.5 9C31 16 30.8 22 30.8 27', 2)}
+    ${P(circ(32, 33, 6), GOLD)}${N(circ(32, 33, 2.5), GOLD_D)}
+    ${P(rect(29, 38, 6, 24, 2), '#2b2b33')}${[41, 46, 51, 56].map((y) => N(rect(29, y, 6, 2), RED)).join('')}</g>`,
 
 
 

@@ -61,7 +61,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .mobui.hurt { opacity: 1; }
 .mobhp { width: 54px; height: 7px; background: #000a; border: 1px solid #000; border-radius: 3px; overflow: hidden; }
 .mobhp > div { height: 100%; background: #e8413b; width: 100%; }
-/* dagger stacks under the HP bar */
 .ris { display: flex; gap: 1px; line-height: 0; }
 .ris .ri { display: inline-flex; filter: drop-shadow(0 1px 0 #000); }
 .rws { display: flex; gap: 4px; font-size: 17.9px; font-weight: 900; line-height: 1; text-shadow: 0 1px 0 #000, 0 0 3px #000; white-space: nowrap; }

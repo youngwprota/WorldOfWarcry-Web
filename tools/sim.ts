@@ -1,6 +1,6 @@
 // Balance simulator: a bot plays the forest and the cemetery on a 1-D model of the trail, using the game's own
 // config and formulas (src/balance.ts). Prints a per-minute curve and when each boss falls.
-// Run: npm run sim -- [--faction human|orc] [--weapon sword] [--left dagger] [--runs 20] [--until 45]
+// Run: npm run sim -- [--faction human|orc] [--weapon sword] [--left axe] [--runs 20] [--until 45]
 //                     [--dodge 0.6] [--uptime 0.8] [--combo 0.85] [--seed 1] [--keep] [--log] [--mobs] [--bench]
 //                     [--set MOBS.bandit_chief.hp=6000 --set GACHA.token.normal=0.05 ...] (what-if: config edits for this run)
 import * as CONFIG from '../src/config';
