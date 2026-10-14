@@ -22,8 +22,19 @@ const KEYS: Record<SwingKind, Key[]> = {
   thrust: [[0.6, -0.4, -0.1, -0.4, -0.2, 0.25], [1, 0.5, 0.45, 0.25, 0.1, 0], [1.4, 0.45, 0.4, 0.2, 0.1, 0]],
   overhead: [[0.6, -0.2, -0.3, 2.7, -0.1, 0.1], [1, 0.1, 0.5, 0.9, 0.1, 0], [1.4, 0.05, 0.4, 0.7, 0.05, 0]],
 };
-/** Torso keys of a clip swing (the arm comes from the clip): the twist follows the blow. */
-const CLIP_TORSO: Record<AttackAnim, SwingKind> = { SwordAttack: 'slashRL', AxeAttack: 'overhead' };
+/**
+ * Body keys of a clip swing (the arm and the clip's own spine come from ArmClips), on top of the clip, for the RIGHT
+ * hand: [phase, yaw, lean, lunge (m forward)]. The whole body winds up and throws itself into the blow.
+ */
+type BodyKey = [phase: number, yaw: number, lean: number, lunge: number];
+const BODY: Record<AttackAnim, BodyKey[]> = {
+  // slash right → left: the torso winds up to the right and unwinds through the blow
+  SwordAttack: [[0.55, -0.75, -0.05, -0.05], [1, 0.15, 0.2, 0.14], [1.45, 0.7, 0.12, 0.08]],
+  // chop: leans back with the axe up, then bends into the blow and steps into it
+  AxeAttack: [[0.6, -0.35, -0.3, -0.06], [1, 0.15, 0.3, 0.16], [1.4, 0.1, 0.2, 0.1]],
+};
+/** Share of the torso twist per spine bone, bottom up: a twist on one bone only kinks the waist. */
+const YAW_SHARE = [0.45, 0.3, 0.25];
 
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const AXIS_Y = new THREE.Vector3(0, 1, 0);
@@ -38,16 +49,19 @@ interface Active { kind: SwingKind; t: number; dur: number; impact: number; tors
 /** Swing state of one character: up to one swing per hand. */
 export class Swinger {
   private hands: (Active | null)[] = [null, null];
-  private spine: THREE.Object3D | null;
+  private spine: (THREE.Object3D | null)[];
   private arms: (THREE.Object3D | null)[];
   /** Smoothed torso twist and bend: the lead swing changes hands without a jump. */
   private yaw = 0;
   private lean = 0;
+  private lunge = 0;
+  private baseZ: number;
   /** Attack clips on one arm (Character sets it): the left hand and both hands with two weapons. */
   armClips: ArmClips | null = null;
 
   constructor(private model: THREE.Object3D) {
-    this.spine = model.getObjectByName('spine_01') ?? null;
+    this.spine = ['spine_01', 'spine_02', 'spine_03'].map((n) => model.getObjectByName(n) ?? null);
+    this.baseZ = model.position.z;
     this.arms = [model.getObjectByName('upperarm_r') ?? null, model.getObjectByName('upperarm_l') ?? null];
   }
 
@@ -63,7 +77,7 @@ export class Swinger {
   startClip(anim: AttackAnim, hand: 0 | 1, period: number, impact: number, torso = 1) {
     const k = ATTACK_HIT[anim] / impact; // clip seconds per game second
     const dur = Math.min(period, (this.armClips?.duration(anim) ?? 1) / k);
-    this.begin(hand, CLIP_TORSO[anim], dur, impact, torso, anim).k = k;
+    this.begin(hand, 'overhead', dur, impact, torso, anim).k = k;
   }
 
   private begin(hand: 0 | 1, kind: SwingKind, dur: number, impact: number, torso: number, clip: AttackAnim | null) {
@@ -77,7 +91,7 @@ export class Swinger {
   /** Call after the mixer update: the clips have just rewritten the bones' local rotations. */
   apply(dt: number) {
     this.armClips?.resetLeft();
-    let yaw = 0, lean = 0;
+    let yaw = 0, lean = 0, lunge = 0;
     // the torso follows only the latest swing: two hands twisting it at once made it jerk back and forth
     let lead = -1, leadT = Infinity;
     for (let h = 0; h < 2; h++) {
@@ -90,15 +104,17 @@ export class Swinger {
       a.t += dt;
       if (a.t >= a.dur) { this.hands[h] = null; continue; }
       const phase = a.t < a.impact ? a.t / a.impact : 1 + (a.t - a.impact) / (a.dur - a.impact);
-      sample(KEYS[a.kind], phase, pose);
       const m = h ? -1 : 1; // the left hand mirrors the twist and the sweep
-      if (h === lead) { yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso * a.torso; }
       if (a.clip && this.armClips) {
+        sample(BODY[a.clip], phase, pose, 3);
+        if (h === lead) { yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso; lunge = pose[2] * a.torso; }
         // eased in and out, so a swing cut short by the next one does not snap
         const w = Math.min(1, a.t / 0.06, (a.dur - a.t) / 0.15);
         this.armClips.apply(a.clip, h as 0 | 1, a.t * a.k, w);
         continue;
       }
+      sample(KEYS[a.kind], phase, pose, 5);
+      if (h === lead) { yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso * a.torso; }
       const arm = this.arms[h];
       if (arm) {
         // fwd: hanging (−Y) towards +Z is a negative turn about X; out: right arm to −X is negative about Z
@@ -107,16 +123,32 @@ export class Swinger {
       }
     }
     const k = 1 - Math.exp(-dt * 16);
+    if (this.armClips) {
+      // the clip's own torso and head from the lead swing
+      const a = lead >= 0 ? this.hands[lead] : null;
+      if (a?.clip) this.armClips.body(a.clip, lead as 0 | 1, a.t * a.k, Math.min(1, a.t / 0.06, (a.dur - a.t) / 0.15), k);
+      else this.armClips.body(null, 0, 0, 0, k);
+    }
     this.yaw += (yaw - this.yaw) * k;
     this.lean += (lean - this.lean) * k;
-    if (this.spine && (Math.abs(this.yaw) > 1e-3 || Math.abs(this.lean) > 1e-3)) {
-      rotateInModel(this.spine, this.model, qa.setFromAxisAngle(AXIS_Y, Math.max(-1.2, Math.min(1.2, this.yaw))).multiply(qb.setFromAxisAngle(AXIS_X, Math.min(0.7, this.lean))));
+    this.lunge += (lunge - this.lunge) * k;
+    this.model.position.z = this.baseZ + this.lunge;
+    if (Math.abs(this.yaw) > 1e-3 || Math.abs(this.lean) > 1e-3) {
+      const yawAll = Math.max(-1.2, Math.min(1.2, this.yaw));
+      for (let i = 0; i < 3; i++) {
+        const b = this.spine[i];
+        if (!b) continue;
+        qa.setFromAxisAngle(AXIS_Y, yawAll * YAW_SHARE[i]);
+        // the bend at the waist only
+        if (i === 0) qa.multiply(qb.setFromAxisAngle(AXIS_X, Math.min(0.7, this.lean)));
+        rotateInModel(b, this.model, qa);
+      }
     }
   }
 }
 
 /** Smoothstep between keys; implicit rest keys at phase 0 and 2. */
-function sample(keys: Key[], phase: number, out: number[]) {
+function sample(keys: readonly (readonly number[])[], phase: number, out: number[], n: number) {
   let prev: readonly number[] = REST0;
   let next: readonly number[] = REST2;
   for (const k of keys) {
@@ -126,7 +158,7 @@ function sample(keys: Key[], phase: number, out: number[]) {
   const span = next[0] - prev[0];
   let u = span > 0 ? (phase - prev[0]) / span : 1;
   u = u * u * (3 - 2 * u);
-  for (let i = 0; i < 5; i++) out[i] = prev[i + 1] + (next[i + 1] - prev[i + 1]) * u;
+  for (let i = 0; i < n; i++) out[i] = prev[i + 1] + (next[i + 1] - prev[i + 1]) * u;
 }
 const REST0 = [0, 0, 0, 0, 0, 0] as const;
 const REST2 = [2, 0, 0, 0, 0, 0] as const;

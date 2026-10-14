@@ -4,11 +4,14 @@ import * as THREE from 'three';
 import type { AttackAnim } from './config';
 
 const CHAIN = ['clavicle', 'upperarm', 'lowerarm', 'hand'];
+/** The clip's torso and head: copied (right hand) or mirrored (left) from the latest swing, see body(). */
+const SPINE = ['spine_01', 'spine_02', 'spine_03', 'neck_01', 'head'];
 const AXIS_Y = new THREE.Vector3(0, 1, 0);
 const qa = new THREE.Quaternion();
 const qb = new THREE.Quaternion();
 const qParent = new THREE.Quaternion();
 const qTarget = new THREE.Quaternion();
+const qBase = new THREE.Quaternion();
 
 /** Bones only (no meshes), same names and rest transforms; the root has no transform of its own. */
 function copyBones(o: THREE.Object3D, root = true): THREE.Object3D {
@@ -49,11 +52,20 @@ export class ArmClips {
   private leftIdle = new THREE.Quaternion();
   private leftRight = new THREE.Quaternion();
   private leftFlip = new THREE.Quaternion();
+  private realS: THREE.Object3D[];
+  private gS: THREE.Object3D[];
+  /** Spine mirror fix (like `fix`), measured in the pelvis space. */
+  private fixS: THREE.Quaternion[];
+  private pelvis: THREE.Object3D;
+  /** The torso as last shown: eased towards the target, so the lead hand changes without a jump. */
+  private bodyQ: THREE.Quaternion[];
+  private bodyInit = false;
 
   constructor(model: THREE.Object3D, clips: Record<AttackAnim | 'Idle', THREE.AnimationClip>) {
     this.ghost = copyBones(model);
     const arm = new Set<string>();
     model.getObjectByName('clavicle_r')?.traverse((o) => arm.add(o.name));
+    for (const n of SPINE) arm.add(n);
     this.mixer = new THREE.AnimationMixer(this.ghost);
     const act = (clip: THREE.AnimationClip) => {
       const c = new THREE.AnimationClip(clip.name + '_arm', clip.duration,
@@ -68,6 +80,10 @@ export class ArmClips {
     this.real = [bones(model, 'r'), bones(model, 'l')];
     this.gR = bones(this.ghost, 'r');
     this.gL = bones(this.ghost, 'l');
+    this.realS = SPINE.map((n) => model.getObjectByName(n)!);
+    this.gS = SPINE.map((n) => this.ghost.getObjectByName(n)!);
+    this.pelvis = this.gS[0].parent!;
+    this.bodyQ = SPINE.map(() => new THREE.Quaternion());
     const rest = new Map<THREE.Object3D, THREE.Quaternion>();
     this.ghost.traverse((o) => rest.set(o, o.quaternion.clone()));
     const idle = this.mixer.clipAction(new THREE.AnimationClip('Idle_arm', clips.Idle.duration,
@@ -78,6 +94,8 @@ export class ArmClips {
     this.chest = this.gL[0].parent!;
     this.fix = CHAIN.map((_, i) =>
       mirror(modelQ(this.gR[i], this.chest, new THREE.Quaternion())).invert().multiply(modelQ(this.gL[i], this.chest, qa)));
+    this.fixS = SPINE.map((_, i) =>
+      mirror(modelQ(this.gS[i], this.pelvis, new THREE.Quaternion())).invert().multiply(modelQ(this.gS[i], this.pelvis, qa)));
     idle.stop();
     for (const [o, q] of rest) o.quaternion.copy(q);
   }
@@ -98,8 +116,29 @@ export class ArmClips {
   /** Before the swings of a frame: the left weapon back in its idle grip. */
   resetLeft() { this.left?.quaternion.copy(this.leftIdle); }
 
-  /** Puts the arm of `hand` at clip time `t`, blended by `w` over its current pose (after the main mixer). */
-  apply(anim: AttackAnim, hand: 0 | 1, t: number, w: number) {
+  /**
+   * The torso and head after the swings of a frame: the clip pose of the lead swing (mirrored for the left hand),
+   * blended by `w` over the current pose; `anim` null — back to the current pose. Eased by `k` (0..1).
+   */
+  body(anim: AttackAnim | null, hand: 0 | 1, t: number, w: number, k: number) {
+    const real = this.realS;
+    if (!this.bodyInit) { for (let i = 0; i < SPINE.length; i++) this.bodyQ[i].copy(real[i].quaternion); this.bodyInit = true; }
+    if (anim) this.pose(anim, t);
+    qParent.identity();
+    for (let i = 0; i < SPINE.length; i++) {
+      qBase.copy(real[i].quaternion);
+      if (anim) {
+        modelQ(this.gS[i], this.pelvis, qTarget);
+        if (hand) mirror(qTarget).multiply(this.fixS[i]);
+        qb.copy(qParent).invert().multiply(qTarget);
+        qParent.copy(qTarget);
+        qBase.slerp(qb, w);
+      }
+      real[i].quaternion.copy(this.bodyQ[i].slerp(qBase, k));
+    }
+  }
+
+  private pose(anim: AttackAnim, t: number) {
     const a = this.actions[anim];
     if (this.current !== a) {
       this.current?.stop();
@@ -108,6 +147,11 @@ export class ArmClips {
     }
     a.time = Math.min(t, a.getClip().duration);
     this.mixer.update(0);
+  }
+
+  /** Puts the arm of `hand` at clip time `t`, blended by `w` over its current pose (after the main mixer). */
+  apply(anim: AttackAnim, hand: 0 | 1, t: number, w: number) {
+    this.pose(anim, t);
     const real = this.real[hand];
     if (hand === 0) {
       for (let i = 0; i < CHAIN.length; i++) real[i].quaternion.slerp(this.gR[i].quaternion, w);

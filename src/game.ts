@@ -684,11 +684,10 @@ export class Game {
       h.impactAt = impactAt;
       // two hands: both swing procedurally (a full-body clip of one hand fights the other hand's swing)
       // the series picks the polearm's swing; other weapons always swing the same way
-      // polearm: its series swings; the left hand and two weapons: the attack clip on that arm only (mirrored on the
-      // left), so each hand swings for real while the other one recovers; one weapon in the right hand: the full clip
+      // polearm: its series swings; other weapons: the attack clip on that arm only (mirrored on the left), so each
+      // hand swings for real while the other one recovers, plus the clip's torso and a body twist, bend and lunge
       if (w.swing) this.hero.swing(w.swing[Math.max(0, h.combo - 1) % w.swing.length], h.i, period, impactAt, this.dual ? DUAL.torso : 1);
-      else if (h.i === 1 || this.dual) this.hero.swingClip(w.anim, h.i, period, impactAt, DUAL.torso);
-      else this.hero.attack(w.anim, period, impactAt);
+      else this.hero.swingClip(w.anim, h.i, period, impactAt);
       h.impact = impactAt;
       h.atkCd = period;
       // the spin takes the whole body: the other hand waits until it is over
