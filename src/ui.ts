@@ -3,7 +3,7 @@ import {
   DAMAGE_TYPE_NAME, FACTIONS, fmtOrb, UI_REF, WEAPONS, ZONE_FOES,
   type FactionId, type OrbKind, type ZoneDef,
 } from './config';
-import { ARMOR_SLOTS, cellHtml, type ArmorSlot, type Item } from './items';
+import { ARMOR_SLOTS, EQUIP_BAR, cellHtml, type ArmorSlot, type Item } from './items';
 import { DAMAGE_TYPE_ICON, fmtK, icon, iconImage, resistIcons, rewardChips } from './icons';
 import { STAT_ICON, art, mini } from './art';
 import type { MobDef } from './config';
@@ -11,9 +11,6 @@ import { sfx } from './audio';
 import type { World } from './world';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-/** Bottom bar sides (the inventory paper doll keeps its own ARMOR_SLOTS.side layout). */
-const BAR_LEFT: ArmorSlot[] = ['head', 'chest', 'legs'];
-const BAR_RIGHT: ArmorSlot[] = ['arms', 'ring', 'amulet'];
 /** Seconds a "+N stat" line stays under the buffs after the last orb of that stat. */
 const GAIN_SHOW = 2.5;
 
@@ -250,8 +247,8 @@ export class UI {
       const x = ARMOR_SLOTS.find((s) => s.id === id)!;
       return cellHtml(equip[id], `data-armor="${id}" title="${x.name}"`, x.icon);
     }).join('');
-    $('armor-l').innerHTML = side(BAR_LEFT);
-    $('armor-r').innerHTML = side(BAR_RIGHT);
+    $('armor-l').innerHTML = side(EQUIP_BAR.left);
+    $('armor-r').innerHTML = side(EQUIP_BAR.right);
   }
 
   zoneBanner(z: ZoneDef) {

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Character } from './character';
 import { COMBOS, DAMAGE_TYPE_NAME, FACTIONS, RARITY, WEAPONS } from './config';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, SLOT_NAME, cellHtml, itemLines, itemName, slotOf,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, slotOf,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -96,7 +96,8 @@ class HeroPreview {
 type BagFilter = 'all' | 'weapon' | 'armor';
 type Source = { at: 'bag'; index: number } | { at: 'armor'; slot: ArmorSlot } | { at: 'weapon'; slot: 0 | 1 };
 
-/** Inventory window: paper doll, stats and the bag in one sheet. */
+/** Inventory window: stats, the hero preview, the bag and the equipped slots. */
+
 /** Weapon slot captions: save.weapons[0] is the right hand. */
 const HAND_NAME = ['правая', 'левая'];
 
@@ -122,11 +123,11 @@ export class Inventory {
     this.game.refreshHud(true);
   }
 
-  /** "Характеристики" panel of the inventory window: at the top of the screen, above the sheet. */
+  /** "Характеристики" panel of the inventory window: at the top of the screen, above the hero; "i" opens the full list. */
   private statsPanel() {
-    const f = FACTIONS[this.game.faction];
     return `<div class="top-stats">
-      <div class="sc-title">Характеристики <small>${f.name} · ${f.passiveName}</small></div>
+      <div class="sc-title">Характеристики</div>
+      <button class="info-btn" id="i-info" title="Все характеристики">i</button>
       <div class="big-stats" id="i-big"></div>
       <div class="chips" id="i-stats"></div>
     </div>`;
@@ -141,40 +142,75 @@ export class Inventory {
       big('regen', fmtK(g.regen), 'Реген');
     const combo = COMBOS[g.weaponItem.def];
     const chip = (ic: string, v: string, title: string) => `<div class="chip" title="${title}">${art(ic, 28)}<b>${v}</b></div>`;
-    q('#i-stats').innerHTML = chip('hammer', fmtK(Math.round(hit)), 'Урон за удар') + chip('sword', fmtK(g.power), 'Сила (сферы и броня)') +
+    q('#i-stats').innerHTML = chip('hammer', fmtK(Math.round(hit)), 'Урон за удар') + chip('fist', fmtK(g.power), 'Сила (сферы и броня)') +
       chip('shield', `${g.defense} <small>−${Math.round((g.defense / (g.defense + 100)) * 100)}%</small>`, 'Защита') +
-      chip('boot', `${g.speedStat}`, 'Скорость') + chip('axe', `×${combo.mult}`, `Комбо: ${combo.name}`) +
-      chip('gear', `${g.weapon.aps}/с`, 'Атак в секунду');
+      chip('run', `${g.speedStat}`, 'Скорость') + chip('axe', `×${combo.mult}`, `Комбо: ${combo.name}`) +
+      chip('hourglass', `${g.weapon.aps}/с`, 'Атак в секунду');
   }
 
-  // ---------- inventory window: hero (doll + stats) on top, scrolling bag under it ----------
+  /** Full list of the hero's stats ("i" on the stats panel). */
+  private showInfo() {
+    const wrap = this.ui.modal.querySelector<HTMLElement>('#i-sw')!;
+    const g = this.game;
+    const f = FACTIONS[g.faction];
+    const w = g.weapon;
+    const hit = g.itemDamage(g.weaponItem) * g.handMul() * g.powerMult();
+    const combo = COMBOS[g.weaponItem.def];
+    const gear = g.gear();
+    const t = Math.round(g.save.playTime ?? 0);
+    const played = t >= 3600 ? `${Math.floor(t / 3600)} ч ${Math.floor((t % 3600) / 60)} мин` : `${Math.floor(t / 60)} мин`;
+    const row = (ic: string, name: string, value: string, note = '') =>
+      `<div class="sw-row">${art(ic, 40)}<div class="sw-name">${name}${note ? `<small>${note}</small>` : ''}</div><b>${value}</b></div>`;
+    const rows = [
+      row('sword', 'Урон в секунду', fmtK(g.heroDps()), `${g.dual ? 'обе руки' : w.name}, с учётом силы`),
+      row('hammer', 'Урон за удар', fmtK(Math.round(hit))),
+      row('hourglass', 'Атак в секунду', String(w.aps)),
+      row(DAMAGE_TYPE_ICON[w.type], 'Тип урона', DAMAGE_TYPE_NAME[w.type]),
+      row('flag', 'Зона удара', w.shape === 'circle' ? 'круг' : `дуга ${w.arc}°`, `дальность ${w.range} м`),
+      row('star', 'Комбо-добивание', `×${combo.mult}`, `${combo.name}${combo.stun ? `, оглушение ${combo.stun} с` : ''}`),
+      row('fist', 'Сила', fmtK(g.power), `+${fmtK(g.power)}% к урону`),
+      row('heart', 'Здоровье', fmtK(g.maxHp), gear.hp ? `+${fmtK(gear.hp)} от брони` : ''),
+      g.shieldMax ? row('shield', 'Святой щит', fmtK(g.shieldMax), '15% здоровья, восстанавливается') : '',
+      row('regen', 'Регенерация', `${g.regen}/с`, 'здоровья в секунду'),
+      row('shield', 'Защита', String(g.defense), `−${Math.round((g.defense / (g.defense + 100)) * 100)}% входящего урона`),
+      row('run', 'Скорость', String(g.speedStat), `${g.speed.toFixed(1)} м/с`),
+      g.faction === 'orc' ? row('drop', 'Жажда крови', `+${Math.round(g.bloodlust * 100)}%`, 'урона сейчас, до +30% при низком здоровье') : '',
+      row('flame', f.passiveName, f.name, f.passiveText),
+      row('skull', 'Убито врагов', fmtK(g.save.kills)),
+      row('hourglass', 'Время в игре', played),
+    ].join('');
+    wrap.innerHTML = `<div class="stats-win">
+      <div class="sw-head"><h2>Характеристики</h2><small>${f.name} · ${w.name}</small><button class="xbtn" id="i-sw-x">✕</button></div>
+      <div class="sw-list">${rows}</div>
+    </div>`;
+    wrap.classList.remove('hidden');
+    wrap.querySelector('#i-sw-x')!.addEventListener('click', () => { sfx.click(); wrap.classList.add('hidden'); });
+  }
+
+  // ---------- inventory window: stats on top, then the hero with the equipped slots, the bag sheet at the bottom ----------
   open() {
     if (this.opened) return;
     this.opened = true;
     const f = FACTIONS[this.game.faction];
     const tab = (bf: BagFilter, ic: string) => `<button class="tab ${this.bagFilter === bf ? 'on' : ''}" data-filter="${bf}">${art(ic, 34)}</button>`;
-    // stats float at the top of the screen, the inventory sheet comes up from the bottom
-    this.ui.open(`${this.statsPanel()}<div class="sheet inv char">
+    this.ui.open(`${this.statsPanel()}
+    <div class="inv-equipped"><div class="eq-title">Экипировано</div>
+      <div class="eq-doll">
+        <div class="eq-side" id="i-eq-l"></div>
+        <div class="eq-stage"><canvas id="i-canvas"></canvas><div class="eq-rot"><button id="i-rl">↶</button><button id="i-rr">↷</button></div></div>
+        <div class="eq-w" id="i-eq-w"></div>
+        <div class="eq-side" id="i-eq-r"></div>
+      </div>
+    </div>
+    <div class="sheet inv">
       <div class="sheet-head"><div class="sheet-title">Инвентарь</div><button class="xbtn" id="i-close" title="Закрыть">✕</button></div>
-      <div class="inv-hero">
-        <div class="doll">
-          <div class="col" id="i-left"></div>
-          <div class="paper">
-            <canvas id="i-canvas"></canvas>
-            <div class="rot"><button id="i-rl">↶</button><button id="i-rr">↷</button></div>
-            <div class="pw left" id="i-w0"></div><div class="pw right" id="i-w1"></div>
-          </div>
-          <div class="col" id="i-right"></div>
-        </div>
-        <div class="tabs">${tab('all', 'bag')}${tab('weapon', 'sword')}${tab('armor', 'chest')}<span class="cap" id="b-sub"></span></div>
-      </div>
-      <div class="sheet-body">
-        <div id="b-grid"></div>
-        <p class="hint-line">Нажми на предмет: надеть, сравнить или выбросить</p>
-      </div>
+      <div class="tabs">${tab('all', 'bag')}${tab('weapon', 'sword')}${tab('armor', 'chest')}<span class="cap" id="b-sub"></span></div>
+      <div class="sheet-body"><div id="b-grid"></div></div>
+      <p class="hint-line">Нажми на предмет: надеть, сравнить или выбросить</p>
     </div>`);
     this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, f.hero);
     this.ui.on('#i-close', () => this.close());
+    this.ui.on('#i-info', () => this.showInfo());
     this.ui.modal.querySelector('#i-rl')!.addEventListener('click', () => this.preview?.nudge(-1));
     this.ui.modal.querySelector('#i-rr')!.addEventListener('click', () => this.preview?.nudge(1));
     this.ui.modal.querySelectorAll<HTMLElement>('[data-filter]').forEach((b) => b.addEventListener('click', () => {
@@ -183,24 +219,29 @@ export class Inventory {
       this.ui.modal.querySelectorAll('[data-filter]').forEach((x) => x.classList.toggle('on', x === b));
       this.renderBag();
     }));
-    this.ui.modal.insertAdjacentHTML('beforeend', '<div class="tip-wrap hidden" id="i-tip"><div class="tip"></div></div>');
+    this.ui.modal.insertAdjacentHTML('beforeend', '<div class="tip-wrap hidden" id="i-tip"><div class="tip"></div></div><div class="tip-wrap hidden" id="i-sw"></div>');
+    const sw = this.ui.modal.querySelector<HTMLElement>('#i-sw')!;
+    sw.addEventListener('click', (e) => { if (e.target === sw) sw.classList.add('hidden'); });
     this.ui.modal.addEventListener('click', this.onClick);
     this.rerender();
   }
 
+  /** "Экипировано", laid out like the Warcraft character frame: armour in columns on both sides of the hero, weapons under him. */
   private renderChar() {
     const g = this.game;
     const s = g.save;
-    const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
-    const side = (which: 'left' | 'right') => ARMOR_SLOTS.filter((x) => x.side === which)
-      .map((x) => this.cell(s.equip[x.id], `data-armor="${x.id}" title="${x.name}"`, x.icon)).join('');
-    q('#i-left').innerHTML = side('left');
-    q('#i-right').innerHTML = side('right');
-    // Weapon slots 1 and 2 on the left and right of the hero, in the middle of the preview.
-    for (const i of [0, 1] as const) {
+    const armor = (ids: ArmorSlot[]) => ids.map((id) => {
+      const x = ARMOR_SLOTS.find((a) => a.id === id)!;
+      return this.cell(s.equip[id], `data-armor="${id}" title="${x.name}"`, x.icon);
+    }).join('');
+    const weapons = ([0, 1] as const).map((i) => {
       const tag = `<span class="wtag ${s.weapons[i] ? 'on' : ''}">${HAND_NAME[i]}</span>`;
-      q(`#i-w${i}`).innerHTML = this.cell(s.weapons[i], `data-weapon="${i}"`, 'sword', tag, s.weapons[i] ? 'active' : '');
-    }
+      return this.cell(s.weapons[i], `data-weapon="${i}"`, 'sword', tag, s.weapons[i] ? 'active' : '');
+    }).join('');
+    const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
+    q('#i-eq-l').innerHTML = armor(EQUIP_BAR.left);
+    q('#i-eq-w').innerHTML = weapons;
+    q('#i-eq-r').innerHTML = armor(EQUIP_BAR.right);
     this.preview?.setGear(...g.handModels(), g.outfit());
     g.newItems = 0;
   }

@@ -15,6 +15,12 @@ const RIGS: Record<string, CreatureRig> = {
   orc_boar: BOAR,
   undead_boar: BOAR,
   human_murloc: { stride: 0.39 * 1.3, upperRoot: 'Spine_1', shadow: 1.1, ram: false },
+  // WoW creatures retextured to the game palette (wow.export glTF → _warcry pipeline). The attack moves the whole
+  // body, so it plays on the full skeleton; strides measured from the planted feet of the walk clip.
+  wild_bear: { stride: 2.5, upperRoot: 'bearskindrkbrown_skeleton', shadow: 1.6, ram: false },
+  wild_direwolf: { stride: 2.4, upperRoot: 'direwolfskinlightblue_skeleton', shadow: 1.5, ram: false },
+  wild_lion: { stride: 3.0, upperRoot: 'lionskingold_skeleton', shadow: 1.5, ram: false },
+  wild_dragon: { stride: 2.6, upperRoot: 'dragonnefarian1_skeleton', shadow: 9, ram: false },
 };
 /**
  * Body lunge of the ram, done here because the attack clip only drives the neck: forward offset (m at scale 1)

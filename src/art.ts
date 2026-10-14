@@ -164,13 +164,23 @@ const MINI: Record<string, { fill: string; line: string; shapes: string; detail?
 };
 
 export function mini(id: string, size = 14) {
+  if (PNG[id]) return png(id, size, 'mini');
   const m = MINI[id];
   if (!m) return '';
   return `<svg class="svgi mini" width="${size}" height="${size}" viewBox="0 0 64 64" stroke-linejoin="round">` +
     `<g fill="${m.line}" stroke="${m.line}" stroke-width="10">${m.shapes}</g><g fill="${m.fill}">${m.shapes}</g>${m.detail ?? ''}</svg>`;
 }
 
+/** UI icons drawn from the casual GUI pack (public/assets/ui); item icons stay vector. */
+const PNG: Record<string, string> = {
+  gear: 'i-gear', bag: 'i-bag', skull: 'i-skull', hourglass: 'i-hourglass',
+  heart: 'i-heart', regen: 'i-regen', fist: 'i-fist', run: 'i-run',
+};
+const png = (id: string, size: number, cls: string) =>
+  `<img class="svgi art png ${cls}" src="${import.meta.env.BASE_URL}assets/ui/${PNG[id]}.png" width="${size}" height="${size}" alt="" draggable="false">`;
+
 /** Coloured icon; falls back to nothing for unknown ids. */
 export function art(id: string, size = 24, cls = '') {
+  if (PNG[id]) return png(id, size, cls);
   return `<svg class="svgi art ${cls}" width="${size}" height="${size}" viewBox="0 0 64 64" stroke="${INK}" stroke-width="5.5" stroke-linejoin="round" paint-order="stroke">${ART[id] ?? ''}</svg>`;
 }

@@ -20,14 +20,16 @@ export type ArmorSlot = 'head' | 'chest' | 'arms' | 'legs' | 'ring' | 'amulet';
 export type VisualPart = 'head' | 'chest' | 'arms' | 'legs';
 export type BonusStat = 'hp' | 'regen' | 'power' | 'speed';
 
-export const ARMOR_SLOTS: { id: ArmorSlot; name: string; icon: string; side: 'left' | 'right' }[] = [
-  { id: 'head', name: 'Шлем', icon: 'head', side: 'left' },
-  { id: 'chest', name: 'Нагрудник', icon: 'chest', side: 'left' },
-  { id: 'arms', name: 'Перчатки', icon: 'arms', side: 'left' },
-  { id: 'legs', name: 'Поножи', icon: 'legs', side: 'right' },
-  { id: 'ring', name: 'Кольцо', icon: 'ring', side: 'right' },
-  { id: 'amulet', name: 'Амулет', icon: 'amulet', side: 'right' },
+export const ARMOR_SLOTS: { id: ArmorSlot; name: string; icon: string }[] = [
+  { id: 'head', name: 'Шлем', icon: 'head' },
+  { id: 'chest', name: 'Нагрудник', icon: 'chest' },
+  { id: 'arms', name: 'Перчатки', icon: 'arms' },
+  { id: 'legs', name: 'Поножи', icon: 'legs' },
+  { id: 'ring', name: 'Кольцо', icon: 'ring' },
+  { id: 'amulet', name: 'Амулет', icon: 'amulet' },
 ];
+/** Armour around the two weapons in the HUD bottom bar and the inventory's "Экипировано" row. */
+export const EQUIP_BAR: { left: ArmorSlot[]; right: ArmorSlot[] } = { left: ['head', 'chest', 'legs'], right: ['arms', 'ring', 'amulet'] };
 export const SLOT_NAME = Object.fromEntries(ARMOR_SLOTS.map((s) => [s.id, s.name])) as Record<ArmorSlot, string>;
 
 /** Mesh-name prefixes of each body part (all Bitgem characters share these). */
@@ -130,7 +132,7 @@ export function itemIcon(it: Item, size = 24) {
 /** Butcher-style item cell: rarity background, damage-type badge, level, sharpening. Empty cells show a faded slot icon. */
 export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = '', extra = '', cls = '') {
   if (!it) return `<button class="cell empty ${cls}" ${attrs}>${placeholder ? icon(placeholder, '#ffffff55', 30, 'ic') : ''}${extra}</button>`;
-  const badge = it.kind === 'weapon' ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 12)}</span>` : '';
+  const badge = it.kind === 'weapon' ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#4a2a12', 12)}</span>` : '';
   return `<button class="cell r${it.rarity} ${cls}" ${attrs}>${art(itemIconId(it), 34, 'ic')}${badge}` +
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }

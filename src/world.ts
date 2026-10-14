@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, type SpawnerDef, type FactionId, type ZoneId } from './config';
+import { FACTIONS, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
   ARENA, FORT, GATE, ISLAND, MAP_BOX, PATH, PATH_W, GATES, RIDGES, angleOf, gateDist, edgePoint, heightAt, inCamp, pathAt, pathDist, progressAt, rimCliff, rimTrees,
   shoreR, walkR, walkable, zoneAt, zoneIdAt, zoneWeights,
@@ -382,6 +382,36 @@ export class World {
     });
   }
 
+  /**
+   * "Zoo" (config ZOO): the WoW creatures together on the meadow beside the trail right outside the camp gate
+   * (the pond side). Own spawner ids (`zoo:i`), so the forest spawners and their saved charges keep their places.
+   * No rng calls: the rest of the forest layout stays as it was.
+   */
+  private buildZoo() {
+    const sGate = progressAt(ISLAND.campX, ISLAND.campZ - ISLAND.campR);
+    const ok = (x: number, z: number, pad: number) => this.free(x, z, pad, true) && zoneIdAt(x, z) === 'forest'
+      && !inCamp(x, z, 3) && !this.taken.some(([tx, tz]) => Math.hypot(tx - x, tz - z) < 4)
+      && !this.packCenters.some(([px, pz]) => Math.hypot(px - x, pz - z) < 6);
+    ZOO.forEach((def, i) => {
+      const side = -1;
+      const big = def.id === 'wild_dragon';
+      const offs = big ? [11, 13, 9] : [6, 8, 10];
+      let c: { x: number; z: number } | null = null;
+      search: for (const sd of [side, -side]) {
+        for (const ds of [0, 3, 6, 9, 12, 15, 18]) {
+          const p = pathAt(sGate + 3 + i * 3.5 + ds);
+          for (const off of offs) {
+            const q = { x: p.x + p.tz * sd * off, z: p.z - p.tx * sd * off };
+            if (ok(q.x, q.z, big ? 3.5 : 1.8)) { c = q; break search; }
+          }
+        }
+      }
+      if (!c) { const p = pathAt(sGate + 3 + i * 3.5); c = { x: p.x + p.tz * side * 7, z: p.z - p.tx * side * 7 }; }
+      this.taken.push([c.x, c.z]);
+      this.addSpawn(`zoo:${i}`, def, c.x, c.z, 'forest', 0, 0);
+    });
+  }
+
   // ---------- camp ----------
   private buildCamp() {
     const H = this.faction === 'human';
@@ -466,6 +496,7 @@ export class World {
     const s0 = progressAt(-3, -80);
     const s1 = sFort - 16;
     this.mobsAlong([[s0, s1], [sFort + 15, GATE.s - 10]], SPAWNERS.forest ?? [], 'forest', r);
+    this.buildZoo();
 
     // Lumber camp in the north-east of the forest
     const L = { x: 28, z: -68 };

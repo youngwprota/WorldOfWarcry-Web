@@ -16,6 +16,7 @@ export const LEFT_SWING: Record<AttackAnim, SwingKind[]> = { SwordAttack: ['slas
 export const ATTACK_HIT: Record<string, number> = {
   SwordAttack: 0.6, AxeAttack: 0.83,
   'orc_boar:attack': 9 / 24, 'undead_boar:attack': 9 / 24, 'human_murloc:attack': 0.6 / 1.3,
+  'wild_bear:attack': 0.58, 'wild_direwolf:attack': 0.375, 'wild_lion:attack': 0.4, 'wild_dragon:attack': 1.04,
 };
 /** When a mob's damage lands: on the clip's hit marker, sped up only if the attack period is too short for it. */
 export function mobImpact(hit: number, period: number) { return Math.min(hit, period * 0.8); }
@@ -410,6 +411,31 @@ export const MOBS: Record<string, MobDef> = {
     anim: 'AxeAttack', hp: 520, dmg: 10, aps: 0.85, range: 1.6, speed: 1.9, aggro: 4.5, regen: 0.03, scale: 1.5,
     ...foes('cemetery'), reward: { hp: 1 }, respawn: 50,
   },
+  // WoW creatures in the game palette, shown in the "zoo" by the camp gate (ZOO, src/world.ts); weak on purpose
+  wild_bear: {
+    id: 'wild_bear', name: 'Медведь', creature: true, push: 4,
+    model: { human: ['wild_bear', null], orc: ['wild_bear', null] },
+    anim: 'AxeAttack', hp: 160, dmg: 4, aps: 0.7, range: 1.8, speed: 2.4, aggro: 3.5, regen: 0.04, scale: 0.8,
+    ...foes('forest'), reward: { hp: 1 }, respawn: 20,
+  },
+  wild_direwolf: {
+    id: 'wild_direwolf', name: 'Лютоволк', creature: true,
+    model: { human: ['wild_direwolf', null], orc: ['wild_direwolf', null] },
+    anim: 'AxeAttack', hp: 110, dmg: 3, aps: 0.9, range: 1.6, speed: 3.2, aggro: 3.5, regen: 0.04, scale: 0.65,
+    ...foes('forest'), reward: { speed: 1 }, respawn: 20,
+  },
+  wild_lion: {
+    id: 'wild_lion', name: 'Лев', creature: true,
+    model: { human: ['wild_lion', null], orc: ['wild_lion', null] },
+    anim: 'AxeAttack', hp: 130, dmg: 4, aps: 0.8, range: 1.7, speed: 3.0, aggro: 3.5, regen: 0.04, scale: 0.8,
+    ...foes('forest'), reward: { power: 1 }, respawn: 20,
+  },
+  wild_dragon: {
+    id: 'wild_dragon', name: 'Чёрный дракон', creature: true, push: 6,
+    model: { human: ['wild_dragon', null], orc: ['wild_dragon', null] },
+    anim: 'AxeAttack', hp: 400, dmg: 6, aps: 0.5, range: 2.6, speed: 2.2, aggro: 4, regen: 0.04, scale: 0.25,
+    ...foes('forest'), reward: { power: 2 }, respawn: 30,
+  },
   skeleton_worker: {
     id: 'skeleton_worker', name: 'Мертвяк',
     model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
@@ -592,6 +618,9 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
     'skeleton_worker', 'ghost', 'gravedigger', 'skeleton_warrior', 'undead_boar', 'skeleton_worker', 'shade', 'skeleton_warrior',
   ]).map((id) => spawner(id)),
 };
+
+/** "Zoo" just outside the camp gate (src/world.ts buildZoo): the WoW creatures, one endless charge each. */
+export const ZOO: SpawnerDef[] = ['wild_bear', 'wild_direwolf', 'wild_dragon', 'wild_lion'].map((id) => spawner(id));
 
 /**
  * Breakable prop spawners (same SpawnerDef, unit 'prop'), spread over an area by group:

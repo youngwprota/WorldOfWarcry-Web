@@ -463,6 +463,8 @@ export class Game {
   get speed() { return heroStats(this.save).speed; }
   /** Orc racial: up to +30% damage as HP drops. */
   get bloodlustMax() { return BLOODLUST; }
+  /** Current bloodlust damage bonus (0 for humans). */
+  get bloodlust() { return this.faction === 'orc' ? this.bloodlustMax * (1 - this.hp / this.maxHp) : 0; }
   /** Main weapon: the right hand, or the left one when the right is empty (stats, balance log). */
   get weaponItem(): Item { return this.save.weapons[0] ?? this.save.weapons[1]!; }
   get weapon() { return WEAPONS[this.weaponItem.def]; }
@@ -1944,7 +1946,7 @@ export class Game {
       goal: g.text,
       buffs: [
         inCamp(this.hero.position.x, this.hero.position.z) && this.hp < this.maxHp ? '🏠 Лагерь: быстрое восстановление' : '',
-        this.faction === 'orc' && this.hp < this.maxHp * 0.7 ? `🩸 Жажда крови: +${Math.round(this.bloodlustMax * 100 * (1 - this.hp / this.maxHp))}% урона` : '',
+        this.faction === 'orc' && this.hp < this.maxHp * 0.7 ? `🩸 Жажда крови: +${Math.round(this.bloodlust * 100)}% урона` : '',
       ].filter(Boolean),
       bosses: this.mobs.filter((m) => m.def.boss).map((m) => ({
         name: m.def.boss!.titles[this.faction],

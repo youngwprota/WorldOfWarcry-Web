@@ -1,0 +1,219 @@
+/* ---------- casual skin: Layer Lab "GUI Pro - Casual Game" (sprites in public/assets/ui) ----------
+   Loaded after style.css and only restyles. Windows, buttons and item frames are the pack's white sprites tinted brown
+   (t-*.png, baked by tools/tint-ui.py: colours live there); a few coloured sprites (btn-green/purple/gray) are used as is.
+   9-slice insets are the Unity sprite borders, shrunk by 1px where they would leave no centre to stretch. */
+
+:root {
+  --ink: #2a1608;
+  --bg: #3b2414;
+  --muted: #e6c9a4;
+  --cream: #fff1dc;
+  --well: #4a2d18;
+  font-family: 'Rubik', 'Trebuchet MS', system-ui, sans-serif;
+  font-weight: 800;
+}
+html, body { background: radial-gradient(circle at 50% 30%, #6e4527, #1e1008); }
+#app { background: var(--bg); }
+
+/* ---------- buttons: Button01_175 (the tall lower part carries the two-tone gloss) ---------- */
+.btn, .xbtn {
+  --bi: url('/assets/ui/t-btn.png');
+  border-style: solid; border-width: 0; border-radius: 0; box-shadow: none; background: none;
+  border-image: var(--bi) 29 31 144 31 fill / 12px 12px 50px 12px;
+  padding-bottom: 12px;
+}
+.btn:active:not(:disabled) { box-shadow: none; transform: translateY(2px); filter: brightness(0.94); }
+.btn.primary { --bi: url('/assets/ui/t-primary.png'); }
+.btn.danger, .btn.red, .xbtn { --bi: url('/assets/ui/t-danger.png'); }
+.btn.purple { --bi: url('/assets/ui/btn-purple.png'); }
+.btn.green { --bi: url('/assets/ui/btn-green.png'); }
+.btn:disabled { --bi: url('/assets/ui/btn-gray.png'); filter: none; opacity: 0.85; }
+.btn { text-transform: none; letter-spacing: 0.2px; }
+/* close: the pack's cross */
+.xbtn { font-size: 0 !important; color: transparent; text-shadow: none; position: relative; }
+.xbtn::after { content: ''; position: absolute; left: 50%; top: 44%; width: 30px; height: 32px; transform: translate(-50%, -50%); background: url('/assets/ui/i-close.png') center / contain no-repeat; }
+.card-head .xbtn::after { width: 26px; height: 28px; }
+
+/* round HUD buttons: dark circle for settings, orange hexagon for the bag */
+.round-btn, .round-btn.bag { border: 0; box-shadow: none; border-radius: 0; background: url('/assets/ui/t-round.png') center / contain no-repeat; }
+.round-btn .svgi { width: 60%; height: 60%; margin-top: -6%; }
+#btn-bag { width: 84px; height: 100px; background-image: url('/assets/ui/t-hex.png'); }
+#btn-bag .svgi { width: 64px; height: 64px; margin-top: -8px; }
+.round-btn.nav span { bottom: 2px; left: 50%; right: auto; transform: translateX(-50%); font-size: 14px; }
+.round-btn:active { transform: translateY(2px); }
+#btn-bag:active { transform: translateY(calc(-50% + 2px)); }
+#btn-bag[data-badge]:not([data-badge=""])::after { top: 2px; right: -4px; }
+
+/* ---------- item cells: a plain rounded plate (BasicFrame_Round20) in the rarity colour with a darker outline ----------
+   style.css paints cells with backgrounds up to .cell:is(.r2..r5):not(.empty), so the reset has to be as specific */
+.cell, .cell.empty, .cell:is(.r0, .r1, .r2, .r3, .r4, .r5):not(.empty) {
+  background: none; box-shadow: none; border-radius: 0; border-style: solid; border-width: 0 !important;
+  border-image: var(--plate, url('/assets/ui/t-r0.png')) 25 fill / 20px;
+}
+.cell.r0 { --rl: #e4ddd2; --rd: #7a7166; }
+.cell.r1 { --rl: #a6f0ad; --rd: #2b8a3a; --plate: url('/assets/ui/t-r1.png'); }
+.cell.r2 { --rl: #a6d4ff; --rd: #2163ad; --plate: url('/assets/ui/t-r2.png'); }
+.cell.r3 { --rl: #d8b0ff; --rd: #6c2fb0; --plate: url('/assets/ui/t-r3.png'); }
+.cell.r4 { --rl: #ffe08a; --rd: #c27812; --plate: url('/assets/ui/t-r4.png'); }
+.cell.r5 { --rl: #ffa3a3; --rd: #9e1f24; --plate: url('/assets/ui/t-r5.png'); }
+.cell.empty { --plate: url('/assets/ui/t-empty.png'); }
+.cell .ic.art { width: 76%; height: 76%; margin: 0; filter: drop-shadow(0 3px 0 #0005); }
+/* level: big white number with an outline in the corner; badge: the damage type on a lighter plate of the rarity */
+.cell .lv, .sheet .grid .cell .lv { right: 8%; bottom: 3%; font-size: 36px; line-height: 1; text-shadow: var(--stroke); }
+.cell .badge { left: 6%; top: 6%; width: 30%; height: 30%; max-width: 38px; max-height: 38px; border-radius: 26%; background: var(--rl, #e4ddd2); border: 3px solid var(--rd, #7a7166); }
+.cell .badge .svgi { width: 66%; height: 66%; }
+.cell .sh { right: 8%; top: 5%; }
+.cell .wtag { background: var(--well); border-color: var(--ink); color: var(--muted); }
+.cell .wtag.on { background: #ffb21a; color: #fff; }
+.card-head .cell.big .lv { font-size: 30px; }
+
+/* equipped slots (HUD bottom bar and the inventory's "Экипировано"): semi-transparent white squares */
+#equipbar .cell, #equipbar .armorside .cell, #equipbar .wslot.active, .inv-equipped .eq-doll .cell {
+  border-image: none; background: #ffffff3d; border-radius: 14px; box-shadow: inset 0 0 0 3px #ffffff40;
+}
+#equipbar .cell .ic.art, .inv-equipped .cell .ic.art { width: 80%; height: 80%; }
+#equipbar .cell .ic:not(.art), .inv-equipped .cell .ic:not(.art) { opacity: 0.9; }
+#equipbar .cell .lv { font-size: 19px; right: 5%; bottom: 2%; text-shadow: var(--stroke-s); }
+#equipbar .cell .badge { left: -4px; top: -4px; width: 22px; height: 22px; border-width: 2px; border-radius: 7px; }
+.inv-equipped .cell .lv { font-size: 26px; }
+.inv-equipped .cell .badge { width: 30px; height: 30px; }
+#equipbar .wslot.active, .inv-equipped .eq-doll .cell.active { box-shadow: inset 0 0 0 3px #ffe04a, 0 0 14px #ffe04acc; background: #ffffff52; }
+.wslot .swap { background: linear-gradient(#ffe04a 0 50%, #ffb21a 50%); }
+
+/* ---------- windows: Popup01~03 white bg ---------- */
+/* .sheet.inv sets its own slices: kept out of the :is(), whose #dialogue lends every member an id's specificity */
+:is(.panel, .tip, .fcard, #dialogue, .stats-win), .sheet.inv {
+  background: none; border-style: solid; border-width: 0; border-radius: 0; box-shadow: none;
+  border-image: url('/assets/ui/t-panel.png') 26 28 39 28 fill / 22px 24px 32px 24px;
+}
+.panel, .tip, #dialogue { padding-bottom: 28px; }
+.panel h2 { color: #fff; text-transform: none; padding-bottom: 10px; margin: -6px -4px 12px; border-bottom: 3px solid #0003; box-shadow: 0 2px 0 #ffffff26; }
+.panel p { color: var(--cream); text-shadow: 0 1px 0 #0006; }
+.fcard.sel { filter: drop-shadow(0 0 4px #ffe04a) drop-shadow(0 0 10px #ffe04a99); }
+/* plates inside windows */
+:is(.well, .stat-card, .dlg-text, .pills span, .card-main, .ability) { background: none; border-style: solid; border-width: 0; box-shadow: none; border-image: url('/assets/ui/t-pill.png') 33 19 33 19 fill / 14px 12px 14px 12px; }
+.tip em { color: #8cff6a; }
+.card-sub span, .cmp-note, .fcard { color: var(--cream); }
+.card-sub div { border-bottom-color: #0003; }
+.ab-title { color: #ffd23f; }
+
+/* ---------- inventory: stats on top, then the hero with the equipped slots, the bag sheet at the bottom ---------- */
+/* stats: a dark see-through panel over the scene */
+.top-stats {
+  position: relative; flex: none; margin: 12px 14px 0; padding: 12px 18px 16px;
+  background: #1c0f07b3; border: 0; border-radius: 30px; box-shadow: none; animation: pop-in 0.18s ease-out;
+}
+/* the HUD and the world's labels would show through it; the scene is dimmed more, so the real hero does not compete with the preview */
+#app:has(.sheet.inv) :is(#hud, #labels) { visibility: hidden; }
+#modal.show:not(.clear):has(.sheet.inv) { background: #140a04c2; box-shadow: 0 0 0 200vmax #140a04c2; }
+.top-stats .sc-title { font-size: 36px; color: #ffcf9e; text-shadow: var(--stroke); }
+.info-btn {
+  position: absolute; top: 12px; right: 14px; width: 62px; height: 62px; padding: 0 0 6px;
+  border-style: solid; border-width: 0; background: none; border-image: url('/assets/ui/t-info.png') 30 32 46 32 fill / 14px 15px 21px 15px;
+  font: 900 38px/1 'Rubik', sans-serif; color: #fff; text-shadow: var(--stroke-s);
+}
+.info-btn:active { transform: translateY(2px); }
+.top-stats .big-stats { margin: 6px 0 16px; }
+.top-stats .big-stats .svgi { width: 72px; height: 72px; margin-right: 2px; }
+.top-stats .big-stats b { font-size: 40px; }
+.top-stats .big-stats span { font-size: 19px; left: 6px; bottom: -8px; }
+.top-stats .chips { gap: 10px; }
+.top-stats .chip { min-height: 58px; padding: 6px 8px; gap: 8px; background: #ffffff1c; border: 0; border-radius: 18px; box-shadow: none; }
+.top-stats .chip .svgi { width: 46px; height: 46px; }
+.top-stats .chip b { font-size: 27px; }
+.top-stats .chip small { font-size: 16px; color: #8cff6a; }
+
+/* the sheet: muted brown, title on its top edge, a wide red close button */
+.sheet.inv {
+  flex: 1 1 0; min-height: 0; margin-top: 46px; padding: 0 22px 14px; animation: sheet-up 0.22s ease-out;
+  border-image-width: 22px 24px 0 24px;
+}
+/* on screens taller than the window rectangle the sheet runs on to the bottom edge */
+.sheet.inv::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 600px; border-style: solid; border-width: 0; border-image: url('/assets/ui/t-panel.png') 26 28 39 28 fill / 0 24px 0 24px; pointer-events: none; }
+.sheet.inv .sheet-head { height: 46px; flex: none; }
+.sheet.inv .sheet-title { left: 50%; top: -32px; transform: translateX(-50%); font-size: 48px; }
+.sheet.inv .sheet-head .xbtn { top: -40px; right: -6px; width: 124px; height: 76px; }
+.sheet.inv .sheet-head .xbtn::after { width: 36px; height: 38px; }
+.sheet.inv .tabs { flex: none; gap: 14px; margin-bottom: 4px; }
+.tab {
+  width: 76px; height: 76px; padding: 0 0 4px; border-style: solid; border-width: 0; border-radius: 0; box-shadow: none; background: none; transform: none;
+  border-image: url('/assets/ui/t-tab.png') 25 fill / 20px;
+}
+.tab.on { border-image-source: url('/assets/ui/t-tab-on.png'); transform: none; }
+.tab .svgi { width: 50px; height: 50px; }
+.sheet.inv .tabs .cap { font-size: 28px; flex-direction: row; }
+.sheet.inv .sheet-body { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 0 2px 12px; }
+.sheet .grid { grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.sheet .none, .sheet .hint-line { color: #e8c49c; }
+.sheet .none { font-size: 22px; }
+/* section headers: ——^ ОРУЖИЕ ^—— */
+.divider { margin: 18px 0 14px; font-size: 24px; color: #f0c08e; }
+.divider::before, .divider::after { height: 5px; border: 0; border-radius: 3px; background: #c79466; box-shadow: none; }
+.divider span { display: inline-flex; align-items: center; }
+.divider span::before, .divider span::after {
+  content: ''; width: 11px; height: 11px; margin: 6px 14px 0; font-size: 0;
+  border: solid #c79466; border-width: 5px 0 0 5px; transform: rotate(45deg);
+}
+/* "Экипировано": the Warcraft character frame — a dark panel, the hero in the middle, armour in columns at his sides,
+   the two weapons under him; the label sits on the top edge. Nearly opaque: the real hero stands right behind it */
+.inv-equipped { position: relative; flex: none; margin: 34px 14px 0; padding: 30px 16px 26px; border-radius: 30px; background: #22130af2; box-shadow: inset 0 0 0 3px #ffffff12, 0 6px 20px #0008; animation: pop-in 0.18s ease-out; }
+.eq-title { position: absolute; left: 50%; top: 0; transform: translate(-50%, -52%); font-size: 32px; font-weight: 900; color: #fff; text-shadow: var(--stroke); white-space: nowrap; }
+.eq-doll { display: grid; grid-template-columns: 88px 1fr 88px; grid-template-rows: 1fr 88px; gap: 10px 14px; height: 356px; }
+.eq-side { grid-row: 1 / 3; display: flex; flex-direction: column; justify-content: space-between; }
+#i-eq-l { grid-column: 1; }
+#i-eq-r { grid-column: 3; }
+.eq-stage { grid-column: 2; grid-row: 1; position: relative; border-radius: 18px; background: radial-gradient(ellipse 46% 56% at 50% 64%, #ffd9a02e, transparent); }
+.eq-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.eq-rot { position: absolute; left: 4px; top: 4px; display: flex; gap: 8px; }
+.eq-rot button {
+  width: 56px; height: 56px; padding: 0 0 5px; border: 0; background: url('/assets/ui/t-round.png') center / contain no-repeat;
+  font-size: 28px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s);
+}
+.eq-rot button:active { transform: translateY(2px); }
+.eq-w { grid-column: 2; grid-row: 2; display: flex; justify-content: center; gap: 18px; }
+.eq-doll .cell { width: 88px; height: 88px; }
+.eq-doll .cell .wtag { font-size: 17px; bottom: -17px; padding: 1px 7px; }
+.sheet.inv .hint-line { flex: none; margin: 12px 0 0; font-size: 19px; }
+
+/* full stats ("i"): brown window, light header, rows in a dark scroll well */
+.stats-win {
+  position: relative; width: 100%; max-width: 680px; max-height: 86%; display: flex; flex-direction: column;
+  padding: 22px 24px 34px; text-align: left; animation: pop-in 0.16s ease-out;
+}
+.sw-head { position: relative; flex: none; margin-bottom: 16px; padding: 16px 12px 18px; text-align: center; border-radius: 20px; background: #ffffff21; box-shadow: inset 0 -4px 0 #00000024; }
+.sw-head h2 { margin: 0; font-size: 44px; font-weight: 900; color: #fff; text-transform: uppercase; text-shadow: var(--stroke); }
+.sw-head small { display: block; margin-top: 6px; font-size: 21px; color: var(--cream); text-shadow: 0 2px 0 #0006; }
+.sw-head .xbtn { position: absolute; top: -50px; right: -38px; width: 100px; height: 72px; }
+.sw-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 22px; background: #3e2513; box-shadow: inset 0 5px 0 #00000040; }
+.sw-row { display: flex; align-items: center; gap: 14px; flex: none; padding: 10px 18px 10px 12px; border-radius: 16px; background: #6e4a2c; box-shadow: inset 0 3px 0 #ffffff1c, 0 3px 0 #00000052; }
+.sw-row .svgi { width: 54px; height: 54px; flex: none; }
+.sw-name { flex: 1; min-width: 0; font-size: 25px; color: #fff; text-shadow: var(--stroke-s); line-height: 1.15; }
+.sw-name small { display: block; margin-top: 3px; font-size: 17px; font-weight: 600; color: #e9cfac; text-shadow: none; }
+.sw-row b { font-size: 29px; color: #ffe04a; text-shadow: var(--stroke-s); white-space: nowrap; }
+
+/* ---------- HUD ---------- */
+#equipbar { background: none; }
+.pill, #goal, #buffs div, .bw-time, #pro-quest { background: #3b2414e6; border: 3px solid var(--ink); box-shadow: inset 0 0 0 2px #ffffff14; }
+#goal, #pro-quest small { color: var(--cream); }
+#minimap, #bigmap { border: 4px solid var(--ink); box-shadow: 0 0 0 5px #c48a52, 0 0 0 6px #e6b57e, 0 0 0 10px var(--ink), 0 6px 0 10px #0005; }
+#zone-foes .foe { border-color: var(--ink); }
+#combo i { border-color: var(--ink); background: #3b2414cc; }
+#combo i.on { background: radial-gradient(circle at 35% 35%, #fff, #ffd23f); }
+.bw-ready { --c1: #8cf26a; --c2: #3cc153; }
+.wm-legend { background: #3b2414d9; }
+.herohp, .mobhp { background: color-mix(in srgb, var(--c) 30%, var(--ink)); }
+
+/* ---------- misc screens ---------- */
+#modal.show:not(.clear) { box-shadow: 0 0 0 200vmax rgba(20, 10, 4, 0.62); }
+.tip-wrap { background: #140a04aa; }
+#loading, #rotate { background: radial-gradient(circle at 50% 35%, #8a5a32, #2a1608 70%); }
+#loading .logo { color: #ffd23f; }
+#loading .bar { background: var(--well); border-color: var(--ink); }
+#loading .pct, #loading .sub { color: var(--cream); }
+.fcard h3 { color: #fff; }
+.dlg-portrait { background: linear-gradient(#a8703f 0 50%, #8a5a32 50%); }
+.dlg-who b { color: #ffd23f; }
+.portrait { border-color: #ffd23f; background: radial-gradient(#a8703f, #3b2414); }
+
+/* pack PNG icons sit inside the same boxes as the vector ones */
+img.svgi.png { object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
