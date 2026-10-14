@@ -16,7 +16,7 @@ _пусто_
 
 ## Гриша (1)
 
-- [Подключить модели wild_* (bear, direwolf, dragon, lion)](cards/261014-def7.md) — @Гриша · `арт` · `мобы`
+- [UI-скин: skin.css + tint-ui.py](cards/261014-59e7.md) — @Гриша · `ui`
 
 ## Леша (0)
 
