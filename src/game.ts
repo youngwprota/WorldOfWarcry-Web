@@ -4,7 +4,7 @@ import { Trail } from './swing';
 import { swordPair, type Pair } from './offhand';
 import { Creature } from './creature';
 import {
-  COMBOS, DUAL, FACTIONS, TRAIL_COLOR, GACHA, SPIN_TIME, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  COMBOS, DUAL, dualGap, FACTIONS, TRAIL_COLOR, GACHA, SPIN_TIME, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
   mobRank, type DamageType, type ResistTier, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -453,6 +453,9 @@ export class Game {
     this.pair = swordPair(this.save.weapons[0]?.def, this.save.weapons[1]?.def);
     this.comboShown = -1; // series dots: only the polearm has them
     this.hero.setWeapon(...this.handModels());
+    // two weapons: the free hand holds its weapon up while the other one strikes (polearm swings procedurally)
+    const ready = (it: Item | null) => (this.dual && it && !WEAPONS[it.def].swing ? WEAPONS[it.def].anim : null);
+    this.hero.swinger.ready = [ready(this.save.weapons[0]), ready(this.save.weapons[1])];
   }
 
   /** Body parts borrowed from other characters for the equipped armour. */
@@ -710,9 +713,10 @@ export class Game {
   private handFree(h: Hand, finisher: boolean) {
     if (!this.dual) return true;
     const o = this.hands[1 - h.i];
-    if (this.time < this.lockUntil || this.time - o.lastSwing < DUAL.gap) return false;
-    if (finisher && o.impact >= 0) return false;
     const ow = WEAPONS[this.save.weapons[o.i]!.def];
+    const gap = dualGap(WEAPONS[this.save.weapons[h.i]!.def].aps, ow.aps);
+    if (this.time < this.lockUntil || this.time - o.lastSwing < gap) return false;
+    if (finisher && o.impact >= 0) return false;
     const oReady = o.atkCd <= 0 && o.impact < 0 && !!this.target && this.inStrike(this.target, ow.range);
     return !(oReady && o.lastSwing < h.lastSwing);
   }
@@ -1651,7 +1655,7 @@ export class Game {
     this.persist();
   }
 
-  /** A mob with endless HP 3 m in front of the hero (no respawn; «Убить рядом» removes it). */
+  /** A mob with endless HP 3 m in front of the hero, already after him (no respawn; «Убить рядом» removes it). */
   debugSpawnDummy() {
     const f = this.hero.facing;
     const at = new THREE.Vector3(this.hero.position.x + Math.sin(f) * 3, 0, this.hero.position.z + Math.cos(f) * 3);
@@ -1659,6 +1663,7 @@ export class Game {
     const m = new Mob(MOBS.bandit_thug, at, this.save.faction, this.labels);
     m.temp = true;
     m.immortal = true;
+    m.state = 'chase';
     m.ch.root.scale.setScalar(this.mobScale);
     this.addUnit(m);
   }

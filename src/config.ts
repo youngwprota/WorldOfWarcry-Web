@@ -109,6 +109,12 @@ export const WEAPONS: Record<string, WeaponDef> = {
  * `torso`: share of a swing's torso twist (bend: its square) with two weapons, so the body does not hunch over.
  */
 export const DUAL = { mul: 0.6, gap: 0.3, torso: 0.55 };
+/**
+ * Least time between the two hands' starts: half the faster hand's period, so the hands alternate about evenly (each
+ * one winds up while the other strikes), never under DUAL.gap. Half the slower one's cost the faster hand its extra
+ * swings (sword + hammer: 82 → 95 s on the bench).
+ */
+export const dualGap = (apsA: number, apsB: number) => Math.max(DUAL.gap, 0.5 / Math.max(apsA, apsB));
 
 /**
  * A sword in one hand and weapon X in the other: the pair bonus (src/offhand.ts). The sword itself swings plainly

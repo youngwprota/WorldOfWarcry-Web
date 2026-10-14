@@ -33,6 +33,10 @@ const BODY: Record<AttackAnim, BodyKey[]> = {
   // chop: leans back with the axe up, then bends into the blow and steps into it
   AxeAttack: [[0.6, -0.35, -0.3, -0.06], [1, 0.15, 0.3, 0.16], [1.4, 0.1, 0.2, 0.1]],
 };
+/** Clip time of the top of the windup: the pose a free hand holds while the other hand strikes. */
+// measured on the weapon tip: the sword dips low first (0.5) and is drawn back to the right at 0.58
+const WINDUP: Record<AttackAnim, number> = { SwordAttack: 0.58, AxeAttack: 0.75 };
+
 /** Share of the torso twist per spine bone, bottom up: a twist on one bone only kinks the waist. */
 const YAW_SHARE = [0.45, 0.3, 0.25];
 
@@ -44,7 +48,11 @@ const qb = new THREE.Quaternion();
 const qp = new THREE.Quaternion();
 const pose = [0, 0, 0, 0, 0];
 
-interface Active { kind: SwingKind; t: number; dur: number; impact: number; torso: number; clip: AttackAnim | null; k: number }
+/** `off`: clip time the swing starts at (from the held windup), `pow`: easing of the way to the blow. */
+interface Active {
+  kind: SwingKind; t: number; dur: number; impact: number; torso: number; clip: AttackAnim | null; k: number;
+  off: number; pow: number;
+}
 
 /** Swing state of one character: up to one swing per hand. */
 export class Swinger {
@@ -58,6 +66,9 @@ export class Swinger {
   private baseZ: number;
   /** Attack clips on one arm (Character sets it): the left hand and both hands with two weapons. */
   armClips: ArmClips | null = null;
+  /** Per hand: the attack clip whose windup the hand holds while the other hand swings (two weapons), or null. */
+  ready: (AttackAnim | null)[] = [null, null];
+  private readyW = [0, 0];
 
   constructor(private model: THREE.Object3D) {
     this.spine = ['spine_01', 'spine_02', 'spine_03'].map((n) => model.getObjectByName(n) ?? null);
@@ -77,12 +88,18 @@ export class Swinger {
   startClip(anim: AttackAnim, hand: 0 | 1, period: number, impact: number, torso = 1) {
     const k = ATTACK_HIT[anim] / impact; // clip seconds per game second
     const dur = Math.min(period, (this.armClips?.duration(anim) ?? 1) / k);
-    this.begin(hand, 'overhead', dur, impact, torso, anim).k = k;
+    const a = this.begin(hand, 'overhead', dur, impact, torso, anim);
+    a.k = k;
+    // from the held windup: the clip goes on from there, slow at first, then the blow snaps down
+    const r = this.ready[hand] === anim ? this.readyW[hand] : 0;
+    a.off = WINDUP[anim] * r;
+    a.pow = 1 + 2 * r;
   }
 
   private begin(hand: 0 | 1, kind: SwingKind, dur: number, impact: number, torso: number, clip: AttackAnim | null) {
-    const a = this.hands[hand] ?? (this.hands[hand] = { kind, t: 0, dur, impact, torso, clip, k: 1 });
+    const a = this.hands[hand] ?? (this.hands[hand] = { kind, t: 0, dur, impact, torso, clip, k: 1, off: 0, pow: 1 });
     a.kind = kind; a.t = 0; a.dur = Math.max(dur, impact + 0.05); a.impact = impact; a.torso = torso; a.clip = clip;
+    a.off = 0; a.pow = 1;
     return a;
   }
 
@@ -110,7 +127,7 @@ export class Swinger {
         if (h === lead) { yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso; lunge = pose[2] * a.torso; }
         // eased in and out, so a swing cut short by the next one does not snap
         const w = Math.min(1, a.t / 0.06, (a.dur - a.t) / 0.15);
-        this.armClips.apply(a.clip, h as 0 | 1, a.t * a.k, w);
+        this.armClips.apply(a.clip, h as 0 | 1, clipTime(a), w);
         continue;
       }
       sample(KEYS[a.kind], phase, pose, 5);
@@ -124,9 +141,17 @@ export class Swinger {
     }
     const k = 1 - Math.exp(-dt * 16);
     if (this.armClips) {
+      // the free hand rises into its windup while the other one swings, and holds it there
+      for (let h = 0; h < 2; h++) {
+        const anim = this.ready[h];
+        const own = this.hands[h];
+        const up = !!anim && !!this.hands[1 - h] && (!own || own.t > own.impact);
+        this.readyW[h] += ((up ? 1 : 0) - this.readyW[h]) * (1 - Math.exp(-dt * 9));
+        if (anim && this.readyW[h] > 0.01) this.armClips.apply(anim, h as 0 | 1, WINDUP[anim], smooth(this.readyW[h]));
+      }
       // the clip's own torso and head from the lead swing
       const a = lead >= 0 ? this.hands[lead] : null;
-      if (a?.clip) this.armClips.body(a.clip, lead as 0 | 1, a.t * a.k, Math.min(1, a.t / 0.06, (a.dur - a.t) / 0.15), k);
+      if (a?.clip) this.armClips.body(a.clip, lead as 0 | 1, clipTime(a), Math.min(1, a.t / 0.06, (a.dur - a.t) / 0.15), k);
       else this.armClips.body(null, 0, 0, 0, k);
     }
     this.yaw += (yaw - this.yaw) * k;
@@ -145,6 +170,14 @@ export class Swinger {
       }
     }
   }
+}
+
+const smooth = (u: number) => u * u * (3 - 2 * u);
+
+/** Clip time of a clip swing: to the blow from `off`, eased by `pow`, then on at the clip's own pace. */
+function clipTime(a: Active) {
+  if (a.t >= a.impact) return ATTACK_HIT[a.clip!] + (a.t - a.impact) * a.k;
+  return a.off + (ATTACK_HIT[a.clip!] - a.off) * Math.pow(a.t / a.impact, a.pow);
 }
 
 /** Smoothstep between keys; implicit rest keys at phase 0 and 2. */

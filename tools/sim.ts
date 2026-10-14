@@ -5,7 +5,7 @@
 //                     [--set MOBS.bandit_chief.hp=6000 --set GACHA.token.normal=0.05 ...] (what-if: config edits for this run)
 import * as CONFIG from '../src/config';
 import {
-  ATTACK_HIT, BREAKABLES, COMBOS, DUAL, SPIN_TIME, FACTIONS, GACHA, HERO, MOBS, ORBS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, SWORD_PAIRS,
+  ATTACK_HIT, BREAKABLES, COMBOS, dualGap, SPIN_TIME, FACTIONS, GACHA, HERO, MOBS, ORBS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, SWORD_PAIRS,
   WEAPONS, depthMul, mobImpact, mobRank, type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type ZoneId,
 } from '../src/config';
 import { armorMul, handMulOf, heroStats, powerMult, type HeroBuild } from '../src/balance';
@@ -187,9 +187,9 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       const w = WEAPONS[hd.it.def];
       hd.cd -= DT;
       if (hd.cd > 0 || busy > 0) continue;
-      // two hands take turns: not within DUAL.gap of the other's start, the one that waited longer first
+      // two hands take turns: not within dualGap of the other's start, the one that waited longer first
       const o = hands[1 - hd.i];
-      if (dual && (t < lock || t - o.last < DUAL.gap || (o.cd <= 0 && o.last < hd.last))) continue;
+      if (dual && (t < lock || t - o.last < dualGap(w.aps, WEAPONS[o.it!.def].aps) || (o.cd <= 0 && o.last < hd.last))) continue;
       hd.last = t;
       const per = 1 / w.aps;
       // uptime: the hero spends part of the fight repositioning — swings come later and the chain may break
