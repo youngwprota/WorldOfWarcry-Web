@@ -4,7 +4,7 @@ import { Trail } from './swing';
 import { swordPair, type Pair } from './offhand';
 import { Creature } from './creature';
 import {
-  COMBOS, DUAL, FACTIONS, TRAIL_COLOR, GACHA, HAND_SWING, SPIN_TIME, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  COMBOS, DUAL, FACTIONS, TRAIL_COLOR, GACHA, SPIN_TIME, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
   mobRank, type DamageType, type ResistTier, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -343,7 +343,7 @@ export class Game {
     if (save.gatesOpen) this.world.openAllGates(true);
     this.world.fog.load(save.fog); // a new hero knows only the camp
 
-    this.hero = new Character(f.hero, null, 1);
+    this.hero = new Character(f.hero, null, 1, true);
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
     this.hero.setHighlight(true);
@@ -448,7 +448,6 @@ export class Game {
   private equipVisual() {
     this.pair = swordPair(this.save.weapons[0]?.def, this.save.weapons[1]?.def);
     this.comboShown = -1; // series dots: only the polearm has them
-    this.hero.swinger.dual = this.dual;
     this.hero.setWeapon(...this.handModels());
   }
 
@@ -685,8 +684,10 @@ export class Game {
       h.impactAt = impactAt;
       // two hands: both swing procedurally (a full-body clip of one hand fights the other hand's swing)
       // the series picks the polearm's swing; other weapons always swing the same way
-      const kind = w.swing ? w.swing[Math.max(0, h.combo - 1) % w.swing.length] : h.i === 1 || this.dual ? HAND_SWING[w.anim] : null;
-      if (kind) this.hero.swing(kind, h.i, period, impactAt, this.dual ? DUAL.torso : 1);
+      // polearm: its series swings; the left hand and two weapons: the attack clip on that arm only (mirrored on the
+      // left), so each hand swings for real while the other one recovers; one weapon in the right hand: the full clip
+      if (w.swing) this.hero.swing(w.swing[Math.max(0, h.combo - 1) % w.swing.length], h.i, period, impactAt, this.dual ? DUAL.torso : 1);
+      else if (h.i === 1 || this.dual) this.hero.swingClip(w.anim, h.i, period, impactAt, DUAL.torso);
       else this.hero.attack(w.anim, period, impactAt);
       h.impact = impactAt;
       h.atkCd = period;

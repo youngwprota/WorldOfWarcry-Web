@@ -8,11 +8,6 @@ export type FactionId = 'human' | 'orc';
 export type ZoneId = 'forest' | 'cemetery' | 'peaks' | 'swamp' | 'grove' | 'dunes' | 'hills';
 export type AttackAnim = 'SwordAttack' | 'AxeAttack';
 /**
- * Procedural swing by the clip the weapon uses: the left hand (no clips) and both hands when dual-wielding. One swing per
- * hand, always from its own side inwards (the left hand mirrors it): alternating directions read as a muddle.
- */
-export const HAND_SWING: Record<AttackAnim, SwingKind> = { SwordAttack: 'slashRL', AxeAttack: 'overhead' };
-/**
  * Hit markers: seconds into each attack clip at natural speed where the blow connects. Mob damage lands on this
  * frame if the hero is still in reach. Humanoid FBX clips by name, GLB creatures as `<model>:attack`.
  */

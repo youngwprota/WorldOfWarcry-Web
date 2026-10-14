@@ -3,6 +3,7 @@ import { HIT_FLASH, applyHitFlash } from './hitflash';
 import { assets } from './assets';
 import { attachWeapon } from './rig';
 import { Swinger, type SwingKind } from './swing';
+import { ArmClips } from './armclip';
 import { PART_PREFIXES, type VisualPart } from './items';
 import { ATTACK_HIT, type AttackAnim } from './config';
 
@@ -85,7 +86,7 @@ export class Character {
   private baseParts = new Map<VisualPart, THREE.Mesh[]>();
   private outfitParts = new Map<VisualPart, { model: string; meshes: THREE.Mesh[] }>();
 
-  constructor(modelName: string, weaponName: string | null, scale = 1) {
+  constructor(modelName: string, weaponName: string | null, scale = 1, armClips = false) {
     this.model = assets.clone(modelName);
     this.model.scale.multiplyScalar(scale);
     this.root.add(this.model);
@@ -131,6 +132,7 @@ export class Character {
       return a;
     };
     this.attackU = { SwordAttack: once(upper.SwordAttack), AxeAttack: once(upper.AxeAttack) };
+    if (armClips) this.swinger.armClips = new ArmClips(this.model, { SwordAttack: full.SwordAttack, AxeAttack: full.AxeAttack });
     this.hitU = once(upper.Hit);
     this.death = once(full.Death);
     // Desync idle cycles between characters.
@@ -144,7 +146,6 @@ export class Character {
     this.weaponL?.removeFromParent();
     this.weapon = name ? attachWeapon(this.model, name) : null;
     this.weaponL = left ? attachWeapon(this.model, left, true) : null;
-    this.swinger.blades = [this.weapon, this.weaponL];
     for (const w of [this.weapon, this.weaponL]) w?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
     if (this.highlighted) this.rebuildOutline();
   }
@@ -271,6 +272,11 @@ export class Character {
   /** Procedural swing of one hand (no clip): the blow lands `impactAt` s after the start. */
   swing(kind: SwingKind, hand: 0 | 1, period: number, impactAt: number, torso = 1) {
     this.swinger.start(kind, hand, Math.min(period, impactAt * 2.4), impactAt, torso);
+  }
+
+  /** The attack clip on one arm only (the left one mirrored); needs `armClips` in the constructor. */
+  swingClip(anim: AttackAnim, hand: 0 | 1, period: number, impactAt: number, torso = 1) {
+    this.swinger.startClip(anim, hand, period, impactAt, torso);
   }
 
   hit() {

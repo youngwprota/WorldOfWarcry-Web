@@ -1,6 +1,8 @@
 // Procedural attack swings: keyed rotations of the spine and the upper arm, applied on top of the clips
 // (the rig only has two attack clips, both right-handed), plus a weapon trail ribbon.
 import * as THREE from 'three';
+import { ATTACK_HIT, type AttackAnim } from './config';
+import type { ArmClips } from './armclip';
 
 export type SwingKind = 'slashRL' | 'slashLR' | 'thrust' | 'overhead';
 
@@ -8,10 +10,9 @@ export type SwingKind = 'slashRL' | 'slashLR' | 'thrust' | 'overhead';
  * One key, character space, radians, for the RIGHT hand (the left one is mirrored):
  * yaw — torso twist (+ turns to the hero's left), lean — torso bend forward,
  * fwd — arm raised forward (0 hangs, π/2 horizontal, π straight up), sweep — arm swung across (+ to the left),
- * out — arm raised sideways; blade (optional, 0..1) — how far the wrist turns the weapon to continue the arm (shoulder →
- * hand) instead of the idle grip that holds it upright: a slash needs a level blade, not a stick swung sideways.
+ * out — arm raised sideways.
  */
-type Key = [phase: number, yaw: number, lean: number, fwd: number, sweep: number, out: number, blade?: number];
+type Key = [phase: number, yaw: number, lean: number, fwd: number, sweep: number, out: number];
 
 // phase: 0 start → 1 the blow lands → 2 back to rest; missing ends are filled with zeros
 const KEYS: Record<SwingKind, Key[]> = {
@@ -21,27 +22,8 @@ const KEYS: Record<SwingKind, Key[]> = {
   thrust: [[0.6, -0.4, -0.1, -0.4, -0.2, 0.25], [1, 0.5, 0.45, 0.25, 0.1, 0], [1.4, 0.45, 0.4, 0.2, 0.1, 0]],
   overhead: [[0.6, -0.2, -0.3, 2.7, -0.1, 0.1], [1, 0.1, 0.5, 0.9, 0.1, 0], [1.4, 0.05, 0.4, 0.7, 0.05, 0]],
 };
-
-/**
- * Two weapons: wider swings that start and end drawn back (phase 0 and 2 = the windup), and an idle hand waits drawn
- * back too — one hand strikes while the other is cocked, then they trade (a pendulum, not two pokes in front).
- */
-const DUAL_WIDE: Partial<Record<SwingKind, Key[]>> = {
-  slashRL: [[0, -0.7, 0, 1.25, -1.7, 0.6, 0.9], [1, 0.2, 0.15, 1.45, 0.15, 0.1, 1], [1.4, 0.65, 0.1, 1.15, 1.35, 0, 1]],
-  overhead: [[0, -0.25, -0.15, 2.95, -0.2, 0.3, 0.9], [1, 0.1, 0.4, 0.8, 0.1, 0, 1], [1.4, 0.05, 0.3, 0.55, 0.05, 0, 1]],
-};
-const DUAL_KEYS = Object.fromEntries((Object.keys(KEYS) as SwingKind[]).map((k) => {
-  const keys = DUAL_WIDE[k] ?? KEYS[k];
-  // the first key is the windup: it becomes both ends of the swing
-  const windup = keys[0].slice(1) as number[];
-  return [k, [[0, ...windup], ...keys.slice(1), [2, ...windup]] as Key[]];
-})) as Record<SwingKind, Key[]>;
-/** Windup pose of each swing (yaw, lean, fwd, sweep, out): where an idle hand waits with two weapons. */
-const WINDUP = Object.fromEntries((Object.keys(KEYS) as SwingKind[]).map((k) => [k, DUAL_KEYS[k][0].slice(1)])) as Record<SwingKind, number[]>;
-/** Seconds after the last swing the idle hand stays drawn back. */
-const COMBAT_HOLD = 1.5;
-/** Upward bias of the blade over the shoulder → hand line (see Key.blade). */
-const BLADE_LIFT = 0.45;
+/** Torso keys of a clip swing (the arm comes from the clip): the twist follows the blow. */
+const CLIP_TORSO: Record<AttackAnim, SwingKind> = { SwordAttack: 'slashRL', AxeAttack: 'overhead' };
 
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const AXIS_Y = new THREE.Vector3(0, 1, 0);
@@ -49,44 +31,45 @@ const AXIS_Z = new THREE.Vector3(0, 0, 1);
 const qa = new THREE.Quaternion();
 const qb = new THREE.Quaternion();
 const qp = new THREE.Quaternion();
-const pose = [0, 0, 0, 0, 0, 0];
-const vS = new THREE.Vector3();
-const vH = new THREE.Vector3();
-const vCur = new THREE.Vector3();
-const vWant = new THREE.Vector3();
+const pose = [0, 0, 0, 0, 0];
 
-interface Active { kind: SwingKind; t: number; dur: number; impact: number; torso: number }
+interface Active { kind: SwingKind; t: number; dur: number; impact: number; torso: number; clip: AttackAnim | null; k: number }
 
 /** Swing state of one character: up to one swing per hand. */
 export class Swinger {
   private hands: (Active | null)[] = [null, null];
   private spine: THREE.Object3D | null;
   private arms: (THREE.Object3D | null)[];
-  private wrists: (THREE.Object3D | null)[];
-  /** Weapon holders (their +Y runs along the blade), set by Character.setWeapon. */
-  blades: (THREE.Object3D | null)[] = [null, null];
   /** Smoothed torso twist and bend: the lead swing changes hands without a jump. */
   private yaw = 0;
   private lean = 0;
-  /** Two weapons in hand: wide swings from a drawn-back hand (DUAL_KEYS). */
-  dual = false;
-  /** Last swing of each hand (its windup is the idle pose) and how far the idle hand is drawn back. */
-  private ready: (SwingKind | null)[] = [null, null];
-  private readyW = [0, 0];
-  private sinceSwing = 99;
+  /** Attack clips on one arm (Character sets it): the left hand and both hands with two weapons. */
+  armClips: ArmClips | null = null;
 
   constructor(private model: THREE.Object3D) {
     this.spine = model.getObjectByName('spine_01') ?? null;
     this.arms = [model.getObjectByName('upperarm_r') ?? null, model.getObjectByName('upperarm_l') ?? null];
-    this.wrists = [model.getObjectByName('hand_r') ?? null, model.getObjectByName('hand_l') ?? null];
   }
 
   /** `impact` s after the start the blow lands; the whole swing takes `dur` s; `torso` scales the twist and bend. */
   start(kind: SwingKind, hand: 0 | 1, dur: number, impact: number, torso = 1) {
-    const a = this.hands[hand] ?? (this.hands[hand] = { kind, t: 0, dur, impact, torso });
-    a.kind = kind; a.t = 0; a.dur = Math.max(dur, impact + 0.05); a.impact = impact; a.torso = torso;
-    this.ready[hand] = kind;
-    this.sinceSwing = 0;
+    this.begin(hand, kind, dur, impact, torso, null);
+  }
+
+  /**
+   * The attack clip `anim` on one arm only (mirrored on the left): the blow lands `impact` s after the start, the
+   * swing lasts at most `period` s and fades out at its end.
+   */
+  startClip(anim: AttackAnim, hand: 0 | 1, period: number, impact: number, torso = 1) {
+    const k = ATTACK_HIT[anim] / impact; // clip seconds per game second
+    const dur = Math.min(period, (this.armClips?.duration(anim) ?? 1) / k);
+    this.begin(hand, CLIP_TORSO[anim], dur, impact, torso, anim).k = k;
+  }
+
+  private begin(hand: 0 | 1, kind: SwingKind, dur: number, impact: number, torso: number, clip: AttackAnim | null) {
+    const a = this.hands[hand] ?? (this.hands[hand] = { kind, t: 0, dur, impact, torso, clip, k: 1 });
+    a.kind = kind; a.t = 0; a.dur = Math.max(dur, impact + 0.05); a.impact = impact; a.torso = torso; a.clip = clip;
+    return a;
   }
 
   active(hand: 0 | 1) { return !!this.hands[hand]; }
@@ -100,48 +83,29 @@ export class Swinger {
       const a = this.hands[h];
       if (a && a.t + dt < a.dur && a.t < leadT) { lead = h; leadT = a.t; }
     }
-    this.sinceSwing += dt;
-    const k = 1 - Math.exp(-dt * 16);
     for (let h = 0; h < 2; h++) {
-      let a = this.hands[h];
-      if (a) {
-        a.t += dt;
-        if (a.t >= a.dur) { this.hands[h] = a = null; }
-      }
+      const a = this.hands[h];
+      if (!a) continue;
+      a.t += dt;
+      if (a.t >= a.dur) { this.hands[h] = null; continue; }
+      const phase = a.t < a.impact ? a.t / a.impact : 1 + (a.t - a.impact) / (a.dur - a.impact);
+      sample(KEYS[a.kind], phase, pose);
       const m = h ? -1 : 1; // the left hand mirrors the twist and the sweep
-      if (a) {
-        const phase = a.t < a.impact ? a.t / a.impact : 1 + (a.t - a.impact) / (a.dur - a.impact);
-        sample(this.dual ? DUAL_KEYS[a.kind] : KEYS[a.kind], phase, pose);
-        if (h === lead) { yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso * a.torso; }
-        this.readyW[h] = this.dual ? 1 : 0;
-      } else {
-        // two weapons in a fight: the idle hand waits drawn back for its next blow, then eases down
-        const r = this.ready[h];
-        const want = this.dual && r && this.sinceSwing < COMBAT_HOLD ? 1 : 0;
-        this.readyW[h] += (want - this.readyW[h]) * (want ? k : 1 - Math.exp(-dt * 4));
-        if (!r || this.readyW[h] < 0.01) continue;
-        const w = WINDUP[r];
-        for (let i = 0; i < 6; i++) pose[i] = w[i] * this.readyW[h];
+      if (h === lead) { yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso * a.torso; }
+      if (a.clip && this.armClips) {
+        // eased in and out, so a swing cut short by the next one does not snap
+        const w = Math.min(1, a.t / 0.06, (a.dur - a.t) / 0.15);
+        this.armClips.apply(a.clip, h as 0 | 1, a.t * a.k, w);
+        continue;
       }
       const arm = this.arms[h];
       if (arm) {
         // fwd: hanging (−Y) towards +Z is a negative turn about X; out: right arm to −X is negative about Z
         rotateInModel(arm, this.model, qa.setFromAxisAngle(AXIS_Z, -pose[4] * m).premultiply(qb.setFromAxisAngle(AXIS_X, -pose[2])));
         rotateInModel(arm, this.model, qa.setFromAxisAngle(AXIS_Y, pose[3] * m));
-        const blade = this.blades[h], wrist = this.wrists[h];
-        if (pose[5] > 0.01 && blade && wrist) {
-          // turn the wrist so the blade runs on from the arm (shoulder → hand), by `blade`
-          arm.updateMatrixWorld(true);
-          vCur.set(0, 1, 0).applyQuaternion(blade.getWorldQuaternion(qa));
-          // a little above the arm line: the arm slopes down from the shoulder, the blade should stay about level
-          vWant.subVectors(wrist.getWorldPosition(vH), arm.getWorldPosition(vS)).normalize();
-          vWant.y += BLADE_LIFT;
-          vWant.normalize();
-          vWant.lerp(vCur, 1 - Math.min(1, pose[5])).normalize();
-          rotateInWorld(wrist, qa.setFromUnitVectors(vCur, vWant));
-        }
       }
     }
+    const k = 1 - Math.exp(-dt * 16);
     this.yaw += (yaw - this.yaw) * k;
     this.lean += (lean - this.lean) * k;
     if (this.spine && (Math.abs(this.yaw) > 1e-3 || Math.abs(this.lean) > 1e-3)) {
@@ -152,25 +116,19 @@ export class Swinger {
 
 /** Smoothstep between keys; implicit rest keys at phase 0 and 2. */
 function sample(keys: Key[], phase: number, out: number[]) {
-  let prev: readonly (number | undefined)[] = REST0;
-  let next: readonly (number | undefined)[] = REST2;
+  let prev: readonly number[] = REST0;
+  let next: readonly number[] = REST2;
   for (const k of keys) {
     if (k[0] <= phase) prev = k;
     else { next = k; break; }
   }
-  const span = next[0]! - prev[0]!;
-  let u = span > 0 ? (phase - prev[0]!) / span : 0;
+  const span = next[0] - prev[0];
+  let u = span > 0 ? (phase - prev[0]) / span : 1;
   u = u * u * (3 - 2 * u);
-  for (let i = 0; i < 6; i++) out[i] = (prev[i + 1] ?? 0) + ((next[i + 1] ?? 0) - (prev[i + 1] ?? 0)) * u;
+  for (let i = 0; i < 5; i++) out[i] = prev[i + 1] + (next[i + 1] - prev[i + 1]) * u;
 }
-const REST0 = [0, 0, 0, 0, 0, 0, 0] as const;
-const REST2 = [2, 0, 0, 0, 0, 0, 0] as const;
-
-/** Turn a bone by `r` given in world space (its world matrices must be current). */
-function rotateInWorld(bone: THREE.Object3D, r: THREE.Quaternion) {
-  bone.parent!.getWorldQuaternion(qp);
-  bone.quaternion.premultiply(qb.copy(qp).invert().multiply(r).multiply(qp));
-}
+const REST0 = [0, 0, 0, 0, 0, 0] as const;
+const REST2 = [2, 0, 0, 0, 0, 0] as const;
 
 /** Turn a bone by `r` given in model space, around the bone's own pivot. */
 function rotateInModel(bone: THREE.Object3D, model: THREE.Object3D, r: THREE.Quaternion) {
