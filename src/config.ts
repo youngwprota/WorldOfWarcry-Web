@@ -99,7 +99,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   polearm: {
     id: 'polearm', name: 'Древковое', names: ['Рогатина', 'Копьё', 'Глефа', 'Алебарда', 'Копьё королей', 'Глефа бездны'],
     role: 'Бьёт дальше всех, но слабо и медленно: два укола по цели, третий удар серии — прокрут вокруг себя.',
-    type: 'slash', dmgMul: 0.9, aps: 0.8, shape: 'arc', arc: 60, range: 3.2, knock: 3.5,
+    type: 'slash', dmgMul: 0.9, aps: 0.9, shape: 'arc', arc: 60, range: 3.2, knock: 3.5,
     anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '🔱', single: true,
     swing: ['thrust', 'thrust', 'slashRL'],
   },
