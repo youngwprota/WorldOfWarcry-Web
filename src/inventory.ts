@@ -139,11 +139,10 @@ export class Inventory {
     const big = (ic: string, v: string, label: string) => `<div>${art(ic, 46)}<b>${v}</b><span>${label}</span></div>`;
     q('#i-big').innerHTML = big('sword', fmtK(g.heroDps()), 'DPS') + big('heart', fmtK(g.maxHp), 'HP') +
       big('regen', fmtK(g.regen), 'Реген');
-    const combo = COMBOS[g.weaponItem.def];
     const chip = (ic: string, v: string, title: string) => `<div class="chip" title="${title}">${art(ic, 28)}<b>${v}</b></div>`;
     q('#i-stats').innerHTML = chip('hammer', fmtK(Math.round(hit)), 'Урон за удар') + chip('sword', fmtK(g.power), 'Сила (сферы и броня)') +
       chip('shield', `${g.defense} <small>−${Math.round((g.defense / (g.defense + 100)) * 100)}%</small>`, 'Защита') +
-      chip('boot', `${g.speedStat}`, 'Скорость') + chip('axe', `×${combo.mult}`, `Комбо: ${combo.name}`) +
+      chip('boot', `${g.speedStat}`, 'Скорость') + chip('axe', `${g.weapon.range} м`, 'Дальность удара') +
       chip('gear', `${g.weapon.aps}/с`, 'Атак в секунду');
   }
 
@@ -287,11 +286,9 @@ export class Inventory {
     let ability: string;
     if (it.kind === 'weapon') {
       const c = COMBOS[it.def];
-      ability = `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
+      ability = c ? `<div class="ab-title">Серия: ${c.name}</div><p>Удар <b>${c.hits}</b> подряд (каждый попал, без паузы) бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`}${c.mult !== 1 ? ` с уроном <b>×${c.mult}</b>` : ''}, герой крутится.</p>` : '';
       const w = WEAPONS[it.def];
-      if (w.stack) ability = `<div class="ab-title">Порезы</div><p>Каждый удар по врагу добавляет <b>+${Math.round(w.stack.add * 100)}%</b> урона по нему, до <b>+${Math.round(w.stack.add * w.stack.max * 100)}%</b>. Через <b>${w.stack.decay} с</b> без ударов бонус сгорает.</p>` + ability;
-      if (w.pull) ability = `<div class="ab-title">Жатва душ</div><p>Взмах стягивает врагов в радиусе <b>${w.pull.radius} м</b> перед героем (боссов — нет). Каждый задетый враг сверх первого даёт <b>+${Math.round(w.pull.perEnemy * 100)}%</b> урона, до <b>×${w.pull.max}</b>.</p>` + ability;
-      if (w.guard) ability = `<div class="ab-title">Защита</div><p>−${Math.round(w.guard.reduce * 100)}% входящего урона. Удар по герою с шансом <b>${Math.round(w.guard.counter.normal * 100)}–${Math.round(w.guard.counter.boss * 100)}%</b> (чем сильнее враг, тем выше) вызывает контратаку оружием в другой руке. Рядом с оружием сам не бьёт.</p>` + ability;
+      if (w.knock > 5) ability = `<div class="ab-title">Расталкивание</div><p>Каждый удар отбрасывает задетых врагов.</p>` + ability;
       ability = `<p>${w.role}</p>` + ability;
       const pt = pairText(it.def);
       if (pt) ability += `<div class="ab-title">С мечом в другой руке</div><p>${pt}</p>`;

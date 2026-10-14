@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { Character } from './character';
 import { Trail } from './swing';
-import { excess, swordPair, type Pair } from './offhand';
+import { swordPair, type Pair } from './offhand';
 import { Creature } from './creature';
 import {
-  COMBOS, DUAL, FACTIONS, GACHA, LEFT_SWING, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
-  mobRank, type DamageType, type ResistTier, type MobDef, type OrbKind, type WeaponDef, type ZoneDef,
+  COMBOS, DUAL, FACTIONS, TRAIL_COLOR, GACHA, LEFT_SWING, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  mobRank, type DamageType, type ResistTier, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
@@ -20,7 +20,7 @@ import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } 
 import { UI, type MapMark } from './ui';
 import { icon, resistIcons, rewardChips } from './icons';
 import { heroDeaths, logFight, logSnap } from './balancelog';
-import { BLOODLUST, SHIELD_DELAY, armorMul, gearOf, guardMul, handMulOf, heroDps, heroStats, powerMult } from './balance';
+import { BLOODLUST, SHIELD_DELAY, armorMul, gearOf, handMulOf, heroDps, heroStats, powerMult } from './balance';
 
 /** Debris colour of hits and kills: bone dust for skeletons and spirits, blood for the rest. */
 const bloodColor = (m: Mob) => m.def.id.startsWith('skel') || m.def.id === 'ghost' || m.def.id === 'death' ? 0xd8d4c8 : 0xc0392b;
@@ -155,11 +155,6 @@ class Mob extends Unit {
   awake = true;
   /** Damage type of the mob's hits (its location's, config ZONE_FOES); the hero's armour resists it. */
   dmgType: DamageType;
-  /** Dagger stacks (WeaponDef.stack): each adds to the hero's damage on this mob; game time of the last one. */
-  stacks = 0;
-  stackAt = -99;
-  /** "×N" badge under the HP bar while the mob has stacks. */
-  stackEl: HTMLDivElement;
   /** Depth-scaled stats (DEPTH in config): use these instead of def.dmg / def.reward. */
   dmg: number;
   constructor(public def: MobDef, spawn: THREE.Vector3, faction: 'human' | 'orc', layer: HTMLElement,
@@ -181,9 +176,8 @@ class Mob extends Unit {
       title +
       // a micro-boss shows its permanent bonus (+500 HP) in the stat chips instead of its orbs
       `<div class="mside"><div class="rws">${def.bonus ? rewardChips({ reward: def.bonus }, true) : rewardChips({ reward })}</div><div class="ris">${resistIcons(def, named ? 27 : 24)}</div></div>` +
-      '<div class="mobhp"><div></div><span></span></div><div class="stk"></div>',
+      '<div class="mobhp"><div></div><span></span></div>',
       'respawn' + (named ? ' boss' : ''));
-    this.stackEl = this.uiEl.querySelector('.stk')!;
     this.reward = reward;
     const [model, weapon] = def.model[faction];
     this.dmgType = def.attack;
@@ -205,16 +199,7 @@ class Mob extends Unit {
   get barY() { return 2.15 * this.def.scale * this.ch.root.scale.x; }
   get barRange() { return this.def.boss || this.def.rank ? 24 : 16; }
   get loaderReady() { return !this.temp && ((!this.rewardsDue && this.deadT - this.paidAt > 2.2) || this.boss); }
-  /** Sets the dagger stacks and their badge (text only changes here, never per frame). */
-  setStacks(n: number, at: number) {
-    this.stackAt = at;
-    if (n === this.stacks) return;
-    this.stacks = n;
-    this.stackEl.textContent = n ? `×${n}` : '';
-    this.stackEl.classList.toggle('on', n > 0);
-  }
   respawn() {
-    this.setStacks(0, -99);
     this.fight = null;
     this.rewardsDue = false;
     this.loot = [];
@@ -301,10 +286,6 @@ export class Game {
   private comboShown = -1;
   /** Sword pair of the equipped weapons (src/offhand.ts), refreshed with the gear. */
   private pair: Pair | null = null;
-  /** Dagger pair: extra dagger attack speed from sword hits, and when it was last fed. */
-  private haste = 0;
-  private hasteAt = -99;
-  private lastReap = -99;
   private trails: [Trail, Trail] = [new Trail(), new Trail()];
   /** Hit-stop / slow motion: game time runs at `slowK` for `slowT` more real seconds. */
   private slowT = 0;
@@ -464,6 +445,7 @@ export class Game {
 
   private equipVisual() {
     this.pair = swordPair(this.save.weapons[0]?.def, this.save.weapons[1]?.def);
+    this.comboShown = -1; // series dots: only the polearm has them
     this.hero.setWeapon(...this.handModels());
   }
 
@@ -635,7 +617,7 @@ export class Game {
     const shown = this.hands[this.save.weapons[0] ? 0 : 1];
     if (this.comboShown !== shown.combo) {
       this.comboShown = shown.combo;
-      this.ui.combo(shown.combo, COMBOS[this.weaponItem.def].hits);
+      this.ui.combo(shown.combo, COMBOS[this.weaponItem.def]?.hits ?? 0);
     }
 
     // regen; much faster in the camp
@@ -657,7 +639,7 @@ export class Game {
       const it = this.save.weapons[h.i];
       const since = this.time - h.lastSwing;
       const on = !!it && since > h.impactAt * 0.45 && since < h.impactAt * 1.5;
-      this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, it ? COMBOS[it.def].color : 0xffffff);
+      this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, it ? TRAIL_COLOR[it.def] : 0xffffff);
     }
   }
 
@@ -679,31 +661,28 @@ export class Game {
     const it = this.save.weapons[h.i];
     if (!it) { h.combo = 0; h.impact = -1; return; }
     const w = WEAPONS[it.def];
-    // beside a weapon the shield only answers blows (counterStrike); alone (or two shields) it bashes too
-    const other = this.save.weapons[1 - h.i];
-    if (w.guard && other && !WEAPONS[other.def].guard) { h.combo = 0; return; }
-    const pair = this.pair;
     h.atkCd -= dt;
-    let period = 1 / w.aps;
-    if (pair?.kind === 'dagger' && h.i !== pair.sword && this.time - this.hasteAt < SWORD_PAIRS.dagger.decay) period /= 1 + this.haste;
+    const period = 1 / w.aps;
+    // polearm series: a pause or a whiff starts it over; other weapons have no series
     const combo = COMBOS[it.def];
-    // A pause or a whiff breaks the chain (GDD: combo = N uninterrupted attacks).
-    if (h.combo > 0 && h.impact < 0 && this.time - h.lastSwing > period + combo.window) h.combo = 0;
+    const window = combo?.window ?? 0;
+    if (h.combo > 0 && h.impact < 0 && this.time - h.lastSwing > period + window) h.combo = 0;
     // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
     // up to 1 m further for facing, and swinging there was a whiff into thin air.
     const t = this.target;
     const inReach = !!t && this.inStrike(t, w.range);
     if (inReach && h.atkCd <= 0) {
-      const chained = h.lastSwingHit && this.time - h.lastSwing <= period + combo.window;
-      h.combo = chained ? h.combo + 1 : 1;
-      h.finisher = h.combo >= combo.hits;
+      const chained = !!combo && h.lastSwingHit && this.time - h.lastSwing <= period + window;
+      h.combo = chained ? h.combo + 1 : combo ? 1 : 0;
+      h.finisher = !!combo && h.combo >= combo.hits;
       h.lastSwing = this.time;
       const impactAt = Math.min(0.42, period * 0.4);
       h.impactAt = impactAt;
       const kinds = w.swing ?? (h.i === 1 ? LEFT_SWING[w.anim] : null);
-      if (kinds) this.hero.swing(kinds[(h.combo - 1) % kinds.length], h.i, period, impactAt);
+      // the series picks the polearm's swing; other weapons just alternate theirs
+      h.swings++;
+      if (kinds) this.hero.swing(kinds[(combo ? h.combo - 1 : h.swings) % kinds.length], h.i, period, impactAt);
       else this.hero.attack(w.anim, period, impactAt);
-      if (w.pull) this.reapPull(w.pull, h.finisher);
       h.impact = impactAt;
       h.atkCd = period;
     }
@@ -738,46 +717,18 @@ export class Game {
     return Math.abs(a) <= THREE.MathUtils.degToRad(arc / 2) + Math.atan2(radius, d);
   }
 
-  /** Reaper swing start: slide the mobs around towards a point in front of the hero, they land by the impact. */
-  private reapPull(pull: NonNullable<WeaponDef['pull']>, finisher: boolean) {
-    const p = this.hero.position;
-    const at = v2.set(p.x + Math.sin(this.hero.facing) * pull.ahead, 0, p.z + Math.cos(this.hero.facing) * pull.ahead);
-    const radius = pull.radius * (finisher ? 2 : 1);
-    let n = 0;
-    for (const m of this.mobs) {
-      if (!m.hittable || m.def.boss || m.pos.distanceTo(p) - m.radius > radius) continue;
-      // knockback slides 1/9 of its speed (it decays ×(1 − 9·dt)), so speed = 9 × the distance to cover
-      m.knock.set(at.x - m.pos.x, 0, at.z - m.pos.z).multiplyScalar(9 * pull.force);
-      if (m.state === 'idle') m.state = 'chase';
-      n++;
-    }
-    if (n) {
-      this.waves.add(at, 1.2, COMBOS.reaper.color, 0.3);
-      this.particles.burst(at.setY(0.3), COMBOS.reaper.color, 6 + 2 * Math.min(n, 6), 0.1, 4, 0.5);
-    }
-  }
-
   /**
-   * The blow of one hand lands. `yaw`: strike direction (shield counters strike back at the attacker, see
-   * counterStrike); returns the number of units hit.
+   * The blow of one hand lands; returns the number of units hit.
    */
   private heroStrike(h: Hand, yaw = this.hero.facing, focus: Unit | null = this.target) {
     const it = this.save.weapons[h.i];
     if (!it) return 0;
     const w = WEAPONS[it.def];
-    const fin = h.finisher ? COMBOS[it.def] : null;
+    const fin = h.finisher ? COMBOS[it.def] ?? null : null;
     const shape = fin ? fin.shape : w.shape;
     const arc = fin ? fin.arc : w.arc;
     const range = w.range + (fin ? fin.rangeAdd : 0);
     let hits = 0;
-    // reaper: the more mobs the blow catches, the harder it hits each of them
-    let crowd = 1;
-    if (w.pull) {
-      let n = 0;
-      for (const m of this.mobs) if (m.hittable && this.inShape(m.pos, m.radius, shape, arc, range, 0, yaw)) n++;
-      crowd = Math.min(w.pull.max, 1 + w.pull.perEnemy * (n - 1));
-      if (crowd > 1) this.fx.spawn(v1.copy(this.hero.position).setY(2.6), `×${crowd.toFixed(2).replace(/\.?0+$/, '')}`, 'dmg weak', 0.8);
-    }
     const only = !fin && w.single ? focus : null;
     const pair = this.pair;
     const swordHit = !!pair && h.i === pair.sword;
@@ -793,11 +744,9 @@ export class Game {
         continue;
       }
       const m = u as Mob;
-      // daggers: +stack.add per stack on this mob, then one more stack
-      const stackMul = w.stack ? 1 + w.stack.add * m.stacks : 1;
       // hammer pair: no knockback, the closer to the centre of the blow, the harder
       const center = hammerPair ? 1 + SWORD_PAIRS.hammer.center * Math.max(0, 1 - m.pos.distanceTo(this.hero.position) / (range + 0.35)) : 1;
-      const r = this.damageFor(it, m.def.resist, (fin ? fin.mult : 1) * stackMul * crowd * center);
+      const r = this.damageFor(it, m.def.resist, (fin ? fin.mult : 1) * center);
       const { tier } = r;
       let { dmg } = r;
       // axe pair: the sword tears off a share of what the mob has left
@@ -805,25 +754,12 @@ export class Game {
         const a = SWORD_PAIRS.axe;
         dmg += Math.round(m.hp * (mobRank(m.def) === 'normal' ? a.pct : a.boss));
       }
-      if (w.stack) m.setStacks(Math.min(w.stack.max, m.stacks + 1), this.time);
       const f = this.fightOf(m);
       f.hits++;
       if (fin) f.combos++;
-      // the reaper keeps the pulled crowd together
-      this.damageMob(m, dmg, tier, hammerPair ? 0 : fin ? fin.knock : w.pull ? 0.5 : 3.5);
-      if (m.alive && !m.def.boss) {
-        if (fin?.stun) m.stun = Math.max(m.stun, fin.stun);
-        else if (w.stun && Math.random() < w.stun) m.stun = 0.9;
-      }
-      // shield pair: the cut provokes an immediate blow (and with it a chance of a counter)
-      if (swordHit && pair!.kind === 'shield' && m.alive && m.stun <= 0 && Math.random() < SWORD_PAIRS.shield.chance) m.atkCd = 0;
-    }
-    if (swordHit && hits) {
-      if (pair!.kind === 'dagger') {
-        const d = SWORD_PAIRS.dagger;
-        this.haste = Math.min(d.max, (this.time - this.hasteAt < d.decay ? this.haste : 0) + d.aps);
-        this.hasteAt = this.time;
-      } else if (pair!.kind === 'reaper') this.reapExcess();
+      // the hammer's type trait is a heavy push (but not beside a sword, see SWORD_PAIRS.hammer)
+      this.damageMob(m, dmg, tier, hammerPair ? 0 : fin ? fin.knock : w.knock);
+      if (fin?.stun && m.alive && !m.def.boss) m.stun = Math.max(m.stun, fin.stun);
     }
     if (w.shape === 'circle' && hits) {
       this.shake = Math.max(this.shake, 0.18);
@@ -842,24 +778,6 @@ export class Game {
     if (!hits) h.combo = 0;
     return hits;
   }
-
-  /** Reaper pair: more plain mobs around than the reaper's crowd limit — the extra ones (weakest) drop dead. */
-  private reapExcess() {
-    const r = SWORD_PAIRS.reaper;
-    if (this.time - this.lastReap < r.cd) return;
-    const crowd = this.mobs.filter((m) => m.hittable && mobRank(m.def) === 'normal' && m.pos.distanceTo(this.hero.position) - m.radius < r.radius);
-    const doomed = excess(crowd, r.limit);
-    if (!doomed.length) return;
-    this.lastReap = this.time;
-    for (const m of doomed) {
-      this.particles.burst(v2.copy(m.pos).setY(1), COMBOS.reaper.color, 8, 0.1, 5, 0.5);
-      this.damageMob(m, Math.ceil(m.hp), 'weak', 4);
-    }
-    this.fx.spawn(v1.copy(this.hero.position).setY(3), `Жатва ×${doomed.length}`, 'dmg weak', 1.1, { color: '#b49bff' });
-    this.waves.add(this.hero.position, r.radius, COMBOS.reaper.color, 0.4);
-    this.slowMo(0.08, 0.1);
-  }
-
 
   private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5) {
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
@@ -883,7 +801,6 @@ export class Game {
   /** Lethal hit: death clip, blood, shake and the knockback now; orbs and items in grantKillRewards. */
 
   private killMob(m: Mob) {
-    m.setStacks(0, -99);
     m.state = 'dead';
     m.hp = 0;
     m.deadT = 0;
@@ -1271,9 +1188,8 @@ export class Game {
   private hurtHero(raw: number, from: THREE.Vector3, src?: Mob) {
     if (this.dead) return;
     // GDD 10.5: reduction = defense / (defense + 100).
-    let dmg = Math.max(1, Math.round(raw * armorMul(this.defense) * this.guardMul() * (0.9 + Math.random() * 0.2)));
+    let dmg = Math.max(1, Math.round(raw * armorMul(this.defense) * (0.9 + Math.random() * 0.2)));
     this.lastHurt = this.time;
-    if (src) this.tryCounter(src);
     if (src) this.fightOf(src).taken += Math.min(dmg, this.hp + this.shield);
     if (this.shield > 0) {
       const absorbed = Math.min(this.shield, dmg);
@@ -1302,41 +1218,6 @@ export class Game {
       sfx.die();
       this.input.reset();
     }
-  }
-
-  /** Incoming damage multiplier from the shields in hand. */
-  private guardMul() { return guardMul(this.save.weapons); }
-
-  private lastCounter = -99;
-  private counterHand = newHand(0);
-
-  /** Shield: a blow taken may be answered at once by the other hand (with all its effects) towards the attacker. */
-  private tryCounter(m: Mob) {
-    const items = this.save.weapons;
-    const s = items.findIndex((it) => it && WEAPONS[it.def].guard);
-    if (s < 0 || !m.alive || this.dead) return;
-    const g = WEAPONS[items[s]!.def].guard!;
-    if (this.time - this.lastCounter < g.cd || Math.random() >= g.counter[mobRank(m.def)]) return;
-    this.lastCounter = this.time;
-    const other = (1 - s) as 0 | 1;
-    const striker = items[other] && !WEAPONS[items[other]!.def].guard ? other : (s as 0 | 1);
-    this.counterStrike(m, striker, s as 0 | 1);
-  }
-
-  /** Strike back at `m` with hand `striker` (shield bash when both hands hold shields); `shieldHand` blocks. */
-  private counterStrike(m: Mob, striker: 0 | 1, shieldHand: 0 | 1) {
-    const it = this.save.weapons[striker]!;
-    const w = WEAPONS[it.def];
-    const yaw = Math.atan2(m.pos.x - this.hero.position.x, m.pos.z - this.hero.position.z);
-    this.hero.facing = yaw;
-    this.hero.swing('bash', shieldHand, 0.5, 0.12);
-    if (striker !== shieldHand) this.hero.swing(w.swing?.[0] ?? (striker ? LEFT_SWING[w.anim][0] : 'slashRL'), striker, 0.6, 0.15);
-    // a throwaway hand state: a counter neither spends nor builds the combo chain
-    const h = Object.assign(this.counterHand, newHand(striker));
-    const hits = this.heroStrike(h, yaw, m);
-    const at = v1.copy(this.hero.position).setY(1.2);
-    this.particles.burst(at, 0x9fd0ff, 10, 0.1, 6, 0.4);
-    this.fx.spawn(at.setY(2.9), hits ? 'Контратака!' : 'Блок', 'dmg weak', 0.7, { color: '#9fd0ff' });
   }
 
   private respawnInCamp() {
@@ -1394,11 +1275,7 @@ export class Game {
   private updateMobBars(w: number, h: number) {
     const hp = this.hero.position;
     const explored = (p: THREE.Vector3) => this.world.fog.isExplored(p.x, p.z);
-    let decay = 0;
-    for (const it of this.save.weapons) if (it) decay = Math.max(decay, WEAPONS[it.def].stack?.decay ?? 0);
     for (const u of this.units) {
-      // dagger stacks drop off a while after the last hit (at once with another weapon in hand)
-      if (u instanceof Mob && u.stacks && this.time - u.stackAt > decay) u.setStacks(0, -99);
       // HP bar + weakness icons + reward over living units near the hero.
       const show = u.alive && u.visible && u.pos.distanceTo(hp) < u.barRange && explored(u.pos);
       if (!show) { if (u.uiEl.classList.contains('show')) u.uiEl.classList.remove('show'); }
@@ -1549,7 +1426,6 @@ export class Game {
       ['Защита', `${this.defense} (−${Math.round((this.defense / (this.defense + 100)) * 100)}%)`],
       ...this.save.weapons.flatMap((it, i): [string, string][] => it ? [
         [i ? 'Левая рука' : 'Правая рука', `${Math.round(this.itemDamage(it) * this.handMul() * this.powerMult())} × ${WEAPONS[it.def].aps}/с`],
-        [`Комбо ${WEAPONS[it.def].name.toLowerCase()}`, `${COMBOS[it.def].name} ×${COMBOS[it.def].mult}`],
       ] : []),
       ['Пассивка', FACTIONS[this.faction].passiveName],
     ];
@@ -1848,9 +1724,9 @@ function turn(cur: number, want: number, k: number) {
 
 /** Swing timer and combo chain of one hand. */
 interface Hand {
-  i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean;
+  i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; swings: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean;
 }
 function newHand(i: 0 | 1): Hand {
-  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false };
+  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, swings: 0, lastSwing: -99, lastSwingHit: false, finisher: false };
 }
 

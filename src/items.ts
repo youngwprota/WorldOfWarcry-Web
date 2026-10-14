@@ -115,7 +115,7 @@ export function slotOf(it: Item): ArmorSlot | 'weapon' {
 }
 
 export function itemName(it: Item, f: FactionId) {
-  return it.name ?? (it.kind === 'weapon' ? WEAPONS[it.def].name : ARMOR[it.def].name[f]);
+  return it.name ?? (it.kind === 'weapon' ? WEAPONS[it.def].names[it.rarity] : ARMOR[it.def].name[f]);
 }
 
 /** Icon id for icon(): weapon id or armour slot. */
@@ -147,7 +147,8 @@ export function itemLines(it: Item): [string, string][] {
       ['Урон', String(Math.round(weaponDamage(it)))],
       ['Тип', DAMAGE_TYPE_NAME[w.type]],
       ['Атак/с', String(w.aps)],
-      ['Удар', w.shape === 'circle' ? 'круг 360°' : `дуга ${w.arc}°`],
+      ['Удар', w.single ? 'по цели' : w.shape === 'circle' ? 'круг 360°' : `дуга ${w.arc}°`],
+      ['Дальность', `${w.range} м`],
     ];
   }
   const s = armorStats(it);
@@ -169,11 +170,13 @@ export const dropItem = (d: ItemDrop) => makeItem(d.kind, d.def, d.rarity, 1);
 export const dropIconId = (d: ItemDrop) => (d.kind === 'weapon' ? d.def : ARMOR[d.def].slot);
 
 /** Old saves stored bare {def, rarity, sharpen} weapons. */
-const GONE_WEAPONS: Record<string, string> = { nagamaki: 'sword', scythe: 'reaper', pan: 'hammer', hidden_blade: 'dagger' };
+const GONE_WEAPONS: Record<string, string> = {
+  dagger: 'sword', hidden_blade: 'sword', reaper: 'polearm', scythe: 'polearm', nagamaki: 'polearm', shield: 'hammer', pan: 'hammer',
+};
 
 export function normalizeItem(it: Partial<Item> & { def: string }): Item {
   // the old peasant set is gone (the hero looks like a peasant already): its pieces become guard pieces
-  // removed weapons (docs/features/weapons-six) become the closest kept one, same quality and level
+  // weapons off the board card (docs/features/weapons-six) become the closest of the 4 types, same quality and level
   const gone = GONE_WEAPONS[it.def];
   const def = gone ?? (it.def.startsWith('peasant_') ? it.def.replace('peasant_', 'guard_') : it.def);
   return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name && !gone ? { name: it.name } : {}) };

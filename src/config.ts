@@ -49,7 +49,10 @@ export interface ItemDrop { kind: 'weapon' | 'armor'; def: string; rarity: numbe
 
 export interface WeaponDef {
   id: string;
+  /** Type name (debug, combo dots); the item is called by `names[rarity]`. */
   name: string;
+  /** Item name for each quality (RARITY index): one weapon per type and quality, 24 in all. */
+  names: string[];
   /** What the weapon is for, one line for the tooltip. */
   role: string;
   type: DamageType;
@@ -59,66 +62,46 @@ export interface WeaponDef {
   shape: 'arc' | 'circle';
   arc: number; // degrees, for 'arc'
   range: number; // metres
+  /** Knockback speed of a plain hit. */
+  knock: number;
   anim: AttackAnim;
   model: Record<FactionId, string>;
   icon: string;
-  stun?: number; // chance
-  /** Plain swings hit only the current target (the combo finisher still hits an area). */
+  /** Plain swings hit only the current target (the polearm's series finisher still hits an area). */
   single?: boolean;
-  /**
-   * Daggers: every hit on a mob adds `add` to the damage on that mob, up to `max` stacks; the stacks drop off
-   * `decay` seconds after the last hit.
-   */
-  stack?: { add: number; max: number; decay: number };
-  /**
-   * Reaper: each swing drags mobs within `radius` m (×2 on the finisher) towards a point `ahead` m in front of
-   * the hero (bosses stay); `force` = share of the way they slide. Then the blow deals
-   * × (1 + perEnemy × (mobs hit − 1)), up to × `max`.
-   */
-  pull?: { radius: number; ahead: number; force: number; perEnemy: number; max: number };
-  /** Procedural swings (src/swing.ts) cycled along the combo chain, instead of the `anim` clip. */
+  /** Procedural swings (src/swing.ts) cycled along the series, instead of the `anim` clip. */
   swing?: SwingKind[];
-  /**
-   * Shield: never swings by itself; incoming damage × (1 − `reduce`); a hit taken may trigger a counter-strike of
-   * the other hand at the attacker (`counter` chance by its rank), not more often than every `cd` s. Two shields
-   * bash back with the shield.
-   */
-  guard?: { reduce: number; counter: Record<MobRank, number>; cd: number };
 }
 
 export type MobRank = 'normal' | 'elite' | 'mini' | 'boss';
 export const mobRank = (d: MobDef): MobRank => (d.boss ? 'boss' : d.rank ?? 'normal');
 
+/** The weapon card on the board (docs/features/weapons-six): sword, axe, hammer, polearm × 6 qualities. */
 export const WEAPONS: Record<string, WeaponDef> = {
   sword: {
-    id: 'sword', role: 'Универсал: обычный удар — только по цели, добивание — по кругу. С мечом в другой руке любое оружие получает бонус пары.', name: 'Меч', type: 'slash', dmgMul: 1, aps: 1.15, shape: 'arc', arc: 140, range: 2.3,
+    id: 'sword', name: 'Меч', names: ['Ржавый меч', 'Меч стражника', 'Рыцарский меч', 'Клинок героя', 'Меч королей', 'Меч бездны'],
+    role: 'Универсал: средний урон и скорость, бьёт только цель. С мечом в другой руке топор и молот получают бонус пары.',
+    type: 'slash', dmgMul: 1, aps: 1.15, shape: 'arc', arc: 140, range: 2.3, knock: 3.5,
     anim: 'SwordAttack', model: { human: 'sword_human_knight', orc: 'sword_orc_warrior' }, icon: '🗡️', single: true,
   },
   axe: {
-    id: 'axe', role: 'Тяжёлые рубящие удары широкой дугой — и против одного врага, и против нескольких.', name: 'Топор', type: 'chop', dmgMul: 1.25, aps: 0.95, shape: 'arc', arc: 160, range: 2.3,
+    id: 'axe', name: 'Топор', names: ['Колун', 'Боевой топор', 'Секира', 'Топор вождя', 'Топор титанов', 'Топор рока'],
+    role: 'Чуть сильнее и медленнее меча, задевает соседей узкой дугой перед собой.',
+    type: 'chop', dmgMul: 1.15, aps: 1.0, shape: 'arc', arc: 30, range: 2.3, knock: 3.5,
     anim: 'AxeAttack', model: { human: 'axe', orc: 'axe_orc_grunt' }, icon: '🪓',
   },
   hammer: {
-    id: 'hammer', role: 'Медленный, бьёт всех вокруг и часто оглушает — против толпы.', name: 'Молот', type: 'crush', dmgMul: 1.7, aps: 0.7, shape: 'circle', arc: 360, range: 2.1,
-    anim: 'AxeAttack', model: { human: 'hammer_human_paladin', orc: 'hammer_human_paladin' }, icon: '🔨', stun: 0.25,
+    id: 'hammer', name: 'Молот', names: ['Кувалда', 'Боевой молот', 'Молот грома', 'Молот титана', 'Молот королей', 'Молот бездны'],
+    role: 'Медленный и тяжёлый: бьёт широкой дугой перед собой и расталкивает врагов.',
+    type: 'crush', dmgMul: 1.6, aps: 0.7, shape: 'arc', arc: 90, range: 2.3, knock: 9,
+    anim: 'AxeAttack', model: { human: 'hammer_human_paladin', orc: 'hammer_human_paladin' }, icon: '🔨',
   },
-  dagger: {
-    id: 'dagger', role: 'Очень быстрые удары по одной цели, урон по ней растёт с каждым ударом — против элиток и боссов.', name: 'Кинжалы', type: 'slash', dmgMul: 0.38, aps: 2.4, shape: 'arc', arc: 90, range: 1.9,
-    anim: 'SwordAttack', model: { human: 'dagger', orc: 'dagger' }, icon: '🔪', single: true,
-    stack: { add: 0.06, max: 10, decay: 2.5 },
-    swing: ['slashRL', 'slashLR'],
-  },
-  reaper: {
-    id: 'reaper', role: 'Стягивает толпу перед собой и режет её разом: чем больше врагов, тем сильнее удар.', name: 'Жнец', type: 'slash', dmgMul: 1.1, aps: 0.8, shape: 'arc', arc: 200, range: 2.6,
-    anim: 'AxeAttack', model: { human: 'reaper', orc: 'reaper' }, icon: '🌙',
-    pull: { radius: 5, ahead: 1.5, force: 0.85, perEnemy: 0.15, max: 2 },
-    swing: ['reap'],
-  },
-  shield: {
-    id: 'shield', role: 'Защита: снижает входящий урон и отвечает контратаками оружием в другой руке.', name: 'Щит', type: 'crush', dmgMul: 0.5, aps: 0.8, shape: 'arc', arc: 120, range: 1.8,
-    anim: 'AxeAttack', model: { human: 'shield', orc: 'shield' }, icon: '🛡️',
-    guard: { reduce: 0.15, counter: { normal: 0.2, elite: 0.3, mini: 0.4, boss: 0.5 }, cd: 0.4 },
-    swing: ['bash'],
+  polearm: {
+    id: 'polearm', name: 'Древковое', names: ['Рогатина', 'Копьё', 'Глефа', 'Алебарда', 'Копьё королей', 'Глефа бездны'],
+    role: 'Бьёт дальше всех, но слабо и медленно: два укола по цели, третий удар серии — прокрут вокруг себя.',
+    type: 'slash', dmgMul: 0.9, aps: 0.8, shape: 'arc', arc: 60, range: 3.2, knock: 3.5,
+    anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '🔱', single: true,
+    swing: ['thrust', 'thrust', 'slashRL'],
   },
 };
 
@@ -130,22 +113,16 @@ export const DUAL = { mul: 0.6 };
  * unless noted. Numbers are tuned by the balance bench (docs/features/new-weapons/handoff.md).
  */
 export const SWORD_PAIRS = {
-  /** Every sword hit: +`aps` attack speed for the daggers, up to +`max`, gone `decay` s after the last sword hit. */
-  dagger: { aps: 0.08, max: 0.4, decay: 2.5 },
-  /** Sword hit with more than `limit` plain mobs within `radius` m: the extra ones (weakest first) die; every `cd` s. */
-  reaper: { limit: 7, radius: 5, cd: 4 },
   /** Sword hits also cut `pct` of the mob's current HP (`boss` for elites, minis and bosses); hands swing together. */
   axe: { pct: 0.04, boss: 0.01 },
   /** Hammer: no knockback, damage × (1 + `center` × closeness to the centre of the blow). */
   hammer: { center: 0.6 },
-  /** Sword hit: `chance` the mob attacks right away (feeds the shield's counters). */
-  shield: { chance: 0.15 },
 };
 export type SwordPair = keyof typeof SWORD_PAIRS;
 
 export const SHARPEN = { max: 10, perLevel: 0.08, cost: (lvl: number) => 40 + lvl * lvl * 25 };
 
-/** Combo finisher: the 3rd uninterrupted hit in a row (each swing must connect, no pause between). */
+/** Polearm series: the `hits`-th uninterrupted hit in a row (each swing must connect, no pause between) spins round. */
 export interface ComboDef {
   name: string;
   hits: number;
@@ -159,15 +136,12 @@ export interface ComboDef {
   spin: boolean;
   color: number;
 }
-export const COMBOS: Record<string, ComboDef> = {
-  sword: { name: 'Вихрь', hits: 3, window: 0.35, mult: 1.3, rangeAdd: 0.5, shape: 'circle', arc: 360, knock: 7, stun: 0, spin: true, color: 0x9fe3ff },
-  axe: { name: 'Раскол', hits: 3, window: 0.35, mult: 1.6, rangeAdd: 0.8, shape: 'arc', arc: 220, knock: 11, stun: 0.4, spin: false, color: 0xff8a5a },
-  hammer: { name: 'Землетрясение', hits: 3, window: 0.4, mult: 1.3, rangeAdd: 0.8, shape: 'circle', arc: 360, knock: 5, stun: 1.6, spin: false, color: 0xffc95a },
-  dagger: { name: 'Шквал', hits: 3, window: 0.25, mult: 1.2, rangeAdd: 0.4, shape: 'circle', arc: 360, knock: 2, stun: 0, spin: true, color: 0xff6b8a },
-  // reaper: the finisher pulls from twice as far
-  shield: { name: 'Таран', hits: 3, window: 0.5, mult: 1.5, rangeAdd: 0.5, shape: 'arc', arc: 140, knock: 9, stun: 0.8, spin: false, color: 0xa0c8ff },
-  reaper: { name: 'Жатва', hits: 3, window: 0.45, mult: 1.5, rangeAdd: 0.6, shape: 'circle', arc: 360, knock: 2, stun: 0.5, spin: true, color: 0x9a7bff },
+/** Only the polearm has a series (the board card); other weapons just swing. */
+export const COMBOS: Partial<Record<string, ComboDef>> = {
+  polearm: { name: 'Прокрут', hits: 3, window: 0.4, mult: 1, rangeAdd: 0, shape: 'circle', arc: 360, knock: 5, stun: 0, spin: true, color: 0xffe0a0 },
 };
+/** Trail colour of each weapon's swings. */
+export const TRAIL_COLOR: Record<string, number> = { sword: 0x9fe3ff, axe: 0xff8a5a, hammer: 0xffc95a, polearm: 0xffe0a0 };
 
 export interface FactionDef {
   id: FactionId;
@@ -394,7 +368,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
     anim: 'SwordAttack', hp: 1280, dmg: 12, aps: 1.1, range: 1.5, speed: 4.5, aggro: 6.2, regen: 0.03, scale: 1.3,
     ...foes('cemetery'), reward: { speed: 5 }, respawn: 600,
-    drop: { kind: 'weapon', def: 'dagger', rarity: 2 },
+    drop: { kind: 'weapon', def: 'axe', rarity: 2 },
   },
   gravedigger: {
     id: 'gravedigger', name: 'Могильщик', rank: 'mini',
@@ -408,7 +382,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_king', 'reaper'], orc: ['undead_king', 'reaper'] },
     anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
     ...foes('cemetery'), reward: { power: 18 }, respawn: 1200,
-    drop: { kind: 'weapon', def: 'reaper', rarity: 3 },
+    drop: { kind: 'weapon', def: 'polearm', rarity: 3 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['forest-peaks', 'cemetery-peaks'],
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,

@@ -8,7 +8,7 @@ import {
   ATTACK_HIT, BREAKABLES, COMBOS, FACTIONS, GACHA, HERO, MOBS, ORBS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, SWORD_PAIRS,
   WEAPONS, depthMul, mobImpact, mobRank, type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type ZoneId,
 } from '../src/config';
-import { armorMul, guardMul, handMulOf, heroStats, powerMult, type HeroBuild } from '../src/balance';
+import { armorMul, handMulOf, heroStats, powerMult, type HeroBuild } from '../src/balance';
 import { ARMOR, armorStats, dropItem, makeItem, sameItem, weaponDamage, type Item } from '../src/items';
 import { swordPair, type Pair } from '../src/offhand';
 import { pull } from '../src/gacha';
@@ -123,8 +123,8 @@ function foeOf(u: Unit): Foe {
 
 /**
  * One duel. `mean`: no dice (rolls at their expected value, slams hit for their expected share) — the bot's
- * quick estimate. Weapon mechanics are modelled for a single target: crowd effects (reaper pull, reaper pair,
- * hammer pair's centre bonus as an average) are left out.
+ * quick estimate. Weapon mechanics are modelled for a single target: splash is left out, the hammer pair's centre
+ * bonus is an average, the polearm's spin finisher hits the target as a plain blow.
  */
 function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const st = stats(h);
@@ -132,7 +132,6 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const boss = d.boss;
   const rank = mobRank(d);
   const roll = () => (mean ? 1 : 0.9 + rand() * 0.2);
-  const chance = (p: number) => (mean ? false : rand() < p);
   const pair: Pair | null = swordPair(h.weapons[0]?.def, h.weapons[1]?.def);
   let hp = h.hp;
   let shield = st.shieldMax;
@@ -140,9 +139,6 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   let mhp = foe.hp;
   const mmax = foe.hp;
   let stun = 0;
-  let stacks = 0;
-  let haste = 0, hasteAt = -99;
-  let lastCounter = -99;
   const period = 1 / d.aps;
   let matk = mobImpact(ATTACK_HIT[d.creature ? `${d.model.human[0]}:attack` : d.anim] ?? 0.6, period);
   let special = boss ? boss.cd : Infinity;
@@ -154,7 +150,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1, combo: 0 }));
   const pmul = () => powerMult(h.faction, st.power, hp / st.maxHp);
   const hurt = (raw: number) => {
-    let dmg = Math.max(1, raw * armorMul(st.defense) * guardMul(h.weapons) * roll());
+    let dmg = Math.max(1, raw * armorMul(st.defense) * roll());
     lastHurt = t;
     taken += dmg;
     if (shield > 0) { const a = Math.min(shield, dmg); shield -= a; dmg -= a; }
@@ -164,25 +160,20 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     const w = WEAPONS[it.def];
     const r = RESIST_MULT[d.resist[w.type] ?? 'normal'];
     let dmg = weaponDamage(it) * handMulOf(h.weapons, it) * pmul() * r * mult * roll();
-    if (w.stack) { dmg *= 1 + w.stack.add * stacks; stacks = Math.min(w.stack.max, stacks + 1); }
     mhp -= dmg;
     return dmg;
   };
-  /** One swing of a hand (counters too). */
-  const strike = (hd: { i: number; it: Item | null; combo: number }, counter = false) => {
+  /** One swing of a hand. */
+  const strike = (hd: { i: number; it: Item | null; combo: number }) => {
     const it = hd.it!;
-    const w = WEAPONS[it.def];
-    const fin = !counter && hd.combo >= COMBOS[it.def].hits ? COMBOS[it.def] : null;
+    const c = COMBOS[it.def];
+    const fin = c && hd.combo >= c.hits ? c : null;
     let mult = fin ? fin.mult : 1;
     const swordHit = !!pair && hd.i === pair.sword;
     if (pair?.kind === 'hammer' && !swordHit) mult *= 1 + SWORD_PAIRS.hammer.center * 0.5;
     hit(it, mult);
     if (swordHit && pair!.kind === 'axe') mhp -= mhp * (rank === 'normal' ? SWORD_PAIRS.axe.pct : SWORD_PAIRS.axe.boss);
-    if (swordHit && pair!.kind === 'dagger') { haste = Math.min(SWORD_PAIRS.dagger.max, (t - hasteAt < SWORD_PAIRS.dagger.decay ? haste : 0) + SWORD_PAIRS.dagger.aps); hasteAt = t; }
-    if (!boss) {
-      if (fin?.stun) stun = Math.max(stun, fin.stun);
-      else if (w.stun && (mean ? false : chance(w.stun))) stun = Math.max(stun, 0.9);
-    }
+    if (!boss && fin?.stun) stun = Math.max(stun, fin.stun);
     if (fin) hd.combo = 0;
   };
   let t = 0;
@@ -192,12 +183,9 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     for (const hd of hands) {
       if (!hd.it) continue;
       const w = WEAPONS[hd.it.def];
-      const other = h.weapons[1 - hd.i];
-      if (w.guard && other && !WEAPONS[other.def].guard) continue;
       hd.cd -= DT;
       if (hd.cd > 0 || busy > 0) continue;
-      let per = 1 / w.aps;
-      if (pair?.kind === 'dagger' && hd.i !== pair.sword && t - hasteAt < SWORD_PAIRS.dagger.decay) per /= 1 + haste;
+      const per = 1 / w.aps;
       // uptime: the hero spends part of the fight repositioning — swings come later and the chain may break
       hd.cd = per / OPT.uptime;
       hd.combo = mean || rand() < OPT.combo ? hd.combo + 1 : 1;
@@ -212,15 +200,6 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       if (matk <= 0) {
         matk += period;
         hurt(foe.dmg * (phase2 ? boss!.phase2Dmg : 1));
-        // shield: a blow taken may be answered by the other hand
-        const sh = h.weapons.find((x) => x && WEAPONS[x.def].guard);
-        const g = sh && WEAPONS[sh.def].guard!;
-        const other = sh && h.weapons.find((x) => x && x !== sh);
-        if (g && other && t - lastCounter >= g.cd && (mean ? true : chance(g.counter[rank]))) {
-          lastCounter = t;
-          if (mean) hit(other, g.counter[rank]);
-          else strike({ i: h.weapons.indexOf(other), it: other, combo: 0 }, true);
-        }
       }
     }
     if (boss) {
@@ -504,8 +483,7 @@ if (OPT.bench) {
     return (sum / n).toFixed(0).padStart(4);
   };
   console.log('== Стенд: время убийства цели 4000 HP (редкое ур.1, сила 0, без резистов), с — одно / в паре с мечом');
-  for (const w of Object.keys(WEAPONS)) console.log(`${w.padEnd(13)} ${w === 'shield' ? '   —' : ttk(w, null)} / ${ttk(w, 'sword')}`);
-  console.log(`axe+shield    ${ttk('axe', 'shield')}`);
+  for (const w of Object.keys(WEAPONS)) console.log(`${w.padEnd(13)} ${ttk(w, null)} / ${ttk(w, 'sword')}`);
   process.exit(0);
 }
 

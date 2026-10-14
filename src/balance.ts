@@ -56,9 +56,8 @@ const isDual = (w: HeroBuild['weapons']) => !!w[0] && !!w[1];
 
 /** Hand multiplier of one weapon. */
 export function handMulOf(weapons: HeroBuild['weapons'], it: Item) {
-  // beside a shield the weapon is the only one that swings
-  const other = weapons[weapons[0] === it ? 1 : 0];
-  return other && WEAPONS[other.def].guard && !WEAPONS[it.def].guard ? 1 : isDual(weapons) ? DUAL.mul : 1;
+  void it;
+  return isDual(weapons) ? DUAL.mul : 1;
 }
 
 /** Plain-swing DPS of both hands together; `resist` applies each hand's own damage type. */
@@ -67,18 +66,10 @@ export function heroDps(weapons: HeroBuild['weapons'], pmult: number, resist?: P
   for (const it of weapons) {
     if (!it) continue;
     const w = WEAPONS[it.def];
-    if (w.guard && isDual(weapons)) continue;
     const r = resist ? RESIST_MULT[resist[w.type] ?? 'normal'] : 1;
     dps += weaponDamage(it) * w.aps * r * handMulOf(weapons, it);
   }
   return dps * pmult;
-}
-
-/** Incoming damage multiplier from the shields in hand. */
-export function guardMul(weapons: HeroBuild['weapons']) {
-  let k = 1;
-  for (const it of weapons) if (it && WEAPONS[it.def].guard) k *= 1 - WEAPONS[it.def].guard!.reduce;
-  return k;
 }
 
 /** GDD 10.5: armour reduction = defense / (defense + 100); returns the share that gets through. */
