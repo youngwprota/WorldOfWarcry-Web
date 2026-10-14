@@ -169,8 +169,12 @@ export const dropItem = (d: ItemDrop) => makeItem(d.kind, d.def, d.rarity, 1);
 export const dropIconId = (d: ItemDrop) => (d.kind === 'weapon' ? d.def : ARMOR[d.def].slot);
 
 /** Old saves stored bare {def, rarity, sharpen} weapons. */
+const GONE_WEAPONS: Record<string, string> = { nagamaki: 'sword', scythe: 'reaper', pan: 'hammer', hidden_blade: 'dagger' };
+
 export function normalizeItem(it: Partial<Item> & { def: string }): Item {
   // the old peasant set is gone (the hero looks like a peasant already): its pieces become guard pieces
-  const def = it.def.startsWith('peasant_') ? it.def.replace('peasant_', 'guard_') : it.def;
-  return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
+  // removed weapons (docs/features/weapons-six) become the closest kept one, same quality and level
+  const gone = GONE_WEAPONS[it.def];
+  const def = gone ?? (it.def.startsWith('peasant_') ? it.def.replace('peasant_', 'guard_') : it.def);
+  return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name && !gone ? { name: it.name } : {}) };
 }

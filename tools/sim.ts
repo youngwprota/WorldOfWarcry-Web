@@ -124,7 +124,7 @@ function foeOf(u: Unit): Foe {
 /**
  * One duel. `mean`: no dice (rolls at their expected value, slams hit for their expected share) — the bot's
  * quick estimate. Weapon mechanics are modelled for a single target: crowd effects (reaper pull, reaper pair,
- * pan pair's fear, hammer helpers) are left out.
+ * hammer pair's centre bonus as an average) are left out.
  */
 function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const st = stats(h);
@@ -152,7 +152,6 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const pending: [number, number][] = []; // [time, damage] of telegraphed blasts
   // hands
   const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1, combo: 0 }));
-  const orbits: { until: number; next: number; dmg: number }[] = [];
   const pmul = () => powerMult(h.faction, st.power, hp / st.maxHp);
   const hurt = (raw: number) => {
     let dmg = Math.max(1, raw * armorMul(st.defense) * guardMul(h.weapons) * roll());
@@ -164,7 +163,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const hit = (it: Item, mult: number) => {
     const w = WEAPONS[it.def];
     const r = RESIST_MULT[d.resist[w.type] ?? 'normal'];
-    let dmg = weaponDamage(it) * handMulOf(h.weapons, pair, it) * pmul() * r * mult * roll();
+    let dmg = weaponDamage(it) * handMulOf(h.weapons, it) * pmul() * r * mult * roll();
     if (w.stack) { dmg *= 1 + w.stack.add * stacks; stacks = Math.min(w.stack.max, stacks + 1); }
     mhp -= dmg;
     return dmg;
@@ -175,30 +174,12 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     const w = WEAPONS[it.def];
     const fin = !counter && hd.combo >= COMBOS[it.def].hits ? COMBOS[it.def] : null;
     let mult = fin ? fin.mult : 1;
-    if (w.ring && chance(w.ring.chance)) mult *= w.ring.mult;
-    else if (w.ring && mean) mult *= 1 + w.ring.chance * (w.ring.mult - 1);
     const swordHit = !!pair && hd.i === pair.sword;
-    if (pair?.kind === 'hidden_blade' && w.assassin) mult *= SWORD_PAIRS.hidden_blade.dmg;
-    if (pair?.kind === 'pan') mult *= SWORD_PAIRS.pan.dmg;
     if (pair?.kind === 'hammer' && !swordHit) mult *= 1 + SWORD_PAIRS.hammer.center * 0.5;
-    if (w.orbit) {
-      // the thrown scythe circles the hero: one cut per lap on a target in melee
-      orbits.push({ until: t + w.orbit.time, next: t + w.orbit.time / w.orbit.turns / 2, dmg: mult });
-      return;
-    }
     hit(it, mult);
     if (swordHit && pair!.kind === 'axe') mhp -= mhp * (rank === 'normal' ? SWORD_PAIRS.axe.pct : SWORD_PAIRS.axe.boss);
     if (swordHit && pair!.kind === 'dagger') { haste = Math.min(SWORD_PAIRS.dagger.max, (t - hasteAt < SWORD_PAIRS.dagger.decay ? haste : 0) + SWORD_PAIRS.dagger.aps); hasteAt = t; }
-    if (swordHit && pair!.kind === 'scythe') {
-      const sp = SWORD_PAIRS.scythe;
-      if (mean) mhp -= sp.chance * (sp.time / sp.rehit) * sp.mult * weaponDamage(it) * handMulOf(h.weapons, pair, it) * pmul() * RESIST_MULT[d.resist[w.type] ?? 'normal'];
-      else if (chance(sp.chance)) orbits.push({ until: t + sp.time, next: t + sp.rehit, dmg: -sp.mult });
-    }
-    if (fin && pair?.kind === 'nagamaki' && w.cycle) hit(it, SWORD_PAIRS.nagamaki.mult);
-    if (w.assassin) {
-      if (!boss) stun = Math.max(stun, w.assassin.stun);
-      if (rank === 'normal' && mhp < mmax * w.assassin.execute) mhp = 0;
-    } else if (!boss) {
+    if (!boss) {
       if (fin?.stun) stun = Math.max(stun, fin.stun);
       else if (w.stun && (mean ? false : chance(w.stun))) stun = Math.max(stun, 0.9);
     }
@@ -213,29 +194,16 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       const w = WEAPONS[hd.it.def];
       const other = h.weapons[1 - hd.i];
       if (w.guard && other && !WEAPONS[other.def].guard) continue;
-      if (pair?.kind === 'hidden_blade' && hd.i === pair.sword) continue;
       hd.cd -= DT;
       if (hd.cd > 0 || busy > 0) continue;
       let per = 1 / w.aps;
-      if (pair && hd.i !== pair.sword) {
-        if (pair.kind === 'dagger' && t - hasteAt < SWORD_PAIRS.dagger.decay) per /= 1 + haste;
-        if (pair.kind === 'hidden_blade') per /= SWORD_PAIRS.hidden_blade.aps;
-      }
-      if (w.orbit && orbits.some((o) => o.dmg > 0 && o.until > t)) continue;
+      if (pair?.kind === 'dagger' && hd.i !== pair.sword && t - hasteAt < SWORD_PAIRS.dagger.decay) per /= 1 + haste;
       // uptime: the hero spends part of the fight repositioning — swings come later and the chain may break
       hd.cd = per / OPT.uptime;
-      hd.combo = w.cycle || mean || rand() < OPT.combo ? hd.combo + 1 : 1;
+      hd.combo = mean || rand() < OPT.combo ? hd.combo + 1 : 1;
       swings++;
       strike(hd);
     }
-    for (const o of orbits) {
-      if (o.until <= t || t < o.next) continue;
-      const it = o.dmg > 0 ? h.weapons.find((x) => x && WEAPONS[x.def].orbit) : h.weapons[pair?.sword ?? 0];
-      if (!it) { o.until = 0; continue; }
-      if (o.dmg > 0) { hit(it, o.dmg); o.next += WEAPONS[it.def].orbit!.time / WEAPONS[it.def].orbit!.turns; }
-      else { hit(it, -o.dmg); o.next += SWORD_PAIRS.scythe.rehit; }
-    }
-    if (orbits.length > 8) orbits.splice(0, orbits.length - 8);
     if (mhp <= 0) break;
     // the foe
     if (stun > 0) stun -= DT;
