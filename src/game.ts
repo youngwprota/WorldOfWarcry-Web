@@ -142,6 +142,8 @@ class Mob extends Unit {
   radius: number;
   /** Spawned by a prop (grave): no respawn, removed after death. */
   temp = false;
+  /** Debug dummy: HP refills instead of dying. */
+  immortal = false;
   removed = false;
   /** Seconds left of the "crawling out of the ground" intro; untargetable meanwhile. */
   rise = 0;
@@ -292,6 +294,8 @@ export class Game {
   /** Hit-stop / slow motion: game time runs at `slowK` for `slowT` more real seconds. */
   private slowT = 0;
   private slowK = 1;
+  /** Debug: game speed (debug panel «Время»). */
+  timeScale = 1;
   /** Shove from mob hits (MobDef.push), decays like mob knockback. */
   private heroKnock = new THREE.Vector3();
   newItems = 0;
@@ -465,7 +469,7 @@ export class Game {
   // ---------- main loop ----------
   update(dt: number) {
     if (this.paused) { this.render(0); return; }
-    dt = Math.min(dt, 1 / 20);
+    dt = Math.min(dt, 1 / 20) * this.timeScale;
     if (this.slowT > 0) { this.slowT -= dt; dt *= this.slowK; }
     this.time += dt;
     const played = this.save.playTime ?? 0;
@@ -803,6 +807,7 @@ export class Game {
   private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5) {
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
     m.hp -= dmg;
+    if (m.immortal && m.hp <= 0) m.hp = m.maxHp;
     m.hurtAt = this.time;
     m.ch.hit();
     m.state = m.state === 'return' ? 'return' : 'chase';
@@ -1646,6 +1651,18 @@ export class Game {
     this.persist();
   }
 
+  /** A mob with endless HP 3 m in front of the hero (no respawn; «Убить рядом» removes it). */
+  debugSpawnDummy() {
+    const f = this.hero.facing;
+    const at = new THREE.Vector3(this.hero.position.x + Math.sin(f) * 3, 0, this.hero.position.z + Math.cos(f) * 3);
+    this.world.collide(at, HERO.radius);
+    const m = new Mob(MOBS.bandit_thug, at, this.save.faction, this.labels);
+    m.temp = true;
+    m.immortal = true;
+    m.ch.root.scale.setScalar(this.mobScale);
+    this.addUnit(m);
+  }
+
   debugKillNearby(radius = 14) {
     for (const m of this.mobs) if (m.alive && m.rise <= 0 && m.pos.distanceTo(this.hero.position) < radius) this.killMob(m);
   }
@@ -1674,7 +1691,7 @@ export class Game {
   /** Live numbers for the debug panel. */
   debugInfo() {
     return {
-      hp: Math.ceil(this.hp), maxHp: this.maxHp, god: this.god, heroScale: this.heroScale, mobScale: this.mobScale, fov: this.camera.fov,
+      hp: Math.ceil(this.hp), maxHp: this.maxHp, god: this.god, timeScale: this.timeScale, heroScale: this.heroScale, mobScale: this.mobScale, fov: this.camera.fov,
     };
   }
 

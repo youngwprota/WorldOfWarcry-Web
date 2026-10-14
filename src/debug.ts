@@ -10,7 +10,14 @@ const SECTIONS: [string, Action[]][] = [
     ['HP 40%', (g) => g.debugSetHp(0.4)],
     ['HP 100%', (g) => g.debugSetHp(1)],
     ['Бессмертие', (g) => { g.god = !g.god; }, 'god'],
+    ['Моб с бесконечным HP', (g) => g.debugSpawnDummy(), 'wide'],
     ['Убить рядом', (g) => g.debugKillNearby(), 'wide'],
+  ]],
+  ['Время', [
+    ['×0.1', (g) => { g.timeScale = 0.1; }],
+    ['×0.25', (g) => { g.timeScale = 0.25; }],
+    ['×0.5', (g) => { g.timeScale = 0.5; }],
+    ['×1', (g) => { g.timeScale = 1; }],
   ]],
   ['Оружие в руку', [
     ['Меч', (g) => g.debugGiveWeapon('sword')],
@@ -108,7 +115,7 @@ export class DebugPanel {
     const d = this.game.debugInfo();
     this.el.querySelector('.god')?.classList.toggle('on', d.god);
     this.info.textContent = [
-      `HP ${d.hp}/${d.maxHp}${d.god ? '  [бессмертие]' : ''}`,
+      `HP ${d.hp}/${d.maxHp}${d.god ? '  [бессмертие]' : ''}  время ×${d.timeScale}`,
       `Скейл: герой ×${d.heroScale.toFixed(2)}  враги ×${d.mobScale.toFixed(2)}  FOV ${d.fov}°`,
     ].join('\n');
   }
