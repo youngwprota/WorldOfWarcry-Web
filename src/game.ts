@@ -683,10 +683,9 @@ export class Game {
       const impactAt = Math.min(0.42, period * 0.4);
       h.impactAt = impactAt;
       // two hands: both swing procedurally (a full-body clip of one hand fights the other hand's swing)
-      const kinds = w.swing ?? (h.i === 1 || this.dual ? HAND_SWING[w.anim] : null);
-      // the series picks the polearm's swing; other weapons just alternate theirs
-      h.swings++;
-      if (kinds) this.hero.swing(kinds[(combo ? h.combo - 1 : h.swings) % kinds.length], h.i, period, impactAt, this.dual ? DUAL.torso : 1);
+      // the series picks the polearm's swing; other weapons always swing the same way
+      const kind = w.swing ? w.swing[Math.max(0, h.combo - 1) % w.swing.length] : h.i === 1 || this.dual ? HAND_SWING[w.anim] : null;
+      if (kind) this.hero.swing(kind, h.i, period, impactAt, this.dual ? DUAL.torso : 1);
       else this.hero.attack(w.anim, period, impactAt);
       h.impact = impactAt;
       h.atkCd = period;
@@ -1745,9 +1744,9 @@ function turn(cur: number, want: number, k: number) {
 
 /** Swing timer and combo chain of one hand. */
 interface Hand {
-  i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; swings: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean;
+  i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean;
 }
 function newHand(i: 0 | 1): Hand {
-  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, swings: 0, lastSwing: -99, lastSwingHit: false, finisher: false };
+  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false };
 }
 
