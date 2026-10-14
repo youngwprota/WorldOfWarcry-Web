@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { HIT_FLASH, applyHitFlash } from './hitflash';
 import { assets } from './assets';
 import { attachWeapon } from './rig';
-import { Swinger, type SwingKind } from './swing';
+import { Swinger, isIkMove, type SwingKind } from './swing';
 import { PART_PREFIXES, type VisualPart } from './items';
 import { ATTACK_HIT, type AttackAnim } from './config';
 
@@ -272,6 +272,8 @@ export class Character {
 
   /** Procedural swing of one hand (no clip): the blow lands `impactAt` s after the start. */
   swing(kind: SwingKind, hand: 0 | 1, period: number, impactAt: number, torso = 1) {
+    // the hero's moves with IK keys swing the whole arm
+    if (this.swinger.ik && isIkMove(kind)) { this.swinger.startClip(kind, hand, period, impactAt, torso); return; }
     this.swinger.start(kind, hand, Math.min(period, impactAt * 2.4), impactAt, torso);
   }
 

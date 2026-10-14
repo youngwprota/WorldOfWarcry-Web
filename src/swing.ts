@@ -29,10 +29,13 @@ type BodyKey = [phase: number, yaw: number, lean: number, lunge: number];
  * shoulder; shoulder and elbow follow from it (two-bone IK), so the whole arm swings, not just the wrist.
  */
 type ArmKey = [phase: number, handAz: number, handEl: number, reach: number, bladeAz: number, bladeEl: number];
-interface IkSwing { arm: ArmKey[]; pole: readonly [number, number, number]; body: BodyKey[]; lift: number }
+/** Moves swung by IK: the two attack clips' cuts plus the polearm's thrust and wide cut. */
+export type IkMove = AttackAnim | 'thrust' | 'slashRL';
+export const isIkMove = (k: string): k is IkMove => k in IK;
+interface IkSwing { arm: ArmKey[]; pole: readonly [number, number, number]; body: BodyKey[]; lift: number; wrist?: number }
 
 // phase: 0 windup → 1 the blow → FOLLOW_P end of the follow-through; the hand comes back the same way (lifted by `lift`)
-const IK: Record<AttackAnim, IkSwing> = {
+const IK: Record<IkMove, IkSwing> = {
   // level cut right → left: the arm drawn back by the right shoulder (not far behind: unnatural), sweeps round to the
   // front; past the front the torso twist and the wrist carry the blade across (the short arm across the chest went
   // into the body)
@@ -48,6 +51,19 @@ const IK: Record<AttackAnim, IkSwing> = {
     arm: [[0, -85, 55, 0.82, -140, 50], [0.6, -65, 42, 0.92, -110, 50], [0.85, -55, 10, 0.97, -40, 5], [1, -5, -8, 0.97, 20, -20], [1.3, 30, -30, 0.92, 55, -40]],
     pole: [-1, -0.4, 0], lift: 0.15,
     body: [[0, -0.5, -0.04, -0.06], [1, 0.15, 0.06, 0.15], [1.3, 0.45, 0.06, 0.1]],
+  },
+  // polearm thrust: the fist drawn back by the right hip, the shaft level at the target, then the arm drives it
+  // straight out at belly height with a lunge (on the upper-arm keys the arm hung at the hip and only the torso moved)
+  thrust: {
+    arm: [[0, -140, -45, 0.62, 3, 6], [0.6, -110, -38, 0.72, 2, 4], [1, -12, -12, 0.98, 0, 0], [1.3, -8, -14, 0.97, 0, -3]],
+    pole: [-0.7, -0.5, -0.6], lift: 0, wrist: 1.4,
+    body: [[0, -0.5, -0.04, -0.1], [1, 0.3, 0.1, 0.24], [1.3, 0.3, 0.1, 0.22]],
+  },
+  // polearm wide cut right → left: the shaft swept round level from behind the right side across the front
+  slashRL: {
+    arm: [[0, -95, 10, 0.82, -160, 15], [0.6, -60, 5, 0.93, -100, 5], [1, 0, -5, 0.98, 40, 0], [1.3, 35, -15, 0.95, 115, -8]],
+    pole: [-0.5, -1, 0.3], lift: 0, wrist: 1.4,
+    body: [[0, -0.7, 0, -0.06], [1, 0.1, 0.06, 0.16], [1.3, 0.7, 0.06, 0.12]],
   },
 };
 const FOLLOW_P = 1.3;
@@ -68,10 +84,10 @@ const dirOf = (az: number, el: number) =>
 /** The keys as vectors, made once. */
 const IK_V = Object.fromEntries(Object.entries(IK).map(([k, s]) => [k, s.arm.map((a) => ({
   p: a[0], hand: dirOf(a[1], a[2]), reach: a[3], blade: dirOf(a[4], a[5]),
-}))])) as Record<AttackAnim, { p: number; hand: THREE.Vector3; reach: number; blade: THREE.Vector3 }[]>;
+}))])) as Record<IkMove, { p: number; hand: THREE.Vector3; reach: number; blade: THREE.Vector3 }[]>;
 
 /** Hand target (share of the arm, from the shoulder) and blade direction at `p`, body frame, right hand. */
-function armAt(anim: AttackAnim, p: number, hand: THREE.Vector3, blade: THREE.Vector3) {
+function armAt(anim: IkMove, p: number, hand: THREE.Vector3, blade: THREE.Vector3) {
   const keys = IK_V[anim];
   let i = 0;
   while (i < keys.length - 2 && p > keys[i + 1].p) i++;
@@ -85,7 +101,7 @@ const tA = new THREE.Vector3();
 const tB = new THREE.Vector3();
 const tC = new THREE.Vector3();
 /** Where the edge faces at `p`: the way the blade tip moves on the cut (also while held or coming back). */
-function edgeAt(anim: AttackAnim, p: number, out: THREE.Vector3) {
+function edgeAt(anim: IkMove, p: number, out: THREE.Vector3) {
   const c = Math.max(0.05, Math.min(FOLLOW_P - 0.05, p));
   armAt(anim, c + 0.05, tA, tB);
   out.copy(tA).addScaledVector(tB, BLADE);
@@ -120,6 +136,8 @@ const qBase = [new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quatern
 /** The hands' rest rotations this frame (before any IK), for the wrist limits. */
 const qRest = [new THREE.Quaternion(), new THREE.Quaternion()];
 const qIdent = new THREE.Quaternion();
+/** hand_l⁻¹ · mirrored hand_r on the shared Idle clip. */
+const LEFT_FIX = new THREE.Quaternion(-0.375, 0.35, -0.123, 0.849).normalize();
 const vAx = new THREE.Vector3();
 const vBd = new THREE.Vector3();
 /** Wrist limits, rad: the bend of the hand off the forearm; the twist beyond it is lost. */
@@ -132,7 +150,7 @@ let halfSpan = 0;
 
 /** `fin`: s to blend the arm in (longer from rest); `hit`: past the blow (IK swings). */
 interface Active {
-  kind: SwingKind; t: number; dur: number; impact: number; torso: number; clip: AttackAnim | null;
+  kind: SwingKind; t: number; dur: number; impact: number; torso: number; clip: IkMove | null;
   fin: number; hit: boolean;
 }
 
@@ -140,7 +158,7 @@ interface Active {
  * What a hand holds after its IK swing's blow: phase `at` on the follow-through, `back` 0..1 of the way back to the
  * windup, blended in by `w` (fades out once neither hand swings).
  */
-interface Held { anim: AttackAnim | null; at: number; back: number; w: number }
+interface Held { anim: IkMove | null; at: number; back: number; w: number }
 
 /** Swing state of one character: up to one swing per hand. */
 export class Swinger {
@@ -175,7 +193,7 @@ export class Swinger {
    * The attack `anim` on one arm (mirrored on the left) by IK along its keys: the blow lands `impact` s after the
    * start; the hand comes back to the windup as soon as the other hand swings, or by the end of the `period`.
    */
-  startClip(anim: AttackAnim, hand: 0 | 1, period: number, impact: number, torso = 1) {
+  startClip(anim: IkMove, hand: 0 | 1, period: number, impact: number, torso = 1) {
     const a = this.begin(hand, 'overhead', period, impact, torso, anim);
     // a hand still out on its follow-through (or at rest) needs longer to get to the windup
     const hd = this.held[hand];
@@ -185,7 +203,7 @@ export class Swinger {
   /** The weapon changed: drop the held poses. */
   resetHeld() { for (const hd of this.held) { hd.anim = null; hd.w = 0; } }
 
-  private begin(hand: 0 | 1, kind: SwingKind, dur: number, impact: number, torso: number, clip: AttackAnim | null) {
+  private begin(hand: 0 | 1, kind: SwingKind, dur: number, impact: number, torso: number, clip: IkMove | null) {
     const a = this.hands[hand] ?? (this.hands[hand] = { kind, t: 0, dur, impact, torso, clip, fin: 0.06, hit: false });
     a.kind = kind; a.t = 0; a.dur = Math.max(dur, impact + 0.05); a.impact = impact; a.torso = torso; a.clip = clip;
     a.fin = 0.06; a.hit = false;
@@ -196,6 +214,10 @@ export class Swinger {
 
   /** Call after the mixer update: the clips have just rewritten the bones' local rotations. */
   apply(dt: number) {
+    // the left fist turned by the Idle pose's left/right asymmetry: with the weapon gripped as the mirror of the
+    // right one, the left blade stands as the mirror image of the right one (else it pointed across the body)
+    const lh = this.blades[1] ? this.chain[1][2] : null;
+    if (lh) lh.quaternion.multiply(LEFT_FIX);
     let yaw = 0, lean = 0, lunge = 0;
     // the torso follows only the latest swing: two hands twisting it at once made it jerk back and forth
     let lead = -1, leadT = Infinity;
@@ -312,7 +334,7 @@ export class Swinger {
    * One arm at phase `p` of `anim` by two-bone IK, the blade and its edge turned along the cut; `back` 0..1..0 over
    * the way back to the windup; blended by `w`.
    */
-  private ikArm(h: 0 | 1, anim: AttackAnim, p: number, back: number, w: number) {
+  private ikArm(h: 0 | 1, anim: IkMove, p: number, back: number, w: number) {
     const [up, lo, hand] = this.chain[h];
     if (!up || !lo || !hand) return;
     qBase[0].copy(up.quaternion); qBase[1].copy(lo.quaternion); qBase[2].copy(hand.quaternion);
@@ -366,7 +388,7 @@ export class Swinger {
       }
       bladeDir(holder, v2);
       qr.setFromUnitVectors(v2, vBlade);
-      rotateWorld(hand, clampTurn(qr, WRIST_BEND));
+      rotateWorld(hand, clampTurn(qr, IK[anim].wrist ?? WRIST_BEND));
     }
     if (w < 1) {
       up.quaternion.copy(qBase[0].slerp(up.quaternion, w));

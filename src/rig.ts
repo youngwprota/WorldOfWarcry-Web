@@ -116,14 +116,12 @@ export function attachWeapon(character: THREE.Object3D, weapon: string, left = f
 }
 
 /**
- * Left hand: mirror the right-hand holder across the hand's X (the bones match in bind pose), then turn it by
- * the left/right asymmetry of the Idle pose (hand_l⁻¹ · mirrored hand_r, measured on the shared Idle clip), so
- * the left weapon is the mirror image of the right one while standing.
+ * Left hand: mirror the right-hand holder across the hand's X (the bones match in bind pose), so the fist grips it
+ * the same way. (A turn by the Idle pose's left/right asymmetry made it a mirror image while standing, but it ran the
+ * blade out through the fingers.)
  */
-const LEFT_FIX = new THREE.Quaternion(-0.375, 0.35, -0.123, 0.849).normalize();
 function mirrorX(o: THREE.Object3D) {
   const q = o.quaternion;
-  q.set(q.x, -q.y, -q.z, q.w).premultiply(LEFT_FIX);
+  q.set(q.x, -q.y, -q.z, q.w);
   o.position.x = -o.position.x;
-  o.position.applyQuaternion(LEFT_FIX);
 }
