@@ -34,6 +34,12 @@ const models = [
   `${C}/Orcs/Warrior/Models/sword_orc_warrior.fbx`,
   `${C}/Orcs/Chieftain/Models/orc_chieftain.fbx`,
   `${C}/Orcs/Chieftain/Models/axe_orc_chieftain.fbx`,
+  `${C}/Orcs/Shaman/Models/orc_shaman.fbx`,
+  `${C}/Orcs/Shaman/Models/staff_orc_shaman.fbx`,
+  // elves
+  ...['Warrior/Models/elf_warrior', 'Warrior/Models/sword_elf_warrior', 'Assassin/Models/elf_assassin', 'Worker/Models/elf_worker',
+    'Queen/Models/elf_queen', 'Queen/Models/glaive_elf_queen', 'Priestess/Models/elf_priestess', 'Priestess/Models/magic_ball',
+  ].map((n) => `${C}/Elves/${n}.fbx`),
   // undead
   `${C}/Undead/Worker/Models/undead_worker.fbx`,
   `${C}/Undead/Warrior/Models/undead_warrior.fbx`,
@@ -78,10 +84,15 @@ const models = [
   // nature (elf kit): trees, foliage, rocks
   ...['elf_tree', 'elf_foliage_big', 'elf_foliage_mid', 'elf_foliage_small', 'elf_rock_big', 'elf_rock_small',
     'elf_tree_root_1', 'elf_tree_root_2', 'elf_tree_root_3', 'elf_trunk', 'elf_well', 'elf_log_pile', 'elf_stone_big',
-    'elf_stone_small', 'elf_monolith', 'elf_totem_pole_1'].map((n) => `${B}/Elves/Models/Parts/${n}.fbx`),
+    'elf_stone_small', 'elf_monolith', 'elf_totem_pole_1', 'elf_fountain'].map((n) => `${B}/Elves/Models/Parts/${n}.fbx`),
+  ...['elf_mine_Lv1', 'elf_oracle_Lv1', 'elf_throne_Lv1'].map((n) => `${B}/Elves/Models/Buildings/${n}.fbx`),
 ];
 
 const textures = [
+  `${C}/Orcs/Shaman/Textures/orc_shaman_albedo.tga`,
+  ...['Warrior/Textures/elf_warrior_tex', 'Assassin/Textures/elf_assassin_tex', 'Worker/Textures/elf_worker_tex',
+    'Queen/Textures/elf_queen_tex', 'Queen/Textures/elf_queen_glow', 'Priestess/Textures/elf_priestess_tex',
+    'Priestess/Textures/elf_priestess_glow'].map((n) => `${C}/Elves/${n}.tga`),
   `${B}/Elves/Textures/proto_elf_RTS_texture.tga`,
   `${C}/Humans/Knight/Textures/human_knight.tga`,
   `${C}/Humans/Peasant/Textures/human_peasant_color.tga`,

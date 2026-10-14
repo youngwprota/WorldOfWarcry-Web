@@ -83,11 +83,10 @@ export function rewardChips(def: Pick<Target, 'reward'>, raw = false) {
     .join('');
 }
 
-/** Butcher-style compact numbers: 950, 3.05K, 33.5K, 1.2M. */
+/** Compact numbers: 950, 1K, 1.4K, 13.5K, 135K, 1.2M. */
 export function fmtK(n: number) {
   const a = Math.abs(n);
   if (a < 1000) return String(Math.round(n * 10) / 10);
   const [v, s] = a < 1e6 ? [n / 1e3, 'K'] : [n / 1e6, 'M'];
-  const d = Math.abs(v) < 10 ? 2 : Math.abs(v) < 100 ? 1 : 0;
-  return +v.toFixed(d) + s;
+  return +v.toFixed(Math.abs(v) < 100 ? 1 : 0) + s;
 }

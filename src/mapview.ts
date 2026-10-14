@@ -3,7 +3,7 @@ import { ZONES } from './config';
 import { sfx } from './audio';
 import { drawMarks } from './ui';
 import type { Game } from './game';
-import { ISLAND, ZONE_LABEL } from './island';
+import { MAP_BOX, ZONE_LABEL } from './island';
 
 /** The minimap itself expands into a big pannable / zoomable panel; the game keeps running. */
 export class MapView {
@@ -139,11 +139,9 @@ export class MapView {
       c.height = Math.round(h * dpr);
     }
     // keep the camera inside the world
-    const off = Math.hypot(this.cx - ISLAND.cx, this.cz - ISLAND.cz);
-    if (off > 115) {
-      this.cx = ISLAND.cx + ((this.cx - ISLAND.cx) / off) * 115;
-      this.cz = ISLAND.cz + ((this.cz - ISLAND.cz) / off) * 115;
-    }
+    const half = MAP_BOX.size / 2;
+    this.cx = Math.min(MAP_BOX.x + half + 140, Math.max(MAP_BOX.x + half - 140, this.cx));
+    this.cz = Math.min(MAP_BOX.z + half + 140, Math.max(MAP_BOX.z + half - 140, this.cz));
     const g = this.ctx;
     const s = this.scale;
     const X = (x: number) => w / 2 + (x - this.cx) * s;

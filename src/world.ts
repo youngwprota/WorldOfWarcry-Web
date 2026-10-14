@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, type SpawnerDef, type FactionId, type ZoneId } from './config';
+import { FACTIONS, GLOVES_BANDITS, GLOVES_MURLOCS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
-  ARENA, FORT, GATE, ISLAND, MAP_BOX, PATH, PATH_W, GATES, RIDGES, angleOf, gateDist, edgePoint, heightAt, inCamp, pathAt, pathDist, progressAt, rimCliff, rimTrees,
-  shoreR, walkR, walkable, zoneAt, zoneIdAt, zoneWeights,
+  ARENA, BORDER, BORDER_GATE_R, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_MINI, GATE, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
+  pathAt, pathDist, progressAt, ridgeAway, ridgeDist, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
 } from './island';
 import type { Gate } from './island';
 import {
@@ -75,6 +75,10 @@ const leaf = (r: () => number) => LEAF_TINTS[Math.floor(r() * LEAF_TINTS.length)
 /** Position in a local frame: `fwd` along angle a (0 = +Z), `side` to its local +X. */
 const local = (cx: number, cz: number, a: number, side: number, fwd: number) =>
   ({ x: cx + side * Math.cos(a) + fwd * Math.sin(a), z: cz - side * Math.sin(a) + fwd * Math.cos(a) });
+/** Position in the frame of the camp exit: `side` to the left as seen walking out, `fwd` outward. */
+const campGate = (side: number, fwd: number) => local(CAMP_EXIT.x, CAMP_EXIT.z, Math.atan2(CAMP_EXIT.dirX, CAMP_EXIT.dirZ), side, fwd);
+/** The gloves elite (bandit_veteran): between the pond and the trail out of the settlement. */
+const GLOVES_AT: [number, number] = [20, -77];
 /** Angle (0 = +Z) of the trail where it leaves a circle of radius r around a point, going backward or forward. */
 function trailExit(cx: number, cz: number, r: number, forward: boolean) {
   const sc = progressAt(cx, cz);
@@ -102,6 +106,8 @@ export class World {
   /** Every spawner on the island: mobs and breakable props alike. */
   readonly spawns: SpawnPoint[] = [];
   readonly bosses: { mob: string; x: number; z: number }[] = [];
+  /** Trail point just outside the bandit fort's entrance and the trail direction there (where reinforcements arrive). */
+  readonly fortExit = { x: 0, z: 0, tx: 0, tz: 0 };
   readonly ponds: Pond[] = [{ x: 11, z: -83, r: 5 }];
   /** Baked island picture (ground + ocean) for the minimap and the world map; see mapToCanvas. */
   readonly mapCanvas: HTMLCanvasElement;
@@ -132,6 +138,7 @@ export class World {
     this.buildForest();
     this.buildBarrier();
     this.buildCemetery();
+    this.buildOuterLands();
     this.buildRim();
     const free = (x: number, z: number) => this.free(x, z, 0.2);
     this.grass = [buildGrass(free, this.ponds), buildFlowers(free)];
@@ -285,15 +292,15 @@ export class World {
   }
 
   /** Bare spooky trees: instanced trunk + three crooked branches. */
-  private deadTrees(items: Inst[]) {
-    for (const band of bands(items)) this.deadTreeBand(band);
+  private deadTrees(items: Inst[], color = 0x4a3f5a) {
+    for (const band of bands(items)) this.deadTreeBand(band, color);
   }
 
-  private deadTreeBand(items: Inst[]) {
+  private deadTreeBand(items: Inst[], color: number) {
     if (!items.length) return;
     const trunk = new THREE.CylinderGeometry(0.12, 0.3, 2.6, 6).translate(0, 1.3, 0);
     const branch = new THREE.CylinderGeometry(0.04, 0.1, 1.5, 5).translate(0, 0.75, 0);
-    const mat = new THREE.MeshLambertMaterial({ color: 0x4a3f5a, flatShading: true });
+    const mat = new THREE.MeshLambertMaterial({ color, flatShading: true });
     const trunks = new THREE.InstancedMesh(trunk, mat, items.length);
     const branches = new THREE.InstancedMesh(branch, mat, items.length * 4);
     const m = new THREE.Matrix4();
@@ -351,19 +358,31 @@ export class World {
    * 6–13 m off it and away from each other (no clumps). Each spawn gets `depth` 0..1
    * (first..last) for zone depth scaling.
    */
-  private mobsAlong(ranges: [number, number][], mobs: SpawnerDef[], zone: ZoneId, r: () => number) {
+  private mobsAlong(ranges: [number, number][], mobs: SpawnerDef[], zone: ZoneId, r: () => number, pins: Record<string, [number, number]> = {}) {
     const total = ranges.reduce((t, [a, b]) => t + (b - a), 0);
     const sAt = (d: number) => {
       for (const [a, b] of ranges) { if (d <= b - a) return a + d; d -= b - a; }
       return ranges[ranges.length - 1][1];
     };
+    this.mobsOnCurve(total, (d) => pathAt(sAt(d)), mobs, zone, r, pins);
+  }
+
+  /** mobsAlong() for any curve: `at(d)` gives the point and unit tangent at distance d of `total`. */
+  private mobsOnCurve(total: number, at: (d: number) => { x: number; z: number; tx: number; tz: number }, mobs: SpawnerDef[], zone: ZoneId, r: () => number, pins: Record<string, [number, number]> = {}) {
     const ok = (q: { x: number; z: number }) => walkable(q.x, q.z, 3) && zoneIdAt(q.x, q.z) === zone && pathDist(q.x, q.z) > 4 && !inCamp(q.x, q.z, 4)
       && !this.packCenters.some(([x, z]) => Math.hypot(x - q.x, z - q.z) < 9);
     mobs.forEach((def, i) => {
+      const pin = pins[def.id];
+      if (pin) {
+        this.packCenters.push(pin);
+        this.taken.push(pin);
+        this.addSpawn(`${zone}:${i}`, def, pin[0], pin[1], zone, mobs.length > 1 ? i / (mobs.length - 1) : 0, 0);
+        return;
+      }
       const d = ((i + 0.5) / mobs.length) * total;
       let c: { x: number; z: number } | null = null;
       for (const ds of [0, 4, -4, 8, -8]) {
-        const p = pathAt(sAt(Math.min(total, Math.max(0, d + ds))));
+        const p = at(Math.min(total, Math.max(0, d + ds)));
         for (const side of [i % 2 ? 1 : -1, i % 2 ? -1 : 1]) {
           for (const off of i % 4 < 2 ? [7, 10, 13] : [12, 9, 6]) {
             const q = { x: p.x + p.tz * side * off, z: p.z - p.tx * side * off };
@@ -373,7 +392,7 @@ export class World {
         }
         if (c) break;
       }
-      if (!c) { const p = pathAt(sAt(d)); c = { x: p.x + p.tz * 6, z: p.z - p.tx * 6 }; }
+      if (!c) { const p = at(d); c = { x: p.x + p.tz * 6, z: p.z - p.tx * 6 }; }
       c.x += (r() - 0.5) * 1.5;
       c.z += (r() - 0.5) * 1.5;
       this.packCenters.push([c.x, c.z]);
@@ -386,54 +405,58 @@ export class World {
   private buildCamp() {
     const H = this.faction === 'human';
     const cz = ISLAND.campZ;
-    // palisade around the camp, gate to the north (towards the forest)
-    this.palisade(0, cz, 16.5, [Math.PI], 0.27);
+    // palisade around the camp; the wide gate faces the trail
+    this.palisade(0, cz, CAMP_WALL, [Math.atan2(CAMP_EXIT.dirX, CAMP_EXIT.dirZ)], 0.4);
     const tower = H ? 'tower_human_small_1' : 'orc_high_stand';
-    this.place(tower, -5.4, cz - 15.8, H ? 0.75 : 0.65, 0, 1.4);
-    this.place(tower, 5.4, cz - 15.8, H ? 0.75 : 0.65, 0, 1.4);
     // buildings of the hero's race around the plaza
     const B = H
       ? { big: 'human_house_large', mid: 'human_house_mid', small: 'human_house_small', barrack: 'barrack_Lv2', tower: 'tower_big' }
       : { big: 'orc_house_Lv2', mid: 'orc_house_Lv1', small: 'orc_cabin', barrack: 'orc_barrack_Lv2', tower: 'orc_tower_Lv2' };
-    this.place(B.big, -10, cz + 8.5, 0.62, Math.PI * 0.8);
-    this.place(B.mid, 10, cz + 9, 0.62, -Math.PI * 0.78);
-    this.place(B.small, -11.5, cz - 3.5, H ? 0.62 : 0.85, Math.PI / 2);
-    this.place(B.barrack, 0, cz + 12.5, 0.5, Math.PI);
-    this.place(B.tower, -12.5, cz - 11, 0.45, 0.6);
+    this.place(B.big, -8.5, cz + 7.2, 0.62, Math.PI * 0.8);
+    this.place(B.mid, 8.5, cz + 7.7, 0.62, -Math.PI * 0.78);
+    this.place(B.small, -9.8, cz - 3, H ? 0.62 : 0.85, Math.PI / 2);
+    this.place(B.barrack, 0, cz + 10.6, 0.5, Math.PI);
+    this.place(B.tower, -10, cz - 8.8, 0.45, 0.6);
     // yard props
     const f = FACTIONS[this.faction];
-    this.place(f.campProps[0], -3.2, cz - 13.8, 0.42, 0, 0.4); // banners at the gate
-    this.place(f.campProps[0], 3.2, cz - 13.8, 0.42, 0, 0.4);
-    this.place(H ? 'practice_dummy' : 'orc_practice_dummy', -7.5, cz - 8.5, 0.65, 0.2, 0.5);
-    this.place(H ? 'practice_dummy' : 'orc_practice_dummy', -9.8, cz - 7.2, 0.65, -0.4, 0.5);
-    this.place(H ? 'target' : 'orc_practice_aim', 8.5, cz - 9.5, 0.9, -0.3, 0.5);
-    this.place('elf_well', 4.5, cz + 4.5, 0.36, 0, 1.0);
-    this.place(H ? 'wood_pile_big' : 'orc_wood_pile_big', -14, cz + 2, 0.5, 0.4);
-    this.place(H ? 'wood_pile_small' : 'orc_wood_pile_small', 13.2, cz + 3.5, 0.65, 1.2);
-    this.place(H ? 'lantern_street' : 'orc_head_lantern', -2.6, cz - 7.5, H ? 0.6 : 0.45, 0, 0.3);
-    this.place(H ? 'lantern_street' : 'orc_head_lantern', 2.6, cz - 7.5, H ? 0.6 : 0.45, Math.PI, 0.3);
-    this.place(H ? 'lantern_street' : 'orc_head_lantern', -6, cz + 5.5, H ? 0.6 : 0.45, 0.8, 0.3);
-    this.place(H ? 'flag' : 'orc_flag_red', 0, cz + 8.5, 0.7, 0, 0.3);
+    for (const side of [-1, 1]) {
+      const t = campGate(side * 6.3, -0.7);
+      this.place(tower, t.x, t.z, H ? 0.75 : 0.65, 0, 1.4);
+      const b = campGate(side * 3.6, -2.4); // banners at the gate
+      this.place(f.campProps[0], b.x, b.z, 0.42, 0, 0.4);
+      const l = campGate(side * 2.8, -7.6);
+      this.place(H ? 'lantern_street' : 'orc_head_lantern', l.x, l.z, H ? 0.6 : 0.45, side > 0 ? 0 : Math.PI, 0.3);
+      if (!H) { const k = campGate(side * 5.2, 0); this.place('orc_horned_skull', k.x, k.z, 1.2, 0, 0); }
+    }
+    this.place(H ? 'practice_dummy' : 'orc_practice_dummy', -6.4, cz - 7.2, 0.65, 0.2, 0.5);
+    this.place(H ? 'practice_dummy' : 'orc_practice_dummy', -8.3, cz - 6.1, 0.65, -0.4, 0.5);
+    this.place(H ? 'target' : 'orc_practice_aim', 10.6, cz - 2, 0.9, -0.3, 0.5);
+    this.place('elf_well', 3.8, cz + 3.8, 0.36, 0, 1.0);
+    this.place(H ? 'wood_pile_big' : 'orc_wood_pile_big', -11.9, cz + 1.7, 0.5, 0.4);
+    this.place(H ? 'wood_pile_small' : 'orc_wood_pile_small', 11.2, cz + 3, 0.65, 1.2);
+    this.place(H ? 'lantern_street' : 'orc_head_lantern', -5.1, cz + 4.7, H ? 0.6 : 0.45, 0.8, 0.3);
+    this.place(H ? 'flag' : 'orc_flag_red', 0, cz + 7.2, 0.7, 0, 0.3);
     // clutter: crates & barrels stacked by the walls (decor, not breakable)
     const crates: [string, number, number, number][] = [
-      ['box_large_2', -6.5, cz + 11, 0.4], ['box_small_2', -5.4, cz + 11.6, 0.9], ['barrel', 6.2, cz + 11.2, 0.3],
-      ['box_large_2', 14, cz - 7, 1], ['barrel', 13, cz - 8.3, 0.2], ['box_small_2', -14.2, cz - 8, 0.6],
-      ['bucket', 5.6, cz + 3, 0], ['barrel', -13.4, cz + 5.8, 0.7],
+      ['box_large_2', -5.5, cz + 9.4, 0.4], ['box_small_2', -4.6, cz + 9.9, 0.9], ['barrel', 5.3, cz + 9.5, 0.3],
+      ['box_large_2', 11.9, cz - 6, 1], ['barrel', 11, cz - 7, 0.2], ['box_small_2', -12, cz - 6.8, 0.6],
+      ['bucket', 4.8, cz + 2.6, 0], ['barrel', -11.4, cz + 4.9, 0.7],
     ];
     for (const [n, x, z, rr] of crates) this.place(H ? n : n === 'barrel' ? 'orc_barrel' : n.startsWith('box_large') ? 'orc_box_large_2' : n === 'bucket' ? 'orc_bucket' : 'orc_box_small_1', x, z, 0.8, rr, 0.5);
     if (!H) {
-      this.place('orc_drum_big', -3.6, cz + 8.6, 0.45, 0.5, 0.6);
-      this.place('orc_altar', 3.8, cz + 8.8, 0.55, 0, 0.8);
-      for (const [x, z] of [[-4.4, cz - 16.6], [4.4, cz - 16.6]]) this.place('orc_horned_skull', x, z, 1.2, 0, 0);
+      this.place('orc_drum_big', -3.1, cz + 7.3, 0.45, 0.5, 0.6);
+      this.place('orc_altar', 3.2, cz + 7.5, 0.55, 0, 0.8);
     } else {
-      this.place('cauldron', -3.8, cz + 8.6, 0.55, 0, 0.5);
-      this.place('shield', 11.6, cz - 6.5, 0.8, -Math.PI / 2, 0);
-      this.place('spear', 11.6, cz - 7.3, 0.8, -Math.PI / 2, 0);
+      this.place('cauldron', -3.2, cz + 7.3, 0.55, 0, 0.5);
+      this.place('shield', 9.9, cz - 5.5, 0.8, -Math.PI / 2, 0);
+      this.place('spear', 9.9, cz - 6.2, 0.8, -Math.PI / 2, 0);
     }
-    this.campfireDecor(-4.5, cz - 1); // decoration only
-    // camp crates (tutorial-ish), just outside the gate
-    const spots = [[-6, -18.5], [-5, -20], [5, -19.5], [6, -18], [-7, -21], [7, -21]];
-    PROP_SPAWNERS.camp.slice(0, spots.length).forEach((d, i) => this.addProp('camp', i, d, spots[i][0], cz + spots[i][1], 'forest', spots[i][0]));
+    this.campfireDecor(-3.8, cz - 0.8); // decoration only
+    // breakable supply crates inside the camp, left and right of the spawn, clear of the walk to the exit
+    const spots = [[6.5, -6], [8, -4.6], [6.6, 1.4], [7.9, 0.6], [-6, -4], [-7, -2.2], [-6.8, 2.6], [-6.2, 1.6]];
+    PROP_SPAWNERS.camp.slice(0, spots.length).forEach((d, i) => {
+      this.addProp('camp', i, d, spots[i][0], cz + spots[i][1], 'forest', i * 1.3);
+    });
   }
 
   /** A spawner from the config; without `charges` it has one endless charge with the unit's own respawn time. */
@@ -458,18 +481,116 @@ export class World {
     this.flames.push(flame);
   }
 
+  /** Big houses at the user's map marks, each turned to face the nearest trail (long side along it). */
+  private hubHouses() {
+    const kit: [string, number, number][] = [
+      ['house_Lv1', -10.2, -94.8], ['human_house_mid', 24.1, -90.3], ['house_Lv2', -37.8, -77.2], ['house_Lv1', -20, -61.3],
+      ['human_house_mid', 15.5, -56.8], ['human_house_large', -20, -44.4], ['house_Lv2', 23.6, -18.4], ['house_Lv1', 15.5, -8.5],
+    ];
+    const curves = [PATH, ...BRANCH_PATHS];
+    for (const [name, x0, z0] of kit) {
+      let best = Infinity;
+      let nx = x0;
+      let nz = z0;
+      for (const c of curves) {
+        for (let i = 0; i < c.x.length; i += 2) {
+          const d = (c.x[i] - x0) ** 2 + (c.z[i] - z0) ** 2;
+          if (d < best) { best = d; nx = c.x[i]; nz = c.z[i]; }
+        }
+      }
+      const d = Math.sqrt(best) || 1;
+      // keep 5 m off the trail, clear of the camp wall, then step off the coast / ridge border until there is room
+      let x = d < 5 ? nx + ((x0 - nx) / d) * 5 : x0;
+      let z = d < 5 ? nz + ((z0 - nz) / d) * 5 : z0;
+      const c = Math.hypot(x - ISLAND.campX, z - ISLAND.campZ) || 1;
+      if (c < ISLAND.campR + 4) {
+        x = ISLAND.campX + ((x - ISLAND.campX) / c) * (ISLAND.campR + 4);
+        z = ISLAND.campZ + ((z - ISLAND.campZ) / c) * (ISLAND.campR + 4);
+      }
+      for (let k = 0; k < 20 && !walkable(x, z, 3); k++) {
+        const n = outside(x, z) > -3 ? inland(x, z) : ridgeAway(x, z);
+        x += n.x * 0.5;
+        z += n.z * 0.5;
+      }
+      this.place(name, x, z, 0.5, Math.atan2(nx - x, nz - z));
+      this.packCenters.push([x, z]);
+    }
+  }
+
+  /** Three single murlocs beside the trail next to the gloves elite, two bandit pairs in the trees by it. */
+  private glovesGuards() {
+    const s0 = progressAt(24, -84);
+    GLOVES_MURLOCS.forEach((d, i) => {
+      const p = pathAt(s0 + (i - 1) * 9);
+      // the side of the trail facing the elite
+      const side = Math.sign((GLOVES_AT[0] - p.x) * p.tz - (GLOVES_AT[1] - p.z) * p.tx) || 1;
+      const x = p.x + p.tz * side * (PATH_W + 2);
+      const z = p.z - p.tx * side * (PATH_W + 2);
+      this.packCenters.push([x, z]);
+      this.addSpawn(`forest:gloves:m${i}`, d, x, z, 'forest', 0.3, 0);
+    });
+    const packs = [[14, -74], [27, -76]];
+    GLOVES_BANDITS.forEach((d, i) => {
+      const [px, pz] = packs[i >> 1];
+      const x = px + (i & 1 ? 1.6 : -1.6);
+      this.taken.push([x, pz]);
+      this.addSpawn(`forest:gloves:b${i}`, d, x, pz, 'forest', 0.3, 0);
+    });
+    for (const p of packs) this.packCenters.push([p[0], p[1]]);
+  }
+
+  /** Wood north of the straight line from the settlement to the fort (hard to push through), bandits either side ([along, side] m). */
+  private campToFort(r: () => number) {
+    const ax = ISLAND.campX;
+    const az = ISLAND.campZ;
+    const len = Math.hypot(FORT.x - ax, FORT.z - az);
+    const dx = (FORT.x - ax) / len;
+    const dz = (FORT.z - az) / len;
+    const at = ([u, v]: number[]) => ({ x: ax + u * dx - v * dz, z: az + u * dz + v * dx });
+    const ok = (x: number, z: number) => this.free(x, z, 1.2) && pathDist(x, z) > PATH_W + 1
+      && !inCamp(x, z, 1) && Math.hypot(x - FORT.x, z - FORT.z) > FORT.r + 1.5;
+    const trees: Inst[] = [];
+    for (const uv of [
+      [14.5, -2], [16.5, -4.5], [17.5, -1.5], [19.5, -6], [20, -3], [22, -1.2], [22.5, -5], [24.5, -7.5], [25, -3],
+      [27, -5.5], [28, -9], [29.5, -3.5], [30.5, -7], [32, -10],
+    ]) {
+      const { x, z } = at(uv);
+      if (!ok(x, z)) continue;
+      trees.push({ x, z, s: 0.6 + r() * 0.3, r: r() * 6, tint: leaf(r) });
+      this.obstacles.push({ x, z, r: 0.5 });
+    }
+    this.scatter('elf_tree', trees);
+    [[18, 1], [24, 1.5], [27.5, 0], [20.7, 6.9], [17.5, 4.5]].forEach((uv, i) => {
+      const { x, z } = at(uv);
+      if (!ok(x, z)) return;
+      this.taken.push([x, z]);
+      this.addSpawn(`forest:mid:${i}`, MID_SPAWNERS[i], x, z, 'forest', 0.5, 0);
+    });
+  }
+
   // ---------- forest: the hub in the middle of the island, the settlement at its centre ----------
   private buildForest() {
     const r = rng(23);
     const H = this.faction === 'human';
     const sFort = progressAt(FORT.x, FORT.z);
     const s0 = progressAt(-3, -80);
-    const s1 = sFort - 16;
-    this.mobsAlong([[s0, s1], [sFort + 15, GATE.s - 10]], SPAWNERS.forest ?? [], 'forest', r);
+    this.hubHouses();
+    // The guards come first so the roaming mobs keep away from them.
+    let gi = 0;
+    for (const [id, spots] of [['boss_guard', BOSS_GUARDS], ['gate_guard', GATE_GUARDS]] as const) {
+      for (const p of spots) {
+        this.packCenters.push([p.x, p.z]);
+        this.taken.push([p.x, p.z]);
+        this.addSpawn(`forest:guard:${gi++}`, { unit: 'mob', id }, p.x, p.z, 'forest', 0, 0);
+      }
+    }
+    // Pinned: the mini-boss, the armour and gloves elites, «Громила» by the hills door; the rest spread along the trail up to the fort.
+    this.mobsAlong([[s0, sFort - 28]], SPAWNERS.forest ?? [], 'forest', r, { bandit_warlord: FOREST_MINI, bandit_lumberjack: [-28, -82], bandit_veteran: GLOVES_AT, bandit_brute: [-44, -60] });
+    this.campToFort(r);
+    this.glovesGuards();
 
     // Lumber camp in the north-east of the forest
     const L = { x: 28, z: -68 };
-    this.place('woodcutter_building', L.x + 4, L.z + 2, 0.55, -Math.PI / 2);
     this.place('wood_pile_big', L.x - 1.5, L.z + 6.5, 0.5, 0.3);
     this.place('elf_log_pile', L.x - 2, L.z - 3, 0.5, 1.2);
     this.place('saw', L.x + 1.5, L.z - 6, 0.45, 0.4, 0.8);
@@ -503,7 +624,6 @@ export class World {
     };
     if (H) {
       deco('orc_tower_Lv2', -8.5, -7, 0.38, 0.4);
-      deco('orc_tower_Lv2', 8.5, -7, 0.38, -0.4);
       deco('orc_throne', -6, -8.5, 0.9, 0.5, 1);
       deco('orc_drum_big', -9.8, 1, 0.45, 0.5, 0.7);
       deco('orc_tusk_standing', -4.6, 12.4, 0.9, 0.3, 0.5);
@@ -511,11 +631,19 @@ export class World {
       deco('orc_horned_skull', -6, -10, 1.4, 0, 0);
     } else {
       deco('tower_Lv2', -8.5, -7, 0.38, 0.4);
-      deco('tower_Lv2', 8.5, -7, 0.38, -0.4);
       deco('throne_Lv1', -6, -9, 0.3, 0.5, 1.4);
       deco('banner', -4.6, 12.4, 0.45, 0, 0.4);
       deco('banner', 4.6, 12.4, 0.45, 0, 0.4);
     }
+    // the second tower is a real one: a turret prop that can be destroyed (BREAKABLES.fort_tower_*), south of the boss, clear of the ridge border
+    const tp = { x: fx - 1, z: fz + 6 };
+    this.addSpawn('forest:fort_tower', { unit: 'prop', id: H ? 'fort_tower_orc' : 'fort_tower_human' }, tp.x, tp.z, 'forest', 0, aIn - 0.4);
+    this.obstacles.push({ x: tp.x, z: tp.z, r: BREAKABLES[H ? 'fort_tower_orc' : 'fort_tower_human'].r });
+    const aFar = trailExit(fx, fz, FORT.r + 1.5, false);
+    const ex = fx + Math.sin(aFar) * (FORT.r + 1.5);
+    const ez = fz + Math.cos(aFar) * (FORT.r + 1.5);
+    const dir = pathAt(progressAt(ex, ez));
+    Object.assign(this.fortExit, { x: ex, z: ez, tx: dir.tx, tz: dir.tz });
     deco(H ? 'orc_beam_pile' : 'wood_pile_big', -9.5, 4.5, 0.5, 0.6);
     deco(H ? 'orc_wood_pile_small' : 'wood_pile_small', 9.8, -2, 0.65, 1.1);
     deco(H ? 'orc_box_large_2' : 'box_large_2', 9.2, 4, 0.8, 0.3, 0.6);
@@ -548,7 +676,13 @@ export class World {
       const d = Math.sqrt(r()) * 56;
       return { x: ISLAND.cx + Math.sin(a) * d, z: ISLAND.cz + Math.cos(a) * d };
     };
-    for (const { x, z } of this.spread(85, 7, randomSpot, open)) {
+    // the old fort clearing (north-west) is grown over with a denser wood
+    const woodSpot = () => {
+      const a = r() * Math.PI * 2;
+      const d = Math.sqrt(r()) * 14;
+      return { x: -22 + Math.sin(a) * d, z: -75 + Math.cos(a) * d };
+    };
+    for (const { x, z } of [...this.spread(85, 7, randomSpot, open), ...this.spread(16, 4.5, woodSpot, open)]) {
       const t = r();
       if (t < 0.5) {
         trees.push({ x, z, s: 0.55 + r() * 0.35, r: r() * 6, tint: leaf(r) });
@@ -576,7 +710,7 @@ export class World {
     // Breakables: single barrels/boxes/bushes beside the trail, well apart
     const nearTrail = () => {
       const p = pathAt(s0 - 6 + r() * (GATE.s - s0));
-      const off = (r() < 0.5 ? -1 : 1) * (2 + r() * 9);
+      const off = (r() < 0.5 ? -1 : 1) * (PATH_W + 1 + r() * 2);
       return { x: p.x + p.tz * off, z: p.z - p.tx * off };
     };
     const okProp = (x: number, z: number) =>
@@ -642,36 +776,23 @@ export class World {
     const trees: Inst[] = [];
     const dead: Inst[] = [];
     const boulders: Inst[] = [];
-    for (const line of RIDGES) {
-      let carry = 0;
-      for (let i = 1; i < line.length - 1; i++) {
-        const [x, z] = line[i];
-        carry += Math.hypot(x - line[i - 1][0], z - line[i - 1][1]);
-        if (carry < 1.7) continue;
-        carry = 0;
-        if (Math.hypot(x - ISLAND.cx, z - ISLAND.cz) > shoreR(angleOf(x, z)) + 2) continue;
-        if (gateDist(x, z) < 5.5) continue;
-        // unit normal of the line
-        let nx = line[i + 1][1] - line[i - 1][1];
-        let nz = -(line[i + 1][0] - line[i - 1][0]);
-        const nl = Math.hypot(nx, nz) || 1;
-        nx /= nl;
-        nz /= nl;
-        for (const k of [-1, 1]) this.obstacles.push({ x: x + nx * k, z: z + nz * k, r: 1.4 });
-        boulders.push({ x: x + (r() - 0.5) * 1.6, z: z + (r() - 0.5) * 1.6, s: 0.5 + r() * 0.35, r: r() * 6 });
-        for (const side of [-1, 1]) {
-          if (r() > 0.3) continue;
-          const d = 3.6 + r() * 1.5;
-          const tx = x + nx * side * d;
-          const tz = z + nz * side * d;
-          if (!walkable(tx, tz, 0.3) || inCamp(tx, tz, 2) || pathDist(tx, tz) < 2) continue;
-          if (zoneIdAt(tx, tz) === 'cemetery') {
-            dead.push({ x: tx, z: tz, s: 0.9 + r() * 0.4, r: r() * 6 });
-            this.obstacles.push({ x: tx, z: tz, r: 0.45 });
-          } else {
-            trees.push({ x: tx, z: tz, s: 0.55 + r() * 0.25, r: r() * 6, tint: leaf(r) });
-            this.obstacles.push({ x: tx, z: tz, r: 0.5 });
-          }
+    for (const { x, z, nx, nz } of RIDGE_POINTS) {
+      if (coastDist(x, z) < -2) continue;
+      if (gateDist(x, z) < 5.5) continue;
+      for (const k of [-1, 1]) this.obstacles.push({ x: x + nx * k, z: z + nz * k, r: 1.4 });
+      boulders.push({ x: x + (r() - 0.5) * 1.6, z: z + (r() - 0.5) * 1.6, s: 0.5 + r() * 0.35, r: r() * 6 });
+      for (const side of [-1, 1]) {
+        if (r() > 0.3) continue;
+        const d = 3.6 + r() * 1.5;
+        const tx = x + nx * side * d;
+        const tz = z + nz * side * d;
+        if (!walkable(tx, tz, 0.3) || inCamp(tx, tz, 2) || pathDist(tx, tz) < 2) continue;
+        if (zoneIdAt(tx, tz) === 'cemetery') {
+          dead.push({ x: tx, z: tz, s: 0.9 + r() * 0.4, r: r() * 6 });
+          this.obstacles.push({ x: tx, z: tz, r: 0.45 });
+        } else {
+          trees.push({ x: tx, z: tz, s: 0.55 + r() * 0.25, r: r() * 6, tint: leaf(r) });
+          this.obstacles.push({ x: tx, z: tz, r: 0.5 });
         }
       }
     }
@@ -805,6 +926,100 @@ export class World {
     this.deadTrees(deadTrees);
   }
 
+  // ---------- outer locations: mobs along their paths, a main boss, «Свирепый вожак» mini-bosses, Snow Pass trees ----------
+  private buildOuterLands() {
+    const r = rng(61);
+    const PATH_OF: Partial<Record<ZoneId, number>> = { hills: 0, grove: 1, swamp: 2, dunes: 3, peaks: 4 };
+    const BOSS_OF: Partial<Record<ZoneId, string>> = { peaks: 'elf_queen', hills: 'orc_shaman', grove: 'elf_priestess', swamp: 'murloc_king', dunes: 'sand_boar' };
+    for (const zone of ['peaks', 'hills', 'grove'] as const) {
+      const line = LAND_TRAILS[PATH_OF[zone]!];
+      const seg = line.slice(1).map((p, i) => Math.hypot(p[0] - line[i][0], p[1] - line[i][1]));
+      const total = seg.reduce((a, b) => a + b, 0);
+      const at = (d: number) => {
+        let i = 0;
+        while (i < seg.length - 1 && d > seg[i]) d -= seg[i++];
+        const k = Math.min(1, d / seg[i]);
+        const [x0, z0] = line[i];
+        const [x1, z1] = line[i + 1];
+        return { x: x0 + (x1 - x0) * k, z: z0 + (z1 - z0) * k, tx: (x1 - x0) / seg[i], tz: (z1 - z0) / seg[i] };
+      };
+      this.mobsOnCurve(total, at, SPAWNERS[zone] ?? [], zone, r);
+    }
+    for (const land of LAND_BOSSES) {
+      if (land.boss) {
+        const p = this.spotIn(land.zone, land.boss[0], land.boss[1], 4);
+        this.bosses.push({ mob: BOSS_OF[land.zone]!, x: p.x, z: p.z });
+        this.packCenters.push([p.x, p.z]);
+        if (land.zone === 'peaks') this.frozenOutpost(p.x, p.z);
+      }
+      land.minis.forEach(([x0, z0], i) => {
+        const p = this.spotIn(land.zone, x0, z0, 3);
+        this.packCenters.push([p.x, p.z]);
+        this.addSpawn(`mini:${land.zone}:${i}`, MINI_SPAWNER_OF[land.zone] ?? MINI_SPAWNER, p.x, p.z, land.zone, 0, 0);
+      });
+    }
+    // Snow Pass: grey frosted trees, pines, bare trees, stumps, rocks and log piles
+    const GREYS = [0xb4b8bd, 0xc6c9cc, 0xa3a8ae, 0xd3d5d7];
+    const trees: Inst[] = [];
+    const pines: Inst[] = [];
+    const bare: Inst[] = [];
+    const stumps: Inst[] = [];
+    const rocks: Inst[] = [];
+    const bigRocks: Inst[] = [];
+    const logs: Inst[] = [];
+    const inPass = () => ({ x: MAP_BOX.x + r() * MAP_BOX.size, z: MAP_BOX.z + r() * MAP_BOX.size });
+    const okTree = (x: number, z: number) => zoneIdAt(x, z) === 'peaks' && this.free(x, z, 1.2) && !this.nearPack(x, z, 5) && gateDist(x, z) > 7
+      && !LAND_TRAILS[4].some(([px, pz]) => Math.hypot(px - x, pz - z) < 4);
+    for (const { x, z } of this.spread(70, 6, inPass, okTree)) {
+      const k = r();
+      const tint = GREYS[Math.floor(r() * GREYS.length)];
+      if (k < 0.35) trees.push({ x, z, s: 0.55 + r() * 0.35, r: r() * 6, tint });
+      else if (k < 0.75) pines.push({ x, z, s: 0.9 + r() * 0.4, r: r() * 6, tint });
+      else bare.push({ x, z, s: 0.8 + r() * 0.4, r: r() * 6 });
+      this.obstacles.push({ x, z, r: 0.5 });
+    }
+    for (const { x, z } of this.spread(45, 4, inPass, okTree)) {
+      const k = r();
+      const it = { x, z, s: 0, r: r() * 6, tint: GREYS[Math.floor(r() * GREYS.length)] };
+      if (k < 0.3) stumps.push({ ...it, s: 0.3 + r() * 0.2 });
+      else if (k < 0.75) rocks.push({ ...it, s: 0.6 + r() * 0.5 });
+      else if (k < 0.92) { bigRocks.push({ ...it, s: 0.5 + r() * 0.3 }); this.obstacles.push({ x, z, r: 1 }); }
+      else { logs.push({ ...it, s: 0.5 }); this.obstacles.push({ x, z, r: 0.8 }); }
+    }
+    this.scatter('elf_tree', trees);
+    this.pines(pines);
+    this.deadTrees(bare, 0x6e6a66);
+    this.scatter('elf_tree_root_1', stumps, false);
+    this.scatter('elf_rock_small', rocks, false);
+    this.scatter('elf_rock_big', bigRocks);
+    this.scatter('elf_log_pile', logs);
+  }
+
+  /** Stone elf buildings round the Snow Pass boss, frosted (pale blue-white tint). */
+  private frozenOutpost(cx: number, cz: number) {
+    const FROST = 0xdce8f6;
+    const kit: [string, number, number, number][] = [['elf_throne_Lv1', 0, -9, 0.5], ['elf_oracle_Lv1', -12, 2, 0.5], ['elf_mine_Lv1', 12, 3, 0.5], ['elf_fountain', 0, 10, 0.5]];
+    for (const [name, dx, dz, scale] of kit) {
+      const p = this.spotIn('peaks', cx + dx, cz + dz, 3);
+      if (!this.free(p.x, p.z, 3)) continue;
+      const rot = Math.atan2(cx - p.x, cz - p.z);
+      this.scatter(name, [{ x: p.x, z: p.z, s: scale, r: rot, tint: FROST }]);
+      this.obstacles.push({ x: p.x, z: p.z, r: Math.min(this.size(name).x, this.size(name).z) * scale * 0.45 });
+    }
+  }
+
+  /** The walkable spot of `zone` nearest to (x, z), with `pad` metres of room (searched in rings). */
+  private spotIn(zone: ZoneId, x: number, z: number, pad: number) {
+    for (let d = 0; d < 40; d += 1) {
+      for (let k = 0; k < Math.max(1, d * 6); k++) {
+        const a = (k / Math.max(1, d * 6)) * Math.PI * 2;
+        const q = { x: x + Math.sin(a) * d, z: z + Math.cos(a) * d };
+        if (zoneIdAt(q.x, q.z) === zone && walkable(q.x, q.z, pad)) return q;
+      }
+    }
+    return { x, z };
+  }
+
   // ---------- island rim: sandy beaches, tree banks and cliffs down to the sea ----------
   private buildRim() {
     const r = rng(77);
@@ -816,21 +1031,22 @@ export class World {
     const pines: Inst[] = [];
     const logs: Inst[] = [];
     const PINE = [0x3f7a32, 0x4f8a3c, 0x5c9a40, 0x37702e];
-    for (let a = -Math.PI; a < Math.PI; a += 0.034) {
-      const rw = walkR(a);
-      const rs = shoreR(a);
-      const cliff = rimCliff(a);
-      const treeBank = rimTrees(a);
-      for (let k = 0; k < 4; k++) {
-        const aa = a + (r() - 0.5) * 0.03;
-        const d = rw + 1 + k * 3.2 + r() * 1.8;
-        const x = ISLAND.cx + Math.sin(aa) * d;
-        const z = ISLAND.cz + Math.cos(aa) * d;
+    // a jittered 3.3 m lattice over the band from just past the walkable edge out into the shallows
+    for (let gz = MAP_BOX.z; gz < MAP_BOX.z + MAP_BOX.size; gz += 3.3) {
+      for (let gx = MAP_BOX.x; gx < MAP_BOX.x + MAP_BOX.size; gx += 3.3) {
+        const x = gx + r() * 3.3;
+        const z = gz + r() * 3.3;
+        const o = outside(x, z) - 1;
+        if (o < 0 || o > 11.4) continue;
+        const k = Math.floor(o / 3.2); // 0 = next to the walkable edge … 3 = furthest out
+        const a = angleOf(x, z);
+        const cliff = rimCliff(a);
+        const treeBank = rimTrees(a);
         const h = heightAt(x, z);
         const s = 0.55 + r() * 0.45;
         if (h < ISLAND.water + 0.15) {
           // the odd sea stack just off cliffs
-          if (cliff > 0.5 && d < rs + 6 && r() < 0.08) rocks.push({ x, z, s: s * 1.1, r: r() * 6, y: ISLAND.water - 0.6 });
+          if (cliff > 0.5 && coastDist(x, z) > -6 && r() < 0.08) rocks.push({ x, z, s: s * 1.1, r: r() * 6, y: ISLAND.water - 0.6 });
           continue;
         }
         const cem = zoneIdAt(x, z) === 'cemetery';
@@ -934,13 +1150,17 @@ export class World {
     };
     for (const o of this.obstacles) push(o);
     for (const gt of this.gates) if (!gt.open) for (const o of gt.obstacles) push(o);
-    const dx = p.x - ISLAND.cx;
-    const dz = p.z - ISLAND.cz;
-    const d = Math.hypot(dx, dz);
-    const max = walkR(Math.atan2(dx, dz)) - radius * 0.5;
-    if (d > max) {
-      p.x = ISLAND.cx + (dx / d) * max;
-      p.z = ISLAND.cz + (dz / d) * max;
+    const o = outside(p.x, p.z) + radius * 0.5;
+    if (o > 0) {
+      const n = inland(p.x, p.z);
+      p.x += n.x * o;
+      p.z += n.z * o;
+    }
+    const b = BORDER - ridgeDist(p.x, p.z);
+    if (b > 0 && gateDist(p.x, p.z) > BORDER_GATE_R) {
+      const n = ridgeAway(p.x, p.z);
+      p.x += n.x * b;
+      p.z += n.z * b;
     }
   }
 }

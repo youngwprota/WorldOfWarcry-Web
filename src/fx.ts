@@ -114,42 +114,87 @@ export class Particles {
 
 /** Red ground warnings for boss attacks (GDD 10.6: 1–1.5 s, just run out of it). */
 export class Telegraphs {
-  private items: { outer: THREE.Mesh; inner: THREE.Mesh; t: number; dur: number; r: number; cb: () => void }[] = [];
+  private items: {
+    outer: THREE.Mesh; inner: THREE.Mesh; t: number; dur: number; r: number; cb: (tag?: unknown) => void; tag?: unknown;
+    ball?: THREE.Mesh; from?: THREE.Vector3; to?: THREE.Vector3;
+  }[] = [];
   private ringGeo = new THREE.RingGeometry(0.94, 1, 48).rotateX(-Math.PI / 2);
   private discGeo = new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2);
+  private ballGeo = new THREE.SphereGeometry(0.25, 8, 6);
+  private sectors = new Map<number, { fill: THREE.BufferGeometry; arc: THREE.BufferGeometry }>();
   private outerMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: 0.9, depthWrite: false });
   private fillMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: 0.28, depthWrite: false });
   private innerMat = new THREE.MeshBasicMaterial({ color: 0xff5a2a, transparent: true, opacity: 0.45, depthWrite: false });
+  private ballMat = new THREE.MeshBasicMaterial({ color: 0xff7a2a });
 
   constructor(private scene: THREE.Scene) {}
 
-  add(pos: THREE.Vector3, r: number, dur: number, cb: () => void) {
+  /** A circle; `from` makes a ball fly from that point and land in it when the time is up. */
+  add(pos: THREE.Vector3, r: number, dur: number, cb: (tag?: unknown) => void, tag?: unknown, from?: THREE.Vector3) {
     const outer = new THREE.Mesh(this.ringGeo, this.outerMat);
     const fill = new THREE.Mesh(this.discGeo, this.fillMat);
     outer.add(fill);
     const inner = new THREE.Mesh(this.discGeo, this.innerMat);
+    this.push(outer, inner, pos, r, dur, cb, tag);
+    if (!from) return;
+    const it = this.items[this.items.length - 1];
+    it.ball = new THREE.Mesh(this.ballGeo, this.ballMat);
+    it.from = from.clone();
+    it.to = pos.clone().setY(0.3);
+    this.scene.add(it.ball);
+  }
+
+  /** A sector of radius `len` around the direction `yaw` (0 = +Z), `half` rad to each side. */
+  addCone(pos: THREE.Vector3, yaw: number, half: number, len: number, dur: number, cb: (tag?: unknown) => void, tag?: unknown) {
+    let g = this.sectors.get(half);
+    if (!g) {
+      g = {
+        fill: new THREE.CircleGeometry(1, 24, -half, half * 2).rotateX(-Math.PI / 2),
+        arc: new THREE.RingGeometry(0.97, 1, 24, 1, -half, half * 2).rotateX(-Math.PI / 2),
+      };
+      this.sectors.set(half, g);
+    }
+    const outer = new THREE.Mesh(g.arc, this.outerMat);
+    outer.add(new THREE.Mesh(g.fill, this.fillMat));
+    const inner = new THREE.Mesh(g.fill, this.innerMat);
+    // the sector geometry points along +X; rotation.y = yaw - pi/2 turns it to the (sin yaw, cos yaw) direction
+    outer.rotation.y = inner.rotation.y = yaw - Math.PI / 2;
+    this.push(outer, inner, pos, len, dur, cb, tag);
+  }
+
+  private push(outer: THREE.Mesh, inner: THREE.Mesh, pos: THREE.Vector3, r: number, dur: number, cb: (tag?: unknown) => void, tag?: unknown) {
     outer.position.set(pos.x, 0.04, pos.z);
     inner.position.set(pos.x, 0.05, pos.z);
     outer.scale.setScalar(r);
     inner.scale.setScalar(0.001);
     this.scene.add(outer, inner);
-    this.items.push({ outer, inner, t: 0, dur, r, cb });
+    this.items.push({ outer, inner, t: 0, dur, r, cb, tag });
   }
 
   clear() {
-    for (const it of this.items) { this.scene.remove(it.outer, it.inner); }
+    for (const it of this.items) this.remove(it);
     this.items.length = 0;
+  }
+
+  private remove(it: Telegraphs['items'][number]) {
+    this.scene.remove(it.outer, it.inner);
+    if (it.ball) this.scene.remove(it.ball);
   }
 
   update(dt: number) {
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
       it.t += dt;
-      it.inner.scale.setScalar(Math.max(0.001, it.r * Math.min(1, it.t / it.dur)));
+      const k = Math.min(1, it.t / it.dur);
+      it.inner.scale.setScalar(Math.max(0.001, it.r * k));
+      if (it.ball) {
+        it.ball.position.lerpVectors(it.from!, it.to!, k);
+        it.ball.position.y += Math.sin(Math.PI * k) * 3;
+      }
       if (it.t >= it.dur) {
-        this.scene.remove(it.outer, it.inner);
+        this.remove(it);
         this.items.splice(i, 1);
-        it.cb();
+        it.cb(it.tag);
       }
     }
   }
@@ -200,7 +245,7 @@ export class Pickups {
     p.vel.set(Math.cos(a) * s, 5 + Math.random() * 3, Math.sin(a) * s);
   }
 
-  /** Equipment drop: a gem with a light beam in the rarity colour; collected like orbs but needs you to come closer. */
+  /** Equipment drop: a gem with a light beam in the rarity colour; flies to the hero like orbs. */
   spawnItem(pos: THREE.Vector3, item: Item) {
     const color = new THREE.Color(RARITY[item.rarity].color);
     const mesh = new THREE.Mesh(this.itemGeo, new THREE.MeshBasicMaterial({ color }));
@@ -213,7 +258,7 @@ export class Pickups {
     this.items.push({ mesh, kind: 'item', vel: new THREE.Vector3(Math.cos(a) * 2, 6, Math.sin(a) * 2), t: 0, active: true, item });
   }
 
-  update(dt: number, hero: THREE.Vector3, magnet: number) {
+  update(dt: number, hero: THREE.Vector3) {
     for (let i = this.items.length - 1; i >= 0; i--) {
       const p = this.items[i];
       const m = p.mesh;
@@ -228,13 +273,11 @@ export class Pickups {
       m.position.y = 0.7 + Math.sin(p.t * 3) * 0.12;
       tmp.set(hero.x, 0.9, hero.z).sub(m.position);
       const d = tmp.length();
-      if (d < 2.6) {
-        m.position.addScaledVector(tmp.normalize(), Math.min(d, (8 + p.t) * dt));
-        if (d < 0.6) {
-          this.scene.remove(m);
-          this.items.splice(i, 1);
-          this.onCollect('item', p.item);
-        }
+      m.position.addScaledVector(tmp.normalize(), Math.min(d, (8 + p.t * 10) * dt));
+      if (d < 0.6) {
+        this.scene.remove(m);
+        this.items.splice(i, 1);
+        this.onCollect('item', p.item);
       }
     }
     for (const p of this.pool) {
@@ -250,16 +293,11 @@ export class Pickups {
       }
       tmp.set(hero.x, 1, hero.z).sub(m.position);
       const d = tmp.length();
-      if (d < magnet || p.t > 8) {
-        const sp = 6 + p.t * 10;
-        m.position.addScaledVector(tmp.normalize(), Math.min(d, sp * dt));
-        if (d < 0.5) {
-          p.active = false;
-          m.visible = false;
-          this.onCollect(p.kind);
-        }
-      } else {
-        m.position.y = 0.45 + Math.sin(p.t * 4) * 0.12;
+      m.position.addScaledVector(tmp.normalize(), Math.min(d, (6 + p.t * 10) * dt));
+      if (d < 0.5) {
+        p.active = false;
+        m.visible = false;
+        this.onCollect(p.kind);
       }
     }
   }

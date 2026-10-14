@@ -1,8 +1,56 @@
 // Debug panel. Floating, does not pause the game, so fights can be watched live. Open: ` (Backquote) or ⚙ → «Дебаг-меню».
 import { sfx } from './audio';
+import { ZONES } from './config';
+import type { ZoneId } from './config';
+import { ARENA, FOREST_MINI, FORT, GATES, ISLAND, LAND_BOSSES } from './island';
 import type { Game } from './game';
 
-type Action = [label: string, run: (g: Game) => void, cls?: string];
+type Action = [label: string, run: (g: Game, arg: string) => void, cls?: string, arg?: string];
+
+const zoneName = (id: ZoneId) => ZONES.find((z) => z.id === id)!.name;
+
+/** `arg`: 'door:<gateId>' | 'mini:<zone>:<i>' | 'boss:<zone>' | 'fmini' | 'fort' | 'arena'; positions are read at click time (FORT moves). */
+function teleport(g: Game, arg: string) {
+  const [kind, id, i] = arg.split(':');
+  const gate = GATES.find((t) => t.id === id) ?? GATES.find((t) => t.to === id);
+  if (kind === 'door') {
+    if (gate) g.debugTeleportTo(gate.x - gate.tx * 4, gate.z - gate.tz * 4);
+    return;
+  }
+  let at: [number, number] | undefined;
+  if (kind === 'fort') at = [FORT.x, FORT.z];
+  else if (kind === 'fmini') at = FOREST_MINI;
+  else if (kind === 'arena') at = [ARENA.x, ARENA.z];
+  else {
+    const lb = LAND_BOSSES.find((b) => b.zone === id);
+    at = kind === 'boss' ? lb?.boss : lb?.minis[Number(i)];
+  }
+  if (!at) return;
+  // Stand 5 m towards the island centre so the hero lands in front of the target, not inside it.
+  const dx = ISLAND.cx - at[0];
+  const dz = ISLAND.cz - at[1];
+  const l = Math.hypot(dx, dz) || 1;
+  g.debugTeleportTo(at[0] + (dx / l) * 5, at[1] + (dz / l) * 5, kind === 'fort' || kind === 'arena' || kind === 'fmini' ? undefined : gate?.id);
+}
+
+/** One row per location: [entrance] [mini-boss] [boss]; the forest starts at the settlement instead of a door. */
+function locationRows(): [string, Action[]][] {
+  const rows: [string, Action[]][] = [
+    [zoneName('forest'), [['Лагерь', (g) => g.debugTeleport('camp')], ['Мини', teleport, '', 'fmini'], ['Босс', teleport, '', 'fort']]],
+  ];
+  const seen = new Set<ZoneId>();
+  for (const gt of GATES) {
+    if (seen.has(gt.to)) continue;
+    seen.add(gt.to);
+    const row: Action[] = [['Вход', teleport, '', `door:${gt.id}`]];
+    const lb = LAND_BOSSES.find((b) => b.zone === gt.to);
+    if (lb?.minis.length) row.push(['Мини', teleport, '', `mini:${gt.to}:0`]);
+    if (gt.to === 'cemetery') row.push(['Босс', teleport, '', 'arena']);
+    else if (lb?.boss) row.push(['Босс', teleport, '', `boss:${gt.to}`]);
+    rows.push([zoneName(gt.to), row]);
+  }
+  return rows;
+}
 
 const SECTIONS: [string, Action[]][] = [
   ['Бой', [
@@ -66,6 +114,7 @@ const SECTIONS: [string, Action[]][] = [
     ['Кладбище', (g) => g.debugTeleport('cemetery')],
     ['Босс 2', (g) => g.debugTeleport('boss2')],
   ]],
+  ...locationRows(),
 ];
 
 export class DebugPanel {
@@ -91,7 +140,8 @@ export class DebugPanel {
       if (b.dataset.close !== undefined) { this.toggle(false); return; }
       if (b.dataset.min !== undefined) { this.el.classList.toggle('min'); b.textContent = this.el.classList.contains('min') ? '+' : '–'; return; }
       const [si, ai] = b.dataset.a!.split(':').map(Number);
-      SECTIONS[si][1][ai][1](this.game);
+      const a = SECTIONS[si][1][ai];
+      a[1](this.game, a[3] ?? '');
       this.render();
     });
     addEventListener('keydown', (e) => { if (e.code === 'Backquote') this.toggle(); });

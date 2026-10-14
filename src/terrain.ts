@@ -6,8 +6,8 @@
 import * as THREE from 'three';
 import { ZONES } from './config';
 import {
-  GATE, GATES, ISLAND, MAP_BOX, NZ, PATH, PATH_W, ZGRID, ZONE_INDEX, angleOf, fbm, heightAt, inCamp, pathDist, rimCliff, smooth, walkR, walkable, zoneGrid,
-  zoneIdAt, zoneWeights,
+  BRANCH_PATHS, GATE, GATES, ISLAND, LAND_TRAILS, MAP_BOX, NZ, PATH, PATH_W, ZGRID, ZONE_INDEX, angleOf, fbm, heightAt, inCamp, outside, pathDist, rimCliff, smooth,
+  walkable, zoneGrid, zoneIdAt, zoneWeights,
 } from './island';
 
 export { fbm, heightAt };
@@ -91,7 +91,7 @@ export function bakeGroundMaps(ponds: Pond[]) {
       }
       // camp plaza
       const cd = Math.hypot(x - ISLAND.campX, z - ISLAND.campZ + 1) + (n2 - 0.5) * 3;
-      c.lerp(dirt, (1 - smooth(8, 15, cd)) * 0.8);
+      c.lerp(dirt, (1 - smooth(6.5, 13, cd)) * 0.8);
       // ponds: darker wet shore
       for (const p of ponds) {
         const d = Math.hypot(x - p.x, z - p.z) - p.r;
@@ -99,8 +99,7 @@ export function bakeGroundMaps(ponds: Pond[]) {
       }
       const h = heightAt(x, z);
       const a = angleOf(x, z);
-      const r = Math.hypot(x - ISLAND.cx, z - ISLAND.cz);
-      const out = r - walkR(a);
+      const out = outside(x, z);
       // rim: sand towards the water, rock on cliffs and the ridge
       if (out > -3.5) c.lerp(sand, smooth(-3.5, 0.8, out + (n2 - 0.5) * 1.5) * (1 - rimCliff(a) * 0.75));
       if (h > 0.15) {
@@ -134,6 +133,7 @@ export function bakeGroundMaps(ponds: Pond[]) {
   g.drawImage(base, 0, 0, G, G);
   drawTrail(g, G / MAP_BOX.size, PATH_W);
   drawGatePaths(g, G / MAP_BOX.size, PATH_W * 1.5);
+  drawLandTrails(g, G / MAP_BOX.size, PATH_W);
 
   // map picture: ground + ocean (+ a slightly wider trail so it reads at minimap scale)
   const M = 1024;
@@ -148,6 +148,7 @@ export function bakeGroundMaps(ponds: Pond[]) {
   m.drawImage(seaCanvas, 0, 0, M, M);
   drawTrail(m, M / MAP_BOX.size, 1.8, true);
   drawGatePaths(m, M / MAP_BOX.size, 2.2, true);
+  drawLandTrails(m, M / MAP_BOX.size, 1.8);
   const shoreTex = new THREE.DataTexture(shore, N, N, THREE.RGBAFormat);
   shoreTex.magFilter = shoreTex.minFilter = THREE.LinearFilter;
   shoreTex.needsUpdate = true;
@@ -159,15 +160,18 @@ function drawTrail(g: CanvasRenderingContext2D, ppm: number, width: number, flat
   const X = (x: number) => (x - MAP_BOX.x) * ppm;
   const Z = (z: number) => (z - MAP_BOX.z) * ppm;
   const gateI = Math.round(GATE.s / (PATH.length / (PATH.x.length - 1)));
-  const parts: [number, number, string][] = [[0, gateI, DIRT], [gateI, PATH.x.length - 1, CEM_DIRT]];
+  const parts: [typeof PATH, number, number, string][] = [
+    [PATH, 0, gateI, DIRT], [PATH, gateI, PATH.x.length - 1, CEM_DIRT],
+    ...BRANCH_PATHS.map((c): [typeof PATH, number, number, string] => [c, 0, c.x.length - 1, DIRT]),
+  ];
   g.lineCap = g.lineJoin = 'round';
-  for (const [a, b, col] of parts) {
+  for (const [c, a, b, col] of parts) {
     const stroke = (wm: number, alpha: number) => {
       g.globalAlpha = alpha;
       g.strokeStyle = col;
       g.lineWidth = wm * ppm;
       g.beginPath();
-      for (let i = a; i <= b; i++) (i === a ? g.moveTo : g.lineTo).call(g, X(PATH.x[i]), Z(PATH.z[i]));
+      for (let i = a; i <= b; i++) (i === a ? g.moveTo : g.lineTo).call(g, X(c.x[i]), Z(c.z[i]));
       g.stroke();
     };
     if (!flat) stroke(width * 1.35, 0.25);
@@ -177,14 +181,14 @@ function drawTrail(g: CanvasRenderingContext2D, ppm: number, width: number, flat
     let seed = 1;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
     for (let i = a; i <= b; i += 2) {
-      const tx = PATH.x[Math.min(b, i + 1)] - PATH.x[i];
-      const tz = PATH.z[Math.min(b, i + 1)] - PATH.z[i];
+      const tx = c.x[Math.min(b, i + 1)] - c.x[i];
+      const tz = c.z[Math.min(b, i + 1)] - c.z[i];
       const l = Math.hypot(tx, tz) || 1;
       for (const side of [-1, 1]) {
         const off = side * (width * 0.5 + (rnd() - 0.5) * 0.25);
         g.globalAlpha = 0.6 + rnd() * 0.3;
         g.beginPath();
-        g.arc(X(PATH.x[i] - (tz / l) * off), Z(PATH.z[i] + (tx / l) * off), (0.08 + rnd() * 0.14) * ppm, 0, 7);
+        g.arc(X(c.x[i] - (tz / l) * off), Z(c.z[i] + (tx / l) * off), (0.08 + rnd() * 0.14) * ppm, 0, 7);
         g.fill();
       }
     }
@@ -192,14 +196,14 @@ function drawTrail(g: CanvasRenderingContext2D, ppm: number, width: number, flat
   g.globalAlpha = 1;
 }
 
-/** A short worn path through each passage between locations (the cemetery one is on the trail). */
+/** A short worn path through each passage between locations (the doors of the hub are on the trail). */
 function drawGatePaths(g: CanvasRenderingContext2D, ppm: number, width: number, flat = false) {
   const X = (x: number) => (x - MAP_BOX.x) * ppm;
   const Z = (z: number) => (z - MAP_BOX.z) * ppm;
   g.lineCap = 'round';
   g.strokeStyle = DIRT;
   for (const G of GATES) {
-    if (G.id === 'forest-cemetery') continue;
+    if (G.from === 'forest') continue;
     const line = (len: number, wm: number, alpha: number) => {
       g.globalAlpha = alpha;
       g.lineWidth = wm * ppm;
@@ -213,6 +217,36 @@ function drawGatePaths(g: CanvasRenderingContext2D, ppm: number, width: number, 
     line(9, width * 1.6, 0.18);
     line(8, width * 1.2, 0.3);
     line(6.5, width, 0.85);
+  }
+  g.globalAlpha = 1;
+}
+
+/** Worn paths through the other locations: a soft underlay and a core, like the trail without the speckles. */
+function drawLandTrails(g: CanvasRenderingContext2D, ppm: number, width: number) {
+  const X = (x: number) => (x - MAP_BOX.x) * ppm;
+  const Z = (z: number) => (z - MAP_BOX.z) * ppm;
+  g.lineCap = g.lineJoin = 'round';
+  g.strokeStyle = DIRT;
+  for (const line of LAND_TRAILS) {
+    for (const [wm, alpha] of [[width * 1.35, 0.25], [width, 0.85]]) {
+      g.globalAlpha = alpha;
+      g.lineWidth = wm * ppm;
+      g.beginPath();
+      // Catmull-Rom through the waypoints (bezier form) so the path curves like the trail
+      g.moveTo(X(line[0][0]), Z(line[0][1]));
+      for (let i = 0; i < line.length - 1; i++) {
+        const p0 = line[Math.max(0, i - 1)];
+        const p1 = line[i];
+        const p2 = line[i + 1];
+        const p3 = line[Math.min(line.length - 1, i + 2)];
+        g.bezierCurveTo(
+          X(p1[0] + (p2[0] - p0[0]) / 6), Z(p1[1] + (p2[1] - p0[1]) / 6),
+          X(p2[0] - (p3[0] - p1[0]) / 6), Z(p2[1] - (p3[1] - p1[1]) / 6),
+          X(p2[0]), Z(p2[1]),
+        );
+      }
+      g.stroke();
+    }
   }
   g.globalAlpha = 1;
 }
@@ -340,11 +374,7 @@ function swayMaterial(mat: THREE.MeshLambertMaterial) {
   return mat;
 }
 
-const randomOnIsland = () => {
-  const a = Math.random() * Math.PI * 2;
-  const r = Math.sqrt(Math.random()) * 118;
-  return { x: ISLAND.cx + Math.sin(a) * r, z: ISLAND.cz + Math.cos(a) * r };
-};
+const randomOnIsland = () => ({ x: MAP_BOX.x + Math.random() * MAP_BOX.size, z: MAP_BOX.z + Math.random() * MAP_BOX.size });
 const onPlaza = (x: number, z: number, r: number) => inCamp(x, z, r - ISLAND.campR);
 
 /** Grass tufts: three crossed blades per instance, coloured per zone. */
