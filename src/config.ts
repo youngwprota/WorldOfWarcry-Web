@@ -143,6 +143,8 @@ export interface ComboDef {
 export const COMBOS: Partial<Record<string, ComboDef>> = {
   polearm: { name: 'Прокрут', hits: 3, window: 0.4, mult: 1, rangeAdd: 0, shape: 'circle', arc: 360, knock: 5, stun: 0, spin: true, color: 0xffe0a0 },
 };
+/** Seconds the series finisher spins the hero (from its blow); the other hand waits it out. */
+export const SPIN_TIME = 0.35;
 /** Trail colour of each weapon's swings. */
 export const TRAIL_COLOR: Record<string, number> = { sword: 0x9fe3ff, axe: 0xff8a5a, hammer: 0xffc95a, polearm: 0xffe0a0 };
 

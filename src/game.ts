@@ -4,7 +4,7 @@ import { Trail } from './swing';
 import { swordPair, type Pair } from './offhand';
 import { Creature } from './creature';
 import {
-  COMBOS, DUAL, FACTIONS, TRAIL_COLOR, GACHA, HAND_SWING, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  COMBOS, DUAL, FACTIONS, TRAIL_COLOR, GACHA, HAND_SWING, SPIN_TIME, SWORD_PAIRS, HERO, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
   mobRank, type DamageType, type ResistTier, type MobDef, type OrbKind, type ZoneDef,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -284,6 +284,8 @@ export class Game {
   /** Attack state per hand (save.weapons[0] right, [1] left). */
   private hands: [Hand, Hand] = [newHand(0), newHand(1)];
   private comboShown = -1;
+  /** Game time until which neither hand may start a swing (a series spin is under way). */
+  private lockUntil = -99;
   /** Sword pair of the equipped weapons (src/offhand.ts), refreshed with the gear. */
   private pair: Pair | null = null;
   private trails: [Trail, Trail] = [new Trail(), new Trail()];
@@ -671,10 +673,12 @@ export class Game {
     // up to 1 m further for facing, and swinging there was a whiff into thin air.
     const t = this.target;
     const inReach = !!t && this.inStrike(t, w.range);
-    if (inReach && h.atkCd <= 0 && h.impact < 0 && this.handFree(h)) {
-      const chained = !!combo && h.lastSwingHit && this.time - h.lastSwing <= period + window;
-      h.combo = chained ? h.combo + 1 : combo ? 1 : 0;
-      h.finisher = !!combo && h.combo >= combo.hits;
+    const chained = !!combo && h.lastSwingHit && this.time - h.lastSwing <= period + window;
+    const next = chained ? h.combo + 1 : combo ? 1 : 0;
+    const finisher = !!combo && next >= combo.hits;
+    if (inReach && h.atkCd <= 0 && h.impact < 0 && this.handFree(h, finisher)) {
+      h.combo = next;
+      h.finisher = finisher;
       h.lastSwing = this.time;
       const impactAt = Math.min(0.42, period * 0.4);
       h.impactAt = impactAt;
@@ -686,6 +690,8 @@ export class Game {
       else this.hero.attack(w.anim, period, impactAt);
       h.impact = impactAt;
       h.atkCd = period;
+      // the spin takes the whole body: the other hand waits until it is over
+      if (finisher && combo!.spin && this.dual) this.lockUntil = this.time + impactAt + SPIN_TIME;
     }
     if (h.impact >= 0) {
       h.impact -= dt;
@@ -693,11 +699,15 @@ export class Game {
     }
   }
 
-  /** Two hands take turns (DUAL): not right after the other hand's start, and the one that waited longer goes first. */
-  private handFree(h: Hand) {
+  /**
+   * Two hands take turns (DUAL): not right after the other hand's start, and the one that waited longer goes first.
+   * A series spin (`finisher`) starts only once the other hand's blow has landed, then holds it (lockUntil).
+   */
+  private handFree(h: Hand, finisher: boolean) {
     if (!this.dual) return true;
     const o = this.hands[1 - h.i];
-    if (this.time - o.lastSwing < DUAL.gap) return false;
+    if (this.time < this.lockUntil || this.time - o.lastSwing < DUAL.gap) return false;
+    if (finisher && o.impact >= 0) return false;
     const ow = WEAPONS[this.save.weapons[o.i]!.def];
     const oReady = o.atkCd <= 0 && o.impact < 0 && !!this.target && this.inStrike(this.target, ow.range);
     return !(oReady && o.lastSwing < h.lastSwing);
@@ -780,7 +790,7 @@ export class Game {
       h.finisher = false;
       h.combo = 0;
       if (shape === 'circle') this.waves.add(this.hero.position, range + 0.5, fin.color);
-      if (fin.spin) this.hero.spin(0.35);
+      if (fin.spin) this.hero.spin(SPIN_TIME);
       if (hits) this.slowMo(0.07, 0.08);
       this.shake = Math.max(this.shake, 0.35);
       sfx.combo();

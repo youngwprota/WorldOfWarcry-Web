@@ -5,7 +5,7 @@
 //                     [--set MOBS.bandit_chief.hp=6000 --set GACHA.token.normal=0.05 ...] (what-if: config edits for this run)
 import * as CONFIG from '../src/config';
 import {
-  ATTACK_HIT, BREAKABLES, COMBOS, FACTIONS, GACHA, HERO, MOBS, ORBS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, SWORD_PAIRS,
+  ATTACK_HIT, BREAKABLES, COMBOS, DUAL, SPIN_TIME, FACTIONS, GACHA, HERO, MOBS, ORBS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, SWORD_PAIRS,
   WEAPONS, depthMul, mobImpact, mobRank, type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type ZoneId,
 } from '../src/config';
 import { armorMul, handMulOf, heroStats, powerMult, type HeroBuild } from '../src/balance';
@@ -147,7 +147,9 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   let taken = 0, slams = 0, slamHits = 0, swings = 0;
   const pending: [number, number][] = []; // [time, damage] of telegraphed blasts
   // hands
-  const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1, combo: 0 }));
+  const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1, combo: 0, last: -99 }));
+  const dual = !!h.weapons[0] && !!h.weapons[1];
+  let lock = -99; // a series spin holds the other hand (Game.handFree)
   const pmul = () => powerMult(h.faction, st.power, hp / st.maxHp);
   const hurt = (raw: number) => {
     let dmg = Math.max(1, raw * armorMul(st.defense) * roll());
@@ -185,10 +187,16 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       const w = WEAPONS[hd.it.def];
       hd.cd -= DT;
       if (hd.cd > 0 || busy > 0) continue;
+      // two hands take turns: not within DUAL.gap of the other's start, the one that waited longer first
+      const o = hands[1 - hd.i];
+      if (dual && (t < lock || t - o.last < DUAL.gap || (o.cd <= 0 && o.last < hd.last))) continue;
+      hd.last = t;
       const per = 1 / w.aps;
       // uptime: the hero spends part of the fight repositioning — swings come later and the chain may break
       hd.cd = per / OPT.uptime;
       hd.combo = mean || rand() < OPT.combo ? hd.combo + 1 : 1;
+      const c = COMBOS[hd.it.def];
+      if (dual && c?.spin && hd.combo >= c.hits) lock = t + Math.min(0.42, per * 0.4) + SPIN_TIME;
       swings++;
       strike(hd);
     }
