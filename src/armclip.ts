@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import type { AttackAnim } from './config';
 
 const CHAIN = ['clavicle', 'upperarm', 'lowerarm', 'hand'];
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
 const qa = new THREE.Quaternion();
 const qb = new THREE.Quaternion();
 const qParent = new THREE.Quaternion();
@@ -35,11 +36,21 @@ export class ArmClips {
   private real: THREE.Object3D[][];
   private gR: THREE.Object3D[];
   private gL: THREE.Object3D[];
-  /** Left bone = mirror(right bone) × fix, both relative to the model (measured on the rest pose). */
+  /**
+   * Left bone = mirror(right bone) × fix, relative to the chest, measured on the Idle pose: the left weapon's grip is
+   * fitted to Idle too (rig.ts LEFT_FIX), so the bind pose here would leave the left weapon twisted.
+   */
   private fix: THREE.Quaternion[];
   private current: THREE.AnimationAction | null = null;
+  /** The bone both clavicles hang from (spine_03): the mirror is taken in its space. */
+  private chest!: THREE.Object3D;
+  /** Left weapon holder, its idle rotation, its rotation in the right hand, and the turn of its mirror image. */
+  private left: THREE.Object3D | null = null;
+  private leftIdle = new THREE.Quaternion();
+  private leftRight = new THREE.Quaternion();
+  private leftFlip = new THREE.Quaternion();
 
-  constructor(model: THREE.Object3D, clips: Record<AttackAnim, THREE.AnimationClip>) {
+  constructor(model: THREE.Object3D, clips: Record<AttackAnim | 'Idle', THREE.AnimationClip>) {
     this.ghost = copyBones(model);
     const arm = new Set<string>();
     model.getObjectByName('clavicle_r')?.traverse((o) => arm.add(o.name));
@@ -57,11 +68,35 @@ export class ArmClips {
     this.real = [bones(model, 'r'), bones(model, 'l')];
     this.gR = bones(this.ghost, 'r');
     this.gL = bones(this.ghost, 'l');
+    const rest = new Map<THREE.Object3D, THREE.Quaternion>();
+    this.ghost.traverse((o) => rest.set(o, o.quaternion.clone()));
+    const idle = this.mixer.clipAction(new THREE.AnimationClip('Idle_arm', clips.Idle.duration,
+      clips.Idle.tracks.filter((t) => t.name.endsWith('.quaternion'))));
+    idle.play();
+    this.mixer.update(0);
+    // relative to the chest: Idle turns the spine, a mirror of that would leak into the fix
+    this.chest = this.gL[0].parent!;
     this.fix = CHAIN.map((_, i) =>
-      mirror(modelQ(this.gR[i], this.ghost, new THREE.Quaternion())).invert().multiply(modelQ(this.gL[i], this.ghost, qa)));
+      mirror(modelQ(this.gR[i], this.chest, new THREE.Quaternion())).invert().multiply(modelQ(this.gL[i], this.chest, qa)));
+    idle.stop();
+    for (const [o, q] of rest) o.quaternion.copy(q);
   }
 
   duration(anim: AttackAnim) { return this.actions[anim].getClip().duration; }
+
+  /** The weapon in the left hand (rig.ts attachWeapon holder), or null. */
+  setLeft(holder: THREE.Object3D | null) {
+    this.left = holder;
+    if (!holder) return;
+    this.leftIdle.copy(holder.quaternion);
+    this.leftRight.copy(holder.userData.rightQ as THREE.Quaternion);
+    // a weapon is symmetric across its flat plane: its mirror image is the weapon turned half round its shaft when
+    // the head reaches out along X, and the weapon itself when along Z
+    this.leftFlip.setFromAxisAngle(AXIS_Y, holder.userData.wideX ? Math.PI : 0);
+  }
+
+  /** Before the swings of a frame: the left weapon back in its idle grip. */
+  resetLeft() { this.left?.quaternion.copy(this.leftIdle); }
 
   /** Puts the arm of `hand` at clip time `t`, blended by `w` over its current pose (after the main mixer). */
   apply(anim: AttackAnim, hand: 0 | 1, t: number, w: number) {
@@ -78,13 +113,20 @@ export class ArmClips {
       for (let i = 0; i < CHAIN.length; i++) real[i].quaternion.slerp(this.gR[i].quaternion, w);
       return;
     }
-    // left: mirrored model-space rotations, turned back into locals down the chain (the ghost's torso stays at rest)
-    modelQ(this.gL[0].parent!, this.ghost, qParent);
+    // left: mirrored chest-space rotations, turned back into locals down the chain
+    qParent.identity();
     for (let i = 0; i < CHAIN.length; i++) {
-      mirror(modelQ(this.gR[i], this.ghost, qTarget)).multiply(this.fix[i]);
+      mirror(modelQ(this.gR[i], this.chest, qTarget)).multiply(this.fix[i]);
       qb.copy(qParent).invert().multiply(qTarget);
       real[i].quaternion.slerp(qb, w);
       qParent.copy(qTarget);
+    }
+    // the weapon: the exact mirror image of the same weapon in the right hand, not the idle grip carried along
+    // (the left grip is fitted to the asymmetric Idle pose and twists the blade in a swing)
+    if (this.left) {
+      mirror(modelQ(this.gR[CHAIN.length - 1], this.chest, qb).multiply(this.leftRight)).multiply(this.leftFlip);
+      qa.copy(qParent).invert().multiply(qb);
+      this.left.quaternion.slerp(qa, w);
     }
   }
 }

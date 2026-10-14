@@ -79,13 +79,18 @@ export function attachWeapon(character: THREE.Object3D, weapon: string, left = f
   holder.add(offset);
   // blade tip along the holder's +Y (cm, before scale): weapon trails sample it
   holder.updateMatrixWorld(true);
-  holder.userData.tip = new THREE.Box3().setFromObject(offset).max.y;
+  const box = new THREE.Box3().setFromObject(offset);
+  holder.userData.tip = box.max.y;
+  // the head reaches out along the holder's X (axe, hammer) or Z: decides how its mirror image is turned (armclip.ts)
+  const ext = box.getSize(new THREE.Vector3());
+  holder.userData.wideX = ext.x > ext.z;
   // Weapon +Y -> fist axis (hand +Z) tilted toward the forearm (hand +X).
   const tilt = cfg.tilt ?? 0.22;
   const dir = new THREE.Vector3(Math.sin(tilt), cfg.out ?? 0.4, Math.cos(tilt)).normalize();
   holder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   if (cfg.roll) holder.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), cfg.roll));
   holder.position.copy(PALM);
+  holder.userData.rightQ = holder.quaternion.clone();
   if (left) mirrorX(holder);
   holder.scale.setScalar(cfg.scale ?? 1);
   hand.add(holder);

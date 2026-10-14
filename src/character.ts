@@ -132,7 +132,7 @@ export class Character {
       return a;
     };
     this.attackU = { SwordAttack: once(upper.SwordAttack), AxeAttack: once(upper.AxeAttack) };
-    if (armClips) this.swinger.armClips = new ArmClips(this.model, { SwordAttack: full.SwordAttack, AxeAttack: full.AxeAttack });
+    if (armClips) this.swinger.armClips = new ArmClips(this.model, { SwordAttack: full.SwordAttack, AxeAttack: full.AxeAttack, Idle: full.Idle });
     this.hitU = once(upper.Hit);
     this.death = once(full.Death);
     // Desync idle cycles between characters.
@@ -146,6 +146,7 @@ export class Character {
     this.weaponL?.removeFromParent();
     this.weapon = name ? attachWeapon(this.model, name) : null;
     this.weaponL = left ? attachWeapon(this.model, left, true) : null;
+    this.swinger.armClips?.setLeft(this.weaponL);
     for (const w of [this.weapon, this.weaponL]) w?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
     if (this.highlighted) this.rebuildOutline();
   }

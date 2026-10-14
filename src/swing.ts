@@ -76,6 +76,7 @@ export class Swinger {
 
   /** Call after the mixer update: the clips have just rewritten the bones' local rotations. */
   apply(dt: number) {
+    this.armClips?.resetLeft();
     let yaw = 0, lean = 0;
     // the torso follows only the latest swing: two hands twisting it at once made it jerk back and forth
     let lead = -1, leadT = Infinity;
