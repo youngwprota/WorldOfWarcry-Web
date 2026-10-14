@@ -15,10 +15,10 @@ type Key = [phase: number, yaw: number, lean: number, fwd: number, sweep: number
 
 // phase: 0 start → 1 the blow lands → 2 back to rest; missing ends are filled with zeros
 const KEYS: Record<SwingKind, Key[]> = {
-  slashRL: [[0.6, -0.55, 0.05, 1.3, -1.1, 0.3], [1, 0, 0.2, 1.4, 0, 0.1], [1.45, 0.6, 0.15, 1.1, 1.15, 0]],
+  slashRL: [[0.6, -0.4, 0.05, 1.3, -0.8, 0.3], [1, 0, 0.2, 1.4, 0, 0.1], [1.45, 0.6, 0.15, 1.1, 1.15, 0]],
   slashLR: [[0.6, 0.6, 0.05, 1.2, 1.05, 0], [1, 0, 0.2, 1.4, 0, 0.1], [1.45, -0.6, 0.15, 1.1, -1.15, 0.35]],
   // the blade sits across the fist: a level blade needs a low arm, the lunge comes from the torso
-  thrust: [[0.6, -0.4, -0.1, -0.4, -0.2, 0.25], [1, 0.5, 0.45, 0.25, 0.1, 0], [1.4, 0.45, 0.4, 0.2, 0.1, 0]],
+  thrust: [[0.6, -0.3, -0.1, -0.15, -0.2, 0.25], [1, 0.5, 0.45, 0.25, 0.1, 0], [1.4, 0.45, 0.4, 0.2, 0.1, 0]],
   overhead: [[0.6, -0.2, -0.3, 2.7, -0.1, 0.1], [1, 0.1, 0.5, 0.9, 0.1, 0], [1.4, 0.05, 0.4, 0.7, 0.05, 0]],
 };
 /** Body keys of an IK swing, for the RIGHT hand: [phase, yaw, lean, lunge (m forward)]. */
@@ -33,12 +33,13 @@ interface IkSwing { arm: ArmKey[]; pole: readonly [number, number, number]; body
 
 // phase: 0 windup → 1 the blow → FOLLOW_P end of the follow-through; the hand comes back the same way (lifted by `lift`)
 const IK: Record<AttackAnim, IkSwing> = {
-  // level cut right → left: the arm drawn back behind the right shoulder, sweeps round to the front; past the front
-  // the torso twist and the wrist carry the blade across (the short arm across the chest went into the body)
+  // level cut right → left: the arm drawn back by the right shoulder (not far behind: unnatural), sweeps round to the
+  // front; past the front the torso twist and the wrist carry the blade across (the short arm across the chest went
+  // into the body)
   SwordAttack: {
-    arm: [[0, -120, 20, 0.8, -165, 20], [0.6, -75, 12, 0.92, -100, 8], [1, 0, -3, 0.97, 35, 0], [1.3, 18, -18, 0.95, 100, -10]],
+    arm: [[0, -80, 22, 0.85, -140, 20], [0.6, -55, 12, 0.93, -85, 8], [1, 0, -3, 0.97, 35, 0], [1.3, 18, -18, 0.95, 100, -10]],
     pole: [-0.7, -1, -0.3], lift: 0,
-    body: [[0, -0.6, 0, -0.04], [1, 0.1, 0.05, 0.12], [1.3, 0.5, 0.05, 0.08]],
+    body: [[0, -0.4, 0, -0.04], [1, 0.1, 0.05, 0.12], [1.3, 0.5, 0.05, 0.08]],
   },
   // diagonal chop: the hand high by the right shoulder (further back looked unnatural), the axe cocked up and back,
   // the whole arm cuts down across to the front-left, the torso turning with it (straight down from above read as a
