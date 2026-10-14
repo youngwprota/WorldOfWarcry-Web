@@ -2,9 +2,10 @@
 
 > Автогенерация из `cards/`. Интерактивная доска — на GitHub Pages (`board.html`) или `npm run board` локально.
 
-## TODO (1)
+## TODO (2)
 
 - [Баланс](cards/261014-77fc.md)
+- [Локации](cards/261014-c318.md)
 
 ## BACKLOG (0)
 
