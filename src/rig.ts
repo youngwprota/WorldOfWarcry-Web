@@ -57,6 +57,25 @@ function gripPoint(name: string, w: THREE.Object3D, frac: number): THREE.Vector3
  * `left`: into hand_l. The left hand bone is the mirror of the right one (X flipped), so the palm offset and
  * the outward push flip with it.
  */
+/** Direction (holder XZ) to the vertex of the upper part of the weapon that reaches furthest from its shaft. */
+function headSide(o: THREE.Object3D, tip: number) {
+  const v = new THREE.Vector3();
+  const best = new THREE.Vector3(1, 0, 0);
+  let far = 0;
+  o.traverse((m) => {
+    const g = (m as THREE.Mesh).isMesh ? (m as THREE.Mesh).geometry : null;
+    const pos = g?.attributes.position;
+    if (!pos) return;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+      if (v.y < tip * 0.55) continue;
+      const d = v.x * v.x + v.z * v.z;
+      if (d > far) { far = d; best.set(v.x, 0, v.z); }
+    }
+  });
+  return best.normalize();
+}
+
 export function attachWeapon(character: THREE.Object3D, weapon: string, left = false): THREE.Object3D {
   const hand = character.getObjectByName(left ? 'hand_l' : 'hand_r')!;
   const cfg = WEAPON_GRIPS[weapon] ?? {};
@@ -82,16 +101,14 @@ export function attachWeapon(character: THREE.Object3D, weapon: string, left = f
   holder.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(offset);
   holder.userData.tip = box.max.y;
-  // the head reaches out along the holder's X (axe, hammer) or Z: decides how its mirror image is turned (armclip.ts)
-  const ext = box.getSize(new THREE.Vector3());
-  holder.userData.wideX = ext.x > ext.z;
+  // the far side of the head (axe edge, hammer face, a blade's edge), holder space: swings turn it into the cut
+  holder.userData.edge = headSide(offset, box.max.y);
   // Weapon +Y -> fist axis (hand +Z) tilted toward the forearm (hand +X).
   const tilt = cfg.tilt ?? 0.22;
   const dir = new THREE.Vector3(Math.sin(tilt), cfg.out ?? 0.4, Math.cos(tilt)).normalize();
   holder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   if (cfg.roll) holder.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), cfg.roll));
   holder.position.copy(PALM);
-  holder.userData.rightQ = holder.quaternion.clone();
   if (left) mirrorX(holder);
   holder.scale.setScalar(cfg.scale ?? 1);
   hand.add(holder);

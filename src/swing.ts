@@ -2,7 +2,6 @@
 // (the rig only has two attack clips, both right-handed), plus a weapon trail ribbon.
 import * as THREE from 'three';
 import type { AttackAnim } from './config';
-import type { ArmClips } from './armclip';
 
 export type SwingKind = 'slashRL' | 'slashLR' | 'thrust' | 'overhead';
 
@@ -22,35 +21,75 @@ const KEYS: Record<SwingKind, Key[]> = {
   thrust: [[0.6, -0.4, -0.1, -0.4, -0.2, 0.25], [1, 0.5, 0.45, 0.25, 0.1, 0], [1.4, 0.45, 0.4, 0.2, 0.1, 0]],
   overhead: [[0.6, -0.2, -0.3, 2.7, -0.1, 0.1], [1, 0.1, 0.5, 0.9, 0.1, 0], [1.4, 0.05, 0.4, 0.7, 0.05, 0]],
 };
-/**
- * Body keys of a clip swing (the arm and the clip's own spine come from ArmClips), on top of the clip, for the RIGHT
- * hand: [phase, yaw, lean, lunge (m forward)]. The whole body winds up and throws itself into the blow.
- */
+/** Body keys of an IK swing, for the RIGHT hand: [phase, yaw, lean, lunge (m forward)]. */
 type BodyKey = [phase: number, yaw: number, lean: number, lunge: number];
-const BODY: Record<AttackAnim, BodyKey[]> = {
-  // slash right → left: the torso winds up to the right and unwinds through the blow
-  SwordAttack: [[0.55, -0.75, -0.05, -0.05], [1, 0.15, 0.2, 0.14], [1.45, 0.7, 0.12, 0.08]],
-  // chop: leans back with the axe up, then bends into the blow and steps into it
-  AxeAttack: [[0.6, -0.35, -0.3, -0.06], [1, 0.15, 0.3, 0.16], [1.4, 0.1, 0.2, 0.1]],
-};
 /**
- * The stretch of an attack clip a swing moves along, clip times measured on the blade: the windup it starts from,
- * the blow (the blade in front of the hero) and the end of the follow-through. A hand goes windup → blow → a bit on
- * along the cut, then back the same way to the windup and waits there. Outside this stretch the clips hang the blade
- * down (sword 0.3–0.55, axe 0.25–0.7) and bring the weapon back to rest past the head (sword 1.1–1.3, axe 1.2–1.5).
+ * Arm keys of an IK swing, RIGHT hand, body frame (az: 0 forward, + to the hero's left, ±180 behind; el: + up; deg):
+ * [phase, hand az, hand el, reach (share of the arm's length), blade az, blade el]. The hand target is relative to the
+ * shoulder; shoulder and elbow follow from it (two-bone IK), so the whole arm swings, not just the wrist.
  */
-const ARC: Record<AttackAnim, { windup: number; blow: number; follow: number }> = {
-  // drawn out to the right, blade level → in front at chest height → across to the left
-  SwordAttack: { windup: 0.6, blow: 0.68, follow: 0.76 },
-  // cocked behind the head → down in front → a little lower and further
-  AxeAttack: { windup: 0.8, blow: 0.92, follow: 0.98 },
+type ArmKey = [phase: number, handAz: number, handEl: number, reach: number, bladeAz: number, bladeEl: number];
+interface IkSwing { arm: ArmKey[]; pole: readonly [number, number, number]; body: BodyKey[]; lift: number }
+
+// phase: 0 windup → 1 the blow → FOLLOW_P end of the follow-through; the hand comes back the same way (lifted by `lift`)
+const IK: Record<AttackAnim, IkSwing> = {
+  // level cut right → left: the arm drawn back behind the right shoulder, sweeps round to the front; past the front
+  // the torso twist and the wrist carry the blade across (the short arm across the chest went into the body)
+  SwordAttack: {
+    arm: [[0, -120, 20, 0.8, -165, 20], [0.6, -75, 12, 0.92, -100, 8], [1, 0, -3, 0.97, 35, 0], [1.3, 18, -18, 0.95, 100, -10]],
+    pole: [-0.7, -1, -0.3], lift: 0,
+    body: [[0, -0.6, 0, -0.04], [1, 0.1, 0.05, 0.12], [1.3, 0.5, 0.05, 0.08]],
+  },
+  // chop: the hand above and behind the head, the axe cocked up and back, the whole arm comes down in front; the arc
+  // runs by the right side of the head (straight over the top, the fist passed in front of the big head)
+  AxeAttack: {
+    arm: [[0, -150, 65, 0.78, -170, 30], [0.6, -50, 70, 0.9, -150, 70], [1, -25, -10, 0.97, -15, -25], [1.3, -15, -30, 0.92, -10, -45]],
+    pole: [-1, -0.2, 0], lift: 0.2,
+    body: [[0, -0.3, -0.06, -0.05], [1, 0.1, 0.06, 0.14], [1.3, 0.1, 0.06, 0.1]],
+  },
 };
+const FOLLOW_P = 1.3;
+/** Reach of the arm on the way back to the windup. */
+const RETURN_REACH = 0.95;
+/** Blade length for the edge direction, share of the arm's length. */
+const BLADE = 0.7;
 /** s from the blow to the end of the follow-through. */
 const FOLLOW_TIME = 0.12;
 /** s at least for the way back to the windup. */
 const BACK_TIME = 0.12;
 /** With no swing of the other hand: s before the next swing of the same hand to get back to the windup. */
 const OWN_BACK = 0.25;
+
+const DEG = Math.PI / 180;
+const dirOf = (az: number, el: number) =>
+  new THREE.Vector3(Math.sin(az * DEG) * Math.cos(el * DEG), Math.sin(el * DEG), Math.cos(az * DEG) * Math.cos(el * DEG));
+/** The keys as vectors, made once. */
+const IK_V = Object.fromEntries(Object.entries(IK).map(([k, s]) => [k, s.arm.map((a) => ({
+  p: a[0], hand: dirOf(a[1], a[2]), reach: a[3], blade: dirOf(a[4], a[5]),
+}))])) as Record<AttackAnim, { p: number; hand: THREE.Vector3; reach: number; blade: THREE.Vector3 }[]>;
+
+/** Hand target (share of the arm, from the shoulder) and blade direction at `p`, body frame, right hand. */
+function armAt(anim: AttackAnim, p: number, hand: THREE.Vector3, blade: THREE.Vector3) {
+  const keys = IK_V[anim];
+  let i = 0;
+  while (i < keys.length - 2 && p > keys[i + 1].p) i++;
+  const k0 = keys[i], k1 = keys[i + 1];
+  const u = Math.max(0, Math.min(1, (p - k0.p) / (k1.p - k0.p)));
+  hand.copy(k0.hand).lerp(k1.hand, u).normalize().multiplyScalar(k0.reach + (k1.reach - k0.reach) * u);
+  blade.copy(k0.blade).lerp(k1.blade, u).normalize();
+}
+
+const tA = new THREE.Vector3();
+const tB = new THREE.Vector3();
+const tC = new THREE.Vector3();
+/** Where the edge faces at `p`: the way the blade tip moves on the cut (also while held or coming back). */
+function edgeAt(anim: AttackAnim, p: number, out: THREE.Vector3) {
+  const c = Math.max(0.05, Math.min(FOLLOW_P - 0.05, p));
+  armAt(anim, c + 0.05, tA, tB);
+  out.copy(tA).addScaledVector(tB, BLADE);
+  armAt(anim, c - 0.05, tA, tB);
+  return out.sub(tA).addScaledVector(tB, -BLADE);
+}
 
 /** Share of the torso twist per spine bone, bottom up: a twist on one bone only kinks the waist. */
 const YAW_SHARE = [0.45, 0.3, 0.25];
@@ -61,17 +100,34 @@ const AXIS_Z = new THREE.Vector3(0, 0, 1);
 const qa = new THREE.Quaternion();
 const qb = new THREE.Quaternion();
 const qp = new THREE.Quaternion();
+const qr = new THREE.Quaternion();
+const qFrame = new THREE.Quaternion();
 const pose = [0, 0, 0, 0, 0];
+const vHand = new THREE.Vector3();
+const vBlade = new THREE.Vector3();
+const vEdge = new THREE.Vector3();
+const vPole = new THREE.Vector3();
+const vS = new THREE.Vector3();
+const vE = new THREE.Vector3();
+const vW = new THREE.Vector3();
+const vT = new THREE.Vector3();
+const vU = new THREE.Vector3();
+const v1 = new THREE.Vector3();
+const v2 = new THREE.Vector3();
+const qBase = [new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quaternion()];
+/** Midpoint of the shoulders and half their span: the hands' targets are taken from symmetric points around it. */
+const vMid = new THREE.Vector3();
+let halfSpan = 0;
 
-/** `fin`: s to blend the arm in (longer from rest); `hit`: past the blow (clip swings). */
+/** `fin`: s to blend the arm in (longer from rest); `hit`: past the blow (IK swings). */
 interface Active {
   kind: SwingKind; t: number; dur: number; impact: number; torso: number; clip: AttackAnim | null;
   fin: number; hit: boolean;
 }
 
 /**
- * What a hand holds after its clip swing's blow: clip time `at` on the follow-through, `back` 0..1 of the way back to
- * the windup, blended in by `w` (fades out once neither hand swings).
+ * What a hand holds after its IK swing's blow: phase `at` on the follow-through, `back` 0..1 of the way back to the
+ * windup, blended in by `w` (fades out once neither hand swings).
  */
 interface Held { anim: AttackAnim | null; at: number; back: number; w: number }
 
@@ -80,19 +136,23 @@ export class Swinger {
   private hands: (Active | null)[] = [null, null];
   private spine: (THREE.Object3D | null)[];
   private arms: (THREE.Object3D | null)[];
+  private chain: (THREE.Object3D | null)[][];
   /** Smoothed torso twist and bend: the lead swing changes hands without a jump. */
   private yaw = 0;
   private lean = 0;
   private lunge = 0;
   private baseZ: number;
-  /** Attack clips on one arm (Character sets it): the left hand and both hands with two weapons. */
-  armClips: ArmClips | null = null;
+  /** The hero: attack swings move the whole arm by IK (startClip). */
+  ik = false;
+  /** Weapon holders per hand (Character.setWeapon): their blade and edge are turned into the cut. */
+  blades: (THREE.Object3D | null)[] = [null, null];
   private held: Held[] = [{ anim: null, at: 0, back: 0, w: 0 }, { anim: null, at: 0, back: 0, w: 0 }];
 
   constructor(private model: THREE.Object3D) {
     this.spine = ['spine_01', 'spine_02', 'spine_03'].map((n) => model.getObjectByName(n) ?? null);
     this.baseZ = model.position.z;
     this.arms = [model.getObjectByName('upperarm_r') ?? null, model.getObjectByName('upperarm_l') ?? null];
+    this.chain = ['r', 'l'].map((s) => ['upperarm', 'lowerarm', 'hand'].map((n) => model.getObjectByName(`${n}_${s}`) ?? null));
   }
 
   /** `impact` s after the start the blow lands; the whole swing takes `dur` s; `torso` scales the twist and bend. */
@@ -101,8 +161,8 @@ export class Swinger {
   }
 
   /**
-   * The attack clip `anim` on one arm only (mirrored on the left), along its ARC: the blow lands `impact` s after the
-   * start; the hand comes back to the windup by the end of the `period`, or as soon as the other hand swings.
+   * The attack `anim` on one arm (mirrored on the left) by IK along its keys: the blow lands `impact` s after the
+   * start; the hand comes back to the windup as soon as the other hand swings, or by the end of the `period`.
    */
   startClip(anim: AttackAnim, hand: 0 | 1, period: number, impact: number, torso = 1) {
     const a = this.begin(hand, 'overhead', period, impact, torso, anim);
@@ -125,7 +185,6 @@ export class Swinger {
 
   /** Call after the mixer update: the clips have just rewritten the bones' local rotations. */
   apply(dt: number) {
-    this.armClips?.resetLeft();
     let yaw = 0, lean = 0, lunge = 0;
     // the torso follows only the latest swing: two hands twisting it at once made it jerk back and forth
     let lead = -1, leadT = Infinity;
@@ -138,13 +197,15 @@ export class Swinger {
       if (!a) continue;
       a.t += dt;
       if (a.t >= a.dur) { this.hands[h] = null; continue; }
-      const phase = a.t < a.impact ? a.t / a.impact : 1 + (a.t - a.impact) / (a.dur - a.impact);
       const m = h ? -1 : 1; // the left hand mirrors the twist and the sweep
-      if (a.clip && this.armClips) {
-        sample(BODY[a.clip], phase, pose, 3);
-        if (h === lead) { yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso; lunge = pose[2] * a.torso; }
-        continue; // the arm: clipArms() below
+      if (a.clip && this.ik) {
+        if (h === lead) {
+          sample(IK[a.clip].body, phaseOf(a), pose, 3);
+          yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso; lunge = pose[2] * a.torso;
+        }
+        continue; // the arm: ikArms() below, after the torso
       }
+      const phase = a.t < a.impact ? a.t / a.impact : 1 + (a.t - a.impact) / (a.dur - a.impact);
       sample(KEYS[a.kind], phase, pose, 5);
       if (h === lead) { yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso * a.torso; }
       const arm = this.arms[h];
@@ -155,13 +216,6 @@ export class Swinger {
       }
     }
     const k = 1 - Math.exp(-dt * 16);
-    if (this.armClips) {
-      this.clipArms(this.armClips, dt);
-      // the clip's own torso and head from the lead swing
-      const a = lead >= 0 ? this.hands[lead] : null;
-      if (a?.clip) this.armClips.body(a.clip, lead as 0 | 1, clipTime(a), Math.min(1, a.t / a.fin, (a.dur - a.t) / 0.15), k);
-      else this.armClips.body(null, 0, 0, 0, k);
-    }
     this.yaw += (yaw - this.yaw) * k;
     this.lean += (lean - this.lean) * k;
     this.lunge += (lunge - this.lunge) * k;
@@ -177,17 +231,19 @@ export class Swinger {
         rotateInModel(b, this.model, qa);
       }
     }
+    if (this.ik) this.ikArms(dt);
   }
 
-  /** The arms of clip swings: the held pose (follow-through → back to the windup), then a swing's way to its blow. */
-  private clipArms(arm: ArmClips, dt: number) {
+  /** The arms of IK swings: the held pose (follow-through → back to the windup), then a swing's way to its blow. */
+  private ikArms(dt: number) {
+    let ready = false;
     for (let h = 0; h < 2; h++) {
       const a = this.hands[h];
       const o = this.hands[1 - h];
       const hd = this.held[h];
       if (a?.clip && a.t >= a.impact) {
         if (!a.hit) { a.hit = true; hd.anim = a.clip; hd.back = 0; }
-        hd.at = clipTime(a);
+        hd.at = phaseOf(a);
         hd.w = 1;
       }
       if (hd.anim && (!a || a.hit)) {
@@ -201,20 +257,114 @@ export class Swinger {
         if (!a && !o) hd.w = Math.max(0, hd.w - dt / 0.35);
         if (hd.w <= 0) hd.anim = null;
       }
-      if (hd.anim && hd.w > 0.001) arm.apply(hd.anim, h as 0 | 1, hd.at + (ARC[hd.anim].windup - hd.at) * smooth(hd.back), hd.w);
+      const holding = !!hd.anim && hd.w > 0.001;
+      const swinging = !!a?.clip && !a.hit;
+      if (!holding && !swinging) continue;
+      if (!ready) {
+        // the bones as the clips and the torso left them
+        this.model.updateMatrixWorld(true);
+        this.model.getWorldQuaternion(qFrame).multiply(qa.setFromAxisAngle(AXIS_Y, this.yaw));
+        this.chain[0][0]?.getWorldPosition(v1);
+        this.chain[1][0]?.getWorldPosition(v2);
+        vMid.addVectors(v1, v2).multiplyScalar(0.5);
+        halfSpan = v1.distanceTo(v2) / 2;
+        ready = true;
+      }
+      if (holding) {
+        const b = smooth(hd.back);
+        this.ikArm(h as 0 | 1, hd.anim!, hd.at * (1 - b), Math.sin(Math.PI * b), hd.w);
+      }
       // a swing on its way to the blow, over the held pose
-      if (a?.clip && !a.hit) arm.apply(a.clip, h as 0 | 1, clipTime(a), Math.min(1, a.t / a.fin));
+      if (swinging) this.ikArm(h as 0 | 1, a!.clip!, phaseOf(a!), 0, Math.min(1, a!.t / a!.fin));
+    }
+  }
+
+  /**
+   * One arm at phase `p` of `anim` by two-bone IK, the blade and its edge turned along the cut; `back` 0..1..0 over
+   * the way back to the windup; blended by `w`.
+   */
+  private ikArm(h: 0 | 1, anim: AttackAnim, p: number, back: number, w: number) {
+    const [up, lo, hand] = this.chain[h];
+    if (!up || !lo || !hand) return;
+    qBase[0].copy(up.quaternion); qBase[1].copy(lo.quaternion); qBase[2].copy(hand.quaternion);
+    armAt(anim, p, vHand, vBlade);
+    edgeAt(anim, p, vEdge);
+    const pl = IK[anim].pole;
+    vPole.set(pl[0], pl[1], pl[2]);
+    if (back) {
+      // on the way back: the arm kept long (a folded arm brought the fist to the face), lifted by `lift`
+      const lift = IK[anim].lift * back;
+      vHand.setLength(vHand.length() + (RETURN_REACH - vHand.length()) * back);
+      vHand.y += lift * vHand.length(); vBlade.y += lift; vBlade.normalize();
+    }
+    if (h) { vHand.x = -vHand.x; vBlade.x = -vBlade.x; vEdge.x = -vEdge.x; vPole.x = -vPole.x; }
+    vHand.applyQuaternion(qFrame); vBlade.applyQuaternion(qFrame); vEdge.applyQuaternion(qFrame); vPole.applyQuaternion(qFrame);
+    // shoulder, elbow, wrist; the target from a point mirrored across the body, not from the shoulder itself: the Idle
+    // stance turns the chest (right shoulder 7 cm back, left 7 cm forward), and the right hand cut into the chest
+    up.getWorldPosition(vS); lo.getWorldPosition(vE); hand.getWorldPosition(vW);
+    const la = vE.distanceTo(vS), lb = vW.distanceTo(vE);
+    vT.set(h ? halfSpan : -halfSpan, 0, 0).applyQuaternion(qFrame).add(vMid).addScaledVector(vHand, la + lb);
+    vU.subVectors(vT, vS);
+    const d = Math.max(Math.abs(la - lb) + 1e-4, Math.min((la + lb) * 0.999, vU.length()));
+    vU.normalize();
+    vT.copy(vS).addScaledVector(vU, d);
+    const cosA = Math.max(-1, Math.min(1, (la * la + d * d - lb * lb) / (2 * la * d)));
+    // the elbow bends towards the pole
+    vPole.addScaledVector(vU, -vPole.dot(vU));
+    if (vPole.lengthSq() < 1e-8) vPole.set(0, -1, 0);
+    vPole.normalize();
+    v1.copy(vS).addScaledVector(vU, la * cosA).addScaledVector(vPole, la * Math.sqrt(1 - cosA * cosA));
+    aim(up, vS, vE, v1);
+    lo.getWorldPosition(vE); hand.getWorldPosition(vW);
+    aim(lo, vE, vW, vT);
+    const holder = this.blades[h];
+    if (holder) {
+      // the blade along vBlade, then rolled about it so the edge leads
+      holder.getWorldPosition(v1);
+      holder.localToWorld(v2.set(0, holder.userData.tip as number, 0)).sub(v1).normalize();
+      rotateWorld(hand, qr.setFromUnitVectors(v2, vBlade));
+      const e = holder.userData.edge as THREE.Vector3 | undefined;
+      if (e) {
+        v1.copy(e).transformDirection(holder.matrixWorld);
+        v1.addScaledVector(vBlade, -v1.dot(vBlade));
+        vEdge.addScaledVector(vBlade, -vEdge.dot(vBlade));
+        if (v1.lengthSq() > 1e-8 && vEdge.lengthSq() > 1e-8) {
+          v1.normalize(); vEdge.normalize();
+          const ang = Math.atan2(v2.crossVectors(v1, vEdge).dot(vBlade), v1.dot(vEdge));
+          rotateWorld(hand, qr.setFromAxisAngle(vBlade, ang));
+        }
+      }
+    }
+    if (w < 1) {
+      up.quaternion.copy(qBase[0].slerp(up.quaternion, w));
+      lo.quaternion.copy(qBase[1].slerp(lo.quaternion, w));
+      hand.quaternion.copy(qBase[2].slerp(hand.quaternion, w));
+      up.updateMatrixWorld(true);
     }
   }
 }
 
 const smooth = (u: number) => u * u * (3 - 2 * u);
 
-/** Clip time of a clip swing: windup → blow (slow out of the windup, fast into the blow) → follow-through. */
-function clipTime(a: Active) {
-  const arc = ARC[a.clip!];
-  if (a.t >= a.impact) return Math.min(arc.follow, arc.blow + (arc.follow - arc.blow) * (a.t - a.impact) / FOLLOW_TIME);
-  return arc.windup + (arc.blow - arc.windup) * (a.t / a.impact) ** 2;
+/** Phase of an IK swing: windup → blow (slow out of the windup, fast into the blow) → follow-through. */
+function phaseOf(a: Active) {
+  if (a.t >= a.impact) return 1 + (FOLLOW_P - 1) * Math.min(1, (a.t - a.impact) / FOLLOW_TIME);
+  return (a.t / a.impact) ** 1.6;
+}
+
+/** Turn `bone` so that the direction from `from` to `cur` (world) points to `to`. */
+function aim(bone: THREE.Object3D, from: THREE.Vector3, cur: THREE.Vector3, to: THREE.Vector3) {
+  v2.subVectors(cur, from).normalize();
+  tC.subVectors(to, from).normalize();
+  rotateWorld(bone, qr.setFromUnitVectors(v2, tC));
+}
+
+/** Turn `bone` by `r` given in world space; its subtree's matrices follow. */
+function rotateWorld(bone: THREE.Object3D, r: THREE.Quaternion) {
+  bone.parent!.getWorldQuaternion(qp);
+  bone.getWorldQuaternion(qb);
+  bone.quaternion.copy(qp.invert().multiply(r).multiply(qb));
+  bone.updateMatrixWorld(true);
 }
 
 /** Smoothstep between keys; implicit rest keys at phase 0 and 2. */
