@@ -453,9 +453,6 @@ export class Game {
     this.pair = swordPair(this.save.weapons[0]?.def, this.save.weapons[1]?.def);
     this.comboShown = -1; // series dots: only the polearm has them
     this.hero.setWeapon(...this.handModels());
-    // two weapons: the free hand holds its weapon up while the other one strikes (polearm swings procedurally)
-    const ready = (it: Item | null) => (this.dual && it && !WEAPONS[it.def].swing ? WEAPONS[it.def].anim : null);
-    this.hero.swinger.ready = [ready(this.save.weapons[0]), ready(this.save.weapons[1])];
   }
 
   /** Body parts borrowed from other characters for the equipped armour. */

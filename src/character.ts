@@ -147,6 +147,7 @@ export class Character {
     this.weapon = name ? attachWeapon(this.model, name) : null;
     this.weaponL = left ? attachWeapon(this.model, left, true) : null;
     this.swinger.armClips?.setLeft(this.weaponL);
+    this.swinger.resetHeld();
     for (const w of [this.weapon, this.weaponL]) w?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
     if (this.highlighted) this.rebuildOutline();
   }
