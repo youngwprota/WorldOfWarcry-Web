@@ -1,6 +1,6 @@
 # WorldOfWarcry — задачи
 
-> Автогенерация из `cards/` (ветка `board`). Интерактивная доска: `npm run board` в основном репозитории.
+> Автогенерация из `cards/`. Интерактивная доска — на GitHub Pages (`board.html`) или `npm run board` локально.
 
 ## TODO (1)
 
