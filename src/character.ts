@@ -108,9 +108,9 @@ export class Character {
         }
       }
     });
+    this.swinger = new Swinger(this.model);
     if (weaponName) this.setWeapon(weaponName);
 
-    this.swinger = new Swinger(this.model);
     const { full, upper, lower } = assets.clipsFor(modelName);
     this.mixer = new THREE.AnimationMixer(this.model);
     const act = (clip: THREE.AnimationClip, w = 0) => {
@@ -144,6 +144,7 @@ export class Character {
     this.weaponL?.removeFromParent();
     this.weapon = name ? attachWeapon(this.model, name) : null;
     this.weaponL = left ? attachWeapon(this.model, left, true) : null;
+    this.swinger.blades = [this.weapon, this.weaponL];
     for (const w of [this.weapon, this.weaponL]) w?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
     if (this.highlighted) this.rebuildOutline();
   }
