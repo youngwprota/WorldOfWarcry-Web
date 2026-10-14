@@ -37,8 +37,8 @@ const IK: Record<AttackAnim, IkSwing> = {
   // front; past the front the torso twist and the wrist carry the blade across (the short arm across the chest went
   // into the body)
   SwordAttack: {
-    arm: [[0, -80, 22, 0.85, -140, 20], [0.6, -55, 12, 0.93, -85, 8], [1, 0, -3, 0.97, 35, 0], [1.3, 18, -18, 0.95, 100, -10]],
-    pole: [-0.7, -1, -0.3], lift: 0,
+    arm: [[0, -80, 22, 0.85, -160, 45], [0.6, -55, 12, 0.93, -95, 20], [1, 0, -3, 0.97, 35, 0], [1.3, 18, -18, 0.95, 100, -10]],
+    pole: [-0.5, -1, 0.3], lift: 0,
     body: [[0, -0.6, 0, -0.06], [1, 0.1, 0.05, 0.14], [1.3, 0.55, 0.05, 0.1]],
   },
   // diagonal chop: the hand high by the right shoulder (further back looked unnatural), the axe cocked up and back,
@@ -117,6 +117,15 @@ const vU = new THREE.Vector3();
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
 const qBase = [new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quaternion()];
+/** The hands' rest rotations this frame (before any IK), for the wrist limits. */
+const qRest = [new THREE.Quaternion(), new THREE.Quaternion()];
+const qIdent = new THREE.Quaternion();
+const vAx = new THREE.Vector3();
+const vBd = new THREE.Vector3();
+/** Wrist limits, rad: the bend of the hand off the forearm; the twist beyond it is lost. */
+const WRIST_BEND = 0.95;
+/** The forearm takes the wrist's twist (pronation) up to this, rad. */
+const FOREARM_TWIST = 1.75;
 /** Midpoint of the shoulders and half their span: the hands' targets are taken from symmetric points around it. */
 const vMid = new THREE.Vector3();
 let halfSpan = 0;
@@ -289,6 +298,7 @@ export class Swinger {
         halfSpan = v1.distanceTo(v2) / 2;
         ready = true;
       }
+      qRest[h].copy(this.chain[h][2]?.quaternion ?? qIdent);
       if (holding) {
         const b = smooth(hd.back);
         this.ikArm(h as 0 | 1, hd.anim!, hd.at * (1 - b), Math.sin(Math.PI * b), hd.w);
@@ -338,21 +348,25 @@ export class Swinger {
     aim(lo, vE, vW, vT);
     const holder = this.blades[h];
     if (holder) {
-      // the blade along vBlade, then rolled about it so the edge leads
-      holder.getWorldPosition(v1);
-      holder.localToWorld(v2.set(0, holder.userData.tip as number, 0)).sub(v1).normalize();
-      rotateWorld(hand, qr.setFromUnitVectors(v2, vBlade));
-      const e = holder.userData.edge as THREE.Vector3 | undefined;
-      if (e) {
-        v1.copy(e).transformDirection(holder.matrixWorld);
-        v1.addScaledVector(vBlade, -v1.dot(vBlade));
-        vEdge.addScaledVector(vBlade, -vEdge.dot(vBlade));
-        if (v1.lengthSq() > 1e-8 && vEdge.lengthSq() > 1e-8) {
-          v1.normalize(); vEdge.normalize();
-          const ang = Math.atan2(v2.crossVectors(v1, vEdge).dot(vBlade), v1.dot(vEdge));
-          rotateWorld(hand, qr.setFromAxisAngle(vBlade, ang));
-        }
+      // the fist holds the blade across the forearm: the forearm turns about itself to bring the blade round towards
+      // vBlade, the wrist bends the rest of the way, at most WRIST_BEND (the blade set exactly along vBlade, edge
+      // rolled to lead, bent the hand up to 135° off the forearm)
+      hand.quaternion.copy(qRest[h]);
+      hand.updateMatrixWorld(true);
+      hand.getWorldPosition(vW);
+      vAx.subVectors(vW, vE).normalize();
+      bladeDir(holder, v2);
+      v1.copy(v2).addScaledVector(vAx, -v2.dot(vAx));
+      vT.copy(vBlade).addScaledVector(vAx, -vBlade.dot(vAx));
+      if (v1.lengthSq() > 1e-8 && vT.lengthSq() > 1e-8) {
+        v1.normalize(); vT.normalize();
+        let ang = Math.atan2(vU.crossVectors(v1, vT).dot(vAx), v1.dot(vT));
+        ang = Math.max(-FOREARM_TWIST, Math.min(FOREARM_TWIST, ang));
+        rotateWorld(lo, qr.setFromAxisAngle(vAx, ang));
       }
+      bladeDir(holder, v2);
+      qr.setFromUnitVectors(v2, vBlade);
+      rotateWorld(hand, clampTurn(qr, WRIST_BEND));
     }
     if (w < 1) {
       up.quaternion.copy(qBase[0].slerp(up.quaternion, w));
@@ -365,10 +379,24 @@ export class Swinger {
 
 const smooth = (u: number) => u * u * (3 - 2 * u);
 
+/** `q` (unit, in place) turned by at most `max` rad: the same axis, the angle capped. */
+function clampTurn(q: THREE.Quaternion, max: number) {
+  if (q.w < 0) q.set(-q.x, -q.y, -q.z, -q.w);
+  const ang = 2 * Math.acos(Math.min(1, q.w));
+  if (ang > max) q.slerp(qIdent, 1 - max / ang);
+  return q;
+}
+
 /** Phase of an IK swing: windup → blow (slow out of the windup, fast into the blow) → follow-through. */
 function phaseOf(a: Active) {
   if (a.t >= a.impact) return 1 + (FOLLOW_P - 1) * Math.min(1, (a.t - a.impact) / FOLLOW_TIME);
   return (a.t / a.impact) ** 1.6;
+}
+
+/** World direction of the blade of `holder` (grip → tip) into `out`. */
+function bladeDir(holder: THREE.Object3D, out: THREE.Vector3) {
+  holder.getWorldPosition(vBd);
+  return holder.localToWorld(out.set(0, holder.userData.tip as number, 0)).sub(vBd).normalize();
 }
 
 /** Turn `bone` so that the direction from `from` to `cur` (world) points to `to`. */
