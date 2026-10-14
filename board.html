@@ -144,6 +144,8 @@ function githubBackend(owner, repo) {
   const blobCache = new Map(); // blob sha → текст (неизменяем)
   let token = '';
   try { token = localStorage.getItem('board-token') || ''; } catch {}
+  // Сохранённый раньше fine-grained токен не умеет писать в репозиторий — сбрасываем, чтобы войти заново.
+  if (token.startsWith('github_pat_')) { token = ''; try { localStorage.removeItem('board-token'); } catch {} }
   let snapshot = null; // { config, cards }
 
   const gh = async (path, opts = {}) => {
@@ -151,7 +153,13 @@ function githubBackend(owner, repo) {
     if (token) headers.Authorization = `Bearer ${token}`;
     const r = await fetch(path.startsWith('http') ? path : API + path, { ...opts, headers, cache: token ? 'no-store' : 'default' });
     if (r.status === 403 && r.headers.get('x-ratelimit-remaining') === '0') throw new Error('лимит GitHub API без токена исчерпан — войдите или подождите');
-    return json(r);
+    return json(r).catch(e => {
+      // Права аккаунта (permissions.push) не говорят о правах самого токена — недостаток прав видно только при записи.
+      if (/not accessible by personal access token/i.test(e.message)) {
+        throw new Error('У токена нет права на запись. Нажмите «🔑 Токен» → «Выйти» и войдите заново с classic-токеном (scope public_repo) — ссылка в окне входа.');
+      }
+      throw e;
+    });
   };
   const raw = async (commit, path, sha) => {
     if (blobCache.has(sha)) return blobCache.get(sha);
@@ -227,17 +235,16 @@ function githubBackend(owner, repo) {
       await commit(`board: − ${id}`, () => ({ path: `cards/${id}.md`, card: null }));
     },
     async login(t) {
-      const prev = token;
+      // Fine-grained токен не даёт соавтору доступа к чужому личному репозиторию, а его права не проверить заранее.
+      if (t.startsWith('github_pat_')) throw new Error('Это fine-grained токен — нужен classic (начинается с ghp_). Создайте его по ссылке выше.');
+      const r = await fetch(API, { headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${t}` }, cache: 'no-store' });
+      if (r.status === 401) throw new Error('токен неверный или истёк');
+      const repoInfo = await json(r);
+      const scopes = (r.headers.get('x-oauth-scopes') || '').split(',').map(s => s.trim());
+      if (!scopes.includes('public_repo') && !scopes.includes('repo')) throw new Error('у токена нет scope public_repo — создайте новый по ссылке выше');
+      if (!repoInfo.permissions?.push) throw new Error('ваш аккаунт не соавтор репозитория — владелец добавляет в Settings → Collaborators');
       token = t;
-      try {
-        const r = await gh('').catch(e => {
-          throw new Error(/Bad credentials/i.test(e.message) ? 'токен неверный или истёк' : e.message);
-        });
-        if (!r.permissions?.push) {
-          throw new Error('нет права записи: ваш аккаунт не соавтор репозитория (владелец добавляет в Settings → Collaborators) или у токена нет scope public_repo');
-        }
-        try { localStorage.setItem('board-token', t); } catch {}
-      } catch (e) { token = prev; throw e; }
+      try { localStorage.setItem('board-token', t); } catch {}
     },
     logout() { token = ''; try { localStorage.removeItem('board-token'); } catch {} },
   };
