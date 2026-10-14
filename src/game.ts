@@ -448,6 +448,7 @@ export class Game {
   private equipVisual() {
     this.pair = swordPair(this.save.weapons[0]?.def, this.save.weapons[1]?.def);
     this.comboShown = -1; // series dots: only the polearm has them
+    this.hero.swinger.dual = this.dual;
     this.hero.setWeapon(...this.handModels());
   }
 

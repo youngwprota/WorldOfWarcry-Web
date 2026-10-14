@@ -21,6 +21,25 @@ const KEYS: Record<SwingKind, Key[]> = {
   overhead: [[0.6, -0.2, -0.3, 2.7, -0.1, 0.1], [1, 0.1, 0.5, 0.9, 0.1, 0], [1.4, 0.05, 0.4, 0.7, 0.05, 0]],
 };
 
+/**
+ * Two weapons: wider swings that start and end drawn back (phase 0 and 2 = the windup), and an idle hand waits drawn
+ * back too — one hand strikes while the other is cocked, then they trade (a pendulum, not two pokes in front).
+ */
+const DUAL_WIDE: Partial<Record<SwingKind, Key[]>> = {
+  slashRL: [[0, -0.7, 0, 1.25, -1.7, 0.6], [1, 0.2, 0.15, 1.45, 0.15, 0.1], [1.4, 0.65, 0.1, 1.15, 1.35, 0]],
+  overhead: [[0, -0.25, -0.15, 2.95, -0.2, 0.3], [1, 0.1, 0.4, 0.8, 0.1, 0], [1.4, 0.05, 0.3, 0.55, 0.05, 0]],
+};
+const DUAL_KEYS = Object.fromEntries((Object.keys(KEYS) as SwingKind[]).map((k) => {
+  const keys = DUAL_WIDE[k] ?? KEYS[k];
+  // the first key is the windup: it becomes both ends of the swing
+  const windup = keys[0].slice(1) as number[];
+  return [k, [[0, ...windup], ...keys.slice(1), [2, ...windup]] as Key[]];
+})) as Record<SwingKind, Key[]>;
+/** Windup pose of each swing (yaw, lean, fwd, sweep, out): where an idle hand waits with two weapons. */
+const WINDUP = Object.fromEntries((Object.keys(KEYS) as SwingKind[]).map((k) => [k, DUAL_KEYS[k][0].slice(1)])) as Record<SwingKind, number[]>;
+/** Seconds after the last swing the idle hand stays drawn back. */
+const COMBAT_HOLD = 1.5;
+
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const AXIS_Y = new THREE.Vector3(0, 1, 0);
 const AXIS_Z = new THREE.Vector3(0, 0, 1);
@@ -39,6 +58,12 @@ export class Swinger {
   /** Smoothed torso twist and bend: the lead swing changes hands without a jump. */
   private yaw = 0;
   private lean = 0;
+  /** Two weapons in hand: wide swings from a drawn-back hand (DUAL_KEYS). */
+  dual = false;
+  /** Last swing of each hand (its windup is the idle pose) and how far the idle hand is drawn back. */
+  private ready: (SwingKind | null)[] = [null, null];
+  private readyW = [0, 0];
+  private sinceSwing = 99;
 
   constructor(private model: THREE.Object3D) {
     this.spine = model.getObjectByName('spine_01') ?? null;
@@ -49,6 +74,8 @@ export class Swinger {
   start(kind: SwingKind, hand: 0 | 1, dur: number, impact: number, torso = 1) {
     const a = this.hands[hand] ?? (this.hands[hand] = { kind, t: 0, dur, impact, torso });
     a.kind = kind; a.t = 0; a.dur = Math.max(dur, impact + 0.05); a.impact = impact; a.torso = torso;
+    this.ready[hand] = kind;
+    this.sinceSwing = 0;
   }
 
   active(hand: 0 | 1) { return !!this.hands[hand]; }
@@ -62,15 +89,29 @@ export class Swinger {
       const a = this.hands[h];
       if (a && a.t + dt < a.dur && a.t < leadT) { lead = h; leadT = a.t; }
     }
+    this.sinceSwing += dt;
+    const k = 1 - Math.exp(-dt * 16);
     for (let h = 0; h < 2; h++) {
-      const a = this.hands[h];
-      if (!a) continue;
-      a.t += dt;
-      if (a.t >= a.dur) { this.hands[h] = null; continue; }
-      const phase = a.t < a.impact ? a.t / a.impact : 1 + (a.t - a.impact) / (a.dur - a.impact);
-      sample(KEYS[a.kind], phase, pose);
+      let a = this.hands[h];
+      if (a) {
+        a.t += dt;
+        if (a.t >= a.dur) { this.hands[h] = a = null; }
+      }
       const m = h ? -1 : 1; // the left hand mirrors the twist and the sweep
-      if (h === lead) { yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso * a.torso; }
+      if (a) {
+        const phase = a.t < a.impact ? a.t / a.impact : 1 + (a.t - a.impact) / (a.dur - a.impact);
+        sample(this.dual ? DUAL_KEYS[a.kind] : KEYS[a.kind], phase, pose);
+        if (h === lead) { yaw = pose[0] * m * a.torso; lean = pose[1] * a.torso * a.torso; }
+        this.readyW[h] = this.dual ? 1 : 0;
+      } else {
+        // two weapons in a fight: the idle hand waits drawn back for its next blow, then eases down
+        const r = this.ready[h];
+        const want = this.dual && r && this.sinceSwing < COMBAT_HOLD ? 1 : 0;
+        this.readyW[h] += (want - this.readyW[h]) * (want ? k : 1 - Math.exp(-dt * 4));
+        if (!r || this.readyW[h] < 0.01) continue;
+        const w = WINDUP[r];
+        for (let i = 0; i < 5; i++) pose[i] = w[i] * this.readyW[h];
+      }
       const arm = this.arms[h];
       if (arm) {
         // fwd: hanging (−Y) towards +Z is a negative turn about X; out: right arm to −X is negative about Z
@@ -78,7 +119,6 @@ export class Swinger {
         rotateInModel(arm, this.model, qa.setFromAxisAngle(AXIS_Y, pose[3] * m));
       }
     }
-    const k = 1 - Math.exp(-dt * 16);
     this.yaw += (yaw - this.yaw) * k;
     this.lean += (lean - this.lean) * k;
     if (this.spine && (Math.abs(this.yaw) > 1e-3 || Math.abs(this.lean) > 1e-3)) {
@@ -96,7 +136,7 @@ function sample(keys: Key[], phase: number, out: number[]) {
     else { next = k; break; }
   }
   const span = next[0] - prev[0];
-  let u = span > 0 ? (phase - prev[0]) / span : 1;
+  let u = span > 0 ? (phase - prev[0]) / span : 0;
   u = u * u * (3 - 2 * u);
   for (let i = 0; i < 5; i++) out[i] = prev[i + 1] + (next[i + 1] - prev[i + 1]) * u;
 }
