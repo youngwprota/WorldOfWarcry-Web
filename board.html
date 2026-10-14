@@ -100,9 +100,10 @@
 <dialog id="login-dlg">
   <form method="dialog" id="login-form">
     <h3 style="margin:0">Редактирование доски</h3>
-    <p class="small" style="margin:0">Нужен ваш личный GitHub-токен с доступом к репозиторию. Создайте
-      <a id="pat-link" target="_blank" rel="noopener">fine-grained token</a>: Repository access → только этот репозиторий,
-      Permissions → Contents: <b>Read and write</b>. Токен хранится только в этом браузере; изменения коммитятся в ветку <code>board</code> от вашего имени.</p>
+    <p class="small" style="margin:0">Нужен ваш личный GitHub-токен. Откройте
+      <a id="pat-link" target="_blank" rel="noopener">создание classic-токена</a> (галочка <b>public_repo</b> уже стоит),
+      задайте срок действия, нажмите <b>Generate token</b> и вставьте его сюда. Ваш аккаунт должен быть соавтором репозитория
+      (Settings → Collaborators). Токен хранится только в этом браузере; изменения коммитятся в ветку <code>board</code> от вашего имени.</p>
     <label>Токен <input id="token-in" type="password" autocomplete="off" required></label>
     <div class="small" id="login-err" style="color:var(--danger)"></div>
     <div class="actions">
@@ -229,8 +230,12 @@ function githubBackend(owner, repo) {
       const prev = token;
       token = t;
       try {
-        const r = await gh('');
-        if (!r.permissions?.push) throw new Error('у токена нет права записи в репозиторий');
+        const r = await gh('').catch(e => {
+          throw new Error(/Bad credentials/i.test(e.message) ? 'токен неверный или истёк' : e.message);
+        });
+        if (!r.permissions?.push) {
+          throw new Error('нет права записи: ваш аккаунт не соавтор репозитория (владелец добавляет в Settings → Collaborators) или у токена нет scope public_repo');
+        }
         try { localStorage.setItem('board-token', t); } catch {}
       } catch (e) { token = prev; throw e; }
     },
@@ -436,7 +441,8 @@ $('#sync-btn').onclick = async () => {
 };
 
 if (backend.kind === 'github') {
-  $('#pat-link').href = 'https://github.com/settings/personal-access-tokens/new';
+  // Classic-токен: fine-grained токены не работают для соавторов чужого личного репозитория.
+  $('#pat-link').href = 'https://github.com/settings/tokens/new?scopes=public_repo&description=WorldOfWarcry%20board';
   $('#login-btn').onclick = () => { $('#login-err').textContent = ''; $('#token-in').value = ''; $('#logout-btn').hidden = !backend.canEdit(); $('#login-dlg').showModal(); };
   $('#logout-btn').onclick = () => { backend.logout(); $('#login-dlg').close(); render(); };
   $('#login-form').onsubmit = async e => {
