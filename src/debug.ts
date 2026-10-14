@@ -56,9 +56,9 @@ function locationRows(): [string, Action[]][] {
 
 const SECTIONS: [string, Action[]][] = [
   ['Бой', [
-    ['HP 10%', (g) => g.debugSetHp(0.1)],
-    ['HP 40%', (g) => g.debugSetHp(0.4)],
-    ['HP 100%', (g) => g.debugSetHp(1)],
+    ['ХП 10%', (g) => g.debugSetHp(0.1)],
+    ['ХП 40%', (g) => g.debugSetHp(0.4)],
+    ['ХП 100%', (g) => g.debugSetHp(1)],
     ['Бессмертие', (g) => { g.god = !g.god; }, 'god'],
     ['Убить рядом', (g) => g.debugKillNearby(), 'wide'],
   ]],
@@ -81,7 +81,7 @@ const SECTIONS: [string, Action[]][] = [
   ]],
   ['Статы (+очки)', [
     ['+10 урон', (g) => g.debugAddStat('power', 10)],
-    ['+50 HP', (g) => g.debugAddStat('hp', 50)],
+    ['+50 хп', (g) => g.debugAddStat('hp', 50)],
     ['+5 реген', (g) => g.debugAddStat('regen', 5)],
     ['+25 скор.', (g) => g.debugAddStat('speed', 25)],
     ['+25 защ.', (g) => g.debugAddStat('defense', 25)],
@@ -89,7 +89,7 @@ const SECTIONS: [string, Action[]][] = [
     ['+25 крит', (g) => g.debugAddStat('crit', 25)],
     ['+25 к.урон', (g) => g.debugAddStat('critDmg', 25)],
     ['+10% урон', (g) => g.debugAddStat('power', 10, true)],
-    ['+10% HP', (g) => g.debugAddStat('hp', 10, true)],
+    ['+10% хп', (g) => g.debugAddStat('hp', 10, true)],
     ['+10% реген', (g) => g.debugAddStat('regen', 10, true)],
     ['Сбросить дебаг-статы', (g) => g.debugClearStats(), 'wide'],
   ]],
@@ -111,7 +111,7 @@ const SECTIONS: [string, Action[]][] = [
     ['×1', (g) => g.debugSetMobScale(1)],
     ['+0.1', (g) => g.debugSetMobScale(g.mobScale + 0.1)],
   ]],
-  ['FOV камеры', [
+  ['Угол обзора камеры', [
     ['−5', (g) => g.debugSetFov(g.camera.fov - 5)],
     ['54', (g) => g.debugSetFov(54)],
     ['+5', (g) => g.debugSetFov(g.camera.fov + 5)],
@@ -178,9 +178,9 @@ export class DebugPanel {
     const d = this.game.debugInfo();
     this.el.querySelector('.god')?.classList.toggle('on', d.god);
     this.info.textContent = [
-      `HP ${d.hp}/${d.maxHp}${d.god ? '  [бессмертие]' : ''}`,
+      `ХП ${d.hp}/${d.maxHp}${d.god ? '  [бессмертие]' : ''}`,
       `Крит ${pct(d.crit)} ×${d.critMul.toFixed(2)}  уклон ${pct(d.dodge)}  ${d.speed.toFixed(2)} м/с`,
-      `Скейл: герой ×${d.heroScale.toFixed(2)}  враги ×${d.mobScale.toFixed(2)}  FOV ${d.fov}°`,
+      `Скейл: герой ×${d.heroScale.toFixed(2)}  враги ×${d.mobScale.toFixed(2)}  обзор ${d.fov}°`,
     ].join('\n');
   }
 }

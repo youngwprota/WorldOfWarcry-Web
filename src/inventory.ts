@@ -22,14 +22,14 @@ const pct1 = (x: number) => `${+(x * 100).toFixed(1)}%`;
 
 /** Stat window titles, icons and a line on how the stat works. */
 const STAT_UI: Record<StatId, { name: string; icon: string; note: string }> = {
-  power: { name: 'Урон', icon: 'sword', note: 'складывается с уроном оружия, проценты умножают сумму' },
+  power: { name: 'Урон', icon: 'hit', note: 'складывается с уроном оружия, проценты умножают сумму' },
   hp: { name: 'Здоровье', icon: 'heart', note: 'сумма × проценты' },
-  regen: { name: 'Реген здоровья', icon: 'regen', note: 'HP в секунду: сумма × проценты' },
+  regen: { name: 'Реген здоровья', icon: 'regen', note: 'хп/с: сумма × проценты' },
   speed: { name: 'Скорость передвижения', icon: 'run', note: `100 очков = ${HERO.baseSpeed} м/с, предел ${HERO.baseSpeed * (1 + STAT_CURVE.speed.max)} м/с` },
-  defense: { name: 'Защита', icon: 'shield', note: `урон × 100 / (100 + защита), предел −${pct(DEFENSE_CAP)}` },
-  crit: { name: 'Шанс крита', icon: 'star', note: `предел ${pct(STAT_CURVE.crit.base + STAT_CURVE.crit.max)}` },
-  critDmg: { name: 'Урон крита', icon: 'flame', note: `предел ${pct(STAT_CURVE.critDmg.base + STAT_CURVE.critDmg.max)}` },
-  dodge: { name: 'Уклонение', icon: 'flag', note: `от любых ударов, предел ${pct(STAT_CURVE.dodge.max)}` },
+  defense: { name: 'Защита', icon: 'defense', note: `урон × 100 / (100 + защита), предел −${pct(DEFENSE_CAP)}` },
+  crit: { name: 'Шанс крита', icon: 'crit', note: `предел ${pct(STAT_CURVE.crit.base + STAT_CURVE.crit.max)}` },
+  critDmg: { name: 'Урон крита', icon: 'critdmg', note: `предел ${pct(STAT_CURVE.critDmg.base + STAT_CURVE.critDmg.max)}` },
+  dodge: { name: 'Уклонение', icon: 'dodge', note: `от любых ударов, предел ${pct(STAT_CURVE.dodge.max)}` },
 };
 
 /** Rotatable 3D hero for the character sheet (own small renderer, disposed on close). */
@@ -159,17 +159,17 @@ export class Inventory {
     const s = g.stats;
     const hit = g.itemDamage(g.weaponItem) * g.handMul();
     const big = (ic: string, v: string, label: string) => `<div>${art(ic, 46)}<b>${v}</b><span>${label}</span></div>`;
-    q('#i-big').innerHTML = big('sword', fmtK(g.heroDps()), 'DPS') + big('heart', fmtK(g.maxHp), 'HP') +
-      big('regen', fmtK(g.regen), 'Реген');
+    q('#i-big').innerHTML = big('dps', fmtK(g.heroDps()), 'урон/с') + big('heart', fmtK(g.maxHp), 'хп') +
+      big('regen', fmtK(g.regen), 'хп/с');
     // a chip with `k` opens that stat's breakdown
     const chip = (ic: string, v: string, title: string, k?: StatId) =>
       `<div class="chip" title="${title}"${k ? ` data-stat="${k}"` : ''}>${art(ic, 28)}<b>${v}</b></div>`;
-    q('#i-stats').innerHTML = chip('hammer', fmtK(Math.round(hit)), 'Урон за удар', 'power') +
-      chip('shield', `${g.defense} <small>−${pct(1 - armorMul(g.defense))}</small>`, 'Защита', 'defense') +
+    q('#i-stats').innerHTML = chip('hit', fmtK(Math.round(hit)), 'Урон за удар', 'power') +
+      chip('defense', `${g.defense} <small>−${pct(1 - armorMul(g.defense))}</small>`, 'Защита', 'defense') +
       chip('run', `${g.speed.toFixed(1)} <small>м/с</small>`, 'Скорость', 'speed') +
-      chip('star', pct(s.crit), 'Шанс крита', 'crit') +
-      chip('flame', `×${s.critMul.toFixed(2)}`, 'Урон крита', 'critDmg') +
-      chip('flag', pct(s.dodge), 'Уклонение', 'dodge');
+      chip('crit', pct(s.crit), 'Шанс крита', 'crit') +
+      chip('critdmg', `×${s.critMul.toFixed(2)}`, 'Урон крита', 'critDmg') +
+      chip('dodge', pct(s.dodge), 'Уклонение', 'dodge');
   }
 
   /** The window over the inventory (#i-sw): the full stat list or one stat's breakdown. */
@@ -218,7 +218,7 @@ export class Inventory {
       dodge: pct1(s.dodge),
     };
     const total = isPctStat(k)
-      ? `${fmtK(b.sum)} × ${b.mult.toFixed(2)} = <b>${fmtK(k === 'hp' ? Math.round(b.value) : b.value)}${k === 'regen' ? '/с' : ''}</b>`
+      ? `${fmtK(b.sum)} × ${b.mult.toFixed(2)} = <b>${fmtK(k === 'hp' ? Math.round(b.value) : b.value)}${k === 'regen' ? ' хп/с' : ''}</b>`
       : `${fmtK(b.sum)} = <b>${fmtK(b.sum)}</b>`;
     const formula = `<div class="sd-formula">${total}${effect[k] ? ` <i>&gt;&gt;&gt;</i> <b>${effect[k]}</b>` : ''}</div>`;
     const ui = STAT_UI[k];
@@ -238,7 +238,7 @@ export class Inventory {
       // the same total as the breakdown: (weapon + power) × percents
       stat('power', fmtK((weaponBase(g.weaponItem) + s.power) * s.powerMul), 'вместе с оружием'),
       stat('hp', fmtK(g.maxHp)),
-      stat('regen', `${fmtK(g.regen)}/с`, 'здоровья в секунду'),
+      stat('regen', `${fmtK(g.regen)} хп/с`),
       stat('defense', String(g.defense), `−${pct(1 - armorMul(g.defense))} входящего урона`),
       stat('speed', `${g.speed.toFixed(2)} м/с`, `${g.speedStat} очков`),
       stat('crit', pct1(s.crit), `${s.critPts} очков`),
@@ -390,7 +390,8 @@ export class Inventory {
       return cur && o !== undefined && o !== v ? `<i>${o}</i><em>›</em><b class="${cls}">${v}</b>` : `<b>${v}</b>`;
     };
     const [main, ...rest] = itemLines(it).filter(([k]) => k !== 'Тип');
-    const mainIcon = it.kind === 'weapon' ? art(it.def, 30) : art('shield', 30);
+    // the stat's own icon: the coloured sword for damage, the coloured shield for defense
+    const mainIcon = it.kind === 'weapon' ? art('dps', 30) : art('defense', 30);
     const sub = rest.map(([k, v]) => `<div><span>${k}</span>${cmp(k, v)}</div>`).join('');
     let ability: string;
     if (it.kind === 'weapon') {
@@ -402,7 +403,7 @@ export class Inventory {
       if (w.cycle) ability = `<div class="ab-title">Цикл</div><p>Без остановки: взмах справа, взмах слева (широко, слабее) и узкий сильный <b>укол</b>. Цикл не сбрасывается.</p>` + ability;
       if (w.orbit) ability = `<div class="ab-title">Бросок</div><p>Коса летит вокруг героя <b>${w.orbit.time} с</b> и режет всех на пути, потом возвращается в руку.</p>` + ability;
       if (w.ring) ability = `<div class="ab-title">Бонк</div><p>Бьёт по головам в круге перед героем. Оглушает с шансом <b>${Math.round((w.stun ?? 0) * 100)}%</b>, в <b>${Math.round(w.ring.chance * 100)}%</b> случаев — звонкий удар <b>×${w.ring.mult}</b>.</p>` + ability;
-      if (w.assassin) ability = `<div class="ab-title">Убийца</div><p>Рывок к ближайшему врагу и удар только по нему. Всегда оглушает на <b>${w.assassin.stun} с</b>, обычных врагов ниже <b>${Math.round(w.assassin.execute * 100)}%</b> HP казнит.</p>` + ability;
+      if (w.assassin) ability = `<div class="ab-title">Убийца</div><p>Рывок к ближайшему врагу и удар только по нему. Всегда оглушает на <b>${w.assassin.stun} с</b>, обычных врагов ниже <b>${Math.round(w.assassin.execute * 100)}%</b> хп казнит.</p>` + ability;
       if (w.guard) ability = `<div class="ab-title">Защита</div><p>−${Math.round(w.guard.reduce * 100)}% входящего урона. Удар по герою с шансом <b>${Math.round(w.guard.counter.normal * 100)}–${Math.round(w.guard.counter.boss * 100)}%</b> (чем сильнее враг, тем выше) вызывает контратаку оружием в другой руке. Рядом с оружием сам не бьёт.</p>` + ability;
       const pt = pairText(it.def);
       if (pt) ability += `<div class="ab-title">С мечом в другой руке</div><p>${pt}</p>`;

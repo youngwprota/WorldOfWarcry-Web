@@ -1,4 +1,4 @@
-import { STAT_ICON, mini } from './art';
+import { STAT_ICON, art, hasPng, mini, pngUrl } from './art';
 import { ORBS, RESIST_MULT, WEAPONS, fmtOrb, type DamageType, type OrbKind, type ResistTier } from './config';
 
 /** Anything with resistances and a fixed reward: mobs and breakable props. */
@@ -69,7 +69,15 @@ export function resistIcons(def: Target, size = 19) {
     const tier = def.resist[type] ?? 'normal';
     if (tier === 'normal') return '';
     const names = Object.values(WEAPONS).filter((w) => w.type === type).map((w) => w.name).join(', ');
-    return `<span class="ri ${tier}" title="${names}: ${TIER_NAME[tier]} ×${RESIST_MULT[tier]}">${weaponSvg(DAMAGE_TYPE_ICON[type], TIER_COLOR[tier], size)}</span>`;
+    const id = DAMAGE_TYPE_ICON[type];
+    const title = `${names}: ${TIER_NAME[tier]} ×${RESIST_MULT[tier]}`;
+    // the game's weapon icon (white, ink outline) with the tier colour multiplied over it: the white turns
+    // green / orange / red, the outline stays dark
+    if (hasPng(id)) {
+      return `<span class="ri png ${tier}" title="${title}" style="--tc:${TIER_COLOR[tier]};--ic:url('${pngUrl(id)}');width:${size}px;height:${size}px">` +
+        `${art(id, size)}<i></i></span>`;
+    }
+    return `<span class="ri ${tier}" title="${title}">${weaponSvg(id, TIER_COLOR[tier], size)}</span>`;
   }).join('');
 }
 
@@ -83,10 +91,26 @@ export function rewardChips(def: Pick<Target, 'reward'>, raw = false) {
     .join('');
 }
 
-/** Compact numbers: 950, 1K, 1.4K, 13.5K, 135K, 1.2M. */
+/**
+ * Loot over a unit's HP bar: an item drop is just the item's icon (glowing in its quality colour);
+ * otherwise the stats it gives, each a big number with the stat's icon ("20 ❤").
+ * `raw`: the numbers are stat units already (a micro-boss's bonus: hp 500 → 500), not orb counts.
+ */
+export function lootHtml(reward: Partial<Record<OrbKind, number>>, item?: { icon: string; color: string } | null, raw = false) {
+  if (item) return `<span class="lt item" style="--rc:${item.color}">${art(item.icon, 40)}</span>`;
+  return (Object.entries(reward) as [OrbKind, number][])
+    .map(([k, n]) => `<span class="lt" title="${ORBS[k].label}"><b>${fmtK(raw ? n : Math.round(ORBS[k].value * n))}</b>${art(STAT_ICON[k], 28)}</span>`)
+    .join('');
+}
+
+/** Letters of the compact numbers (Cyrillic): тысячи, миллионы, миллиарды, триллионы. */
+const SUFFIX = ['', 'К', 'М', 'Б', 'Т'];
+/** Compact numbers: 950, 1К, 1.4К, 13.5К, 135К, 1.2М, 3.4Б, 5Т. */
 export function fmtK(n: number) {
-  const a = Math.abs(n);
-  if (a < 1000) return String(Math.round(n * 10) / 10);
-  const [v, s] = a < 1e6 ? [n / 1e3, 'K'] : [n / 1e6, 'M'];
-  return +v.toFixed(Math.abs(v) < 100 ? 1 : 0) + s;
+  if (Math.abs(n) < 1000) return String(Math.round(n * 10) / 10);
+  let i = Math.min(SUFFIX.length - 1, Math.floor(Math.log10(Math.abs(n)) / 3));
+  let v = n / 1000 ** i;
+  // 999.96K rounds to 1000K: show 1M instead
+  if (Math.abs(+v.toFixed(Math.abs(v) < 100 ? 1 : 0)) >= 1000 && i < SUFFIX.length - 1) { i++; v /= 1000; }
+  return +v.toFixed(Math.abs(v) < 100 ? 1 : 0) + SUFFIX[i];
 }

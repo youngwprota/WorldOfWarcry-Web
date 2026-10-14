@@ -146,6 +146,14 @@ export class Trail {
       const tip = (weapon.userData.tip as number | undefined) ?? 60;
       weapon.localToWorld(pA.set(0, tip * 0.35, 0));
       weapon.localToWorld(pB.set(0, tip, 0));
+      // a new ribbon: collapse every old sample onto the blade, or the strip would stretch from wherever they were
+      // (the world origin on the very first swing) to the blade
+      if (this.live <= 0) {
+        for (let i = 0; i < SEG; i++) {
+          this.ring.set([pA.x, pA.y, pA.z, pB.x, pB.y, pB.z], i * 6);
+          this.age[i] = 99;
+        }
+      }
       const k = this.head * 6;
       this.ring[k] = pA.x; this.ring[k + 1] = pA.y; this.ring[k + 2] = pA.z;
       this.ring[k + 3] = pB.x; this.ring[k + 4] = pB.y; this.ring[k + 5] = pB.z;

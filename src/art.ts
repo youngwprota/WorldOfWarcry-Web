@@ -147,7 +147,7 @@ const ART: Record<string, string> = {
 };
 
 /** Sprite of each stat: HUD stats panel and kill-reward chips. */
-export const STAT_ICON: Record<OrbKind, string> = { power: 'sword', hp: 'heart', regen: 'regen', speed: 'run' };
+export const STAT_ICON: Record<OrbKind, string> = { power: 'dps', hp: 'heart', regen: 'regen', speed: 'run' };
 
 /**
  * Simplified stat sprites for the small over-head chips: one flat silhouette, outlined in a darker shade of its own
@@ -176,7 +176,31 @@ export function mini(id: string, size = 14) {
 const PNG: Record<string, string> = {
   gear: 'i-gear', bag: 'i-bag', skull: 'i-skull', hourglass: 'i-hourglass',
   heart: 'i-heart', regen: 'i-regen', fist: 'i-fist', run: 'i-run',
+  // white with an ink outline: the main boss's skull, swords / axes / hammers, the armour slots (legs = boots)
+  boss: 'i-boss', sword: 'i-sword', axe: 'i-axe', hammer: 'i-hammer',
+  head: 'i-head', chest: 'i-chest', arms: 'i-arms', legs: 'i-legs', ring: 'i-ring', amulet: 'i-amulet',
+  // orange crit: crit damage, and crit chance (with "%"); the defense stat's shield
+  crit: 'i-crit', critdmg: 'i-critdmg', defense: 'i-defense',
+  // coloured: damage of one blow (hammer), damage per second (sword); blue chevrons of dodge
+  hit: 'i-hit', dps: 'i-dps', dodge: 'i-dodge',
 };
+/** The id has a pack PNG (art() draws it instead of the vector). */
+export const hasPng = (id: string) => !!PNG[id];
+/** URL of a pack PNG icon. */
+export const pngUrl = (id: string) => `${import.meta.env.BASE_URL}assets/ui/${PNG[id]}.png`;
+
+const pngCache = new Map<string, HTMLImageElement>();
+/** A pack PNG icon as an image for canvas drawing (map marks); null for ids without one. Draw once `complete`. */
+export function artImage(id: string) {
+  if (!PNG[id]) return null;
+  let img = pngCache.get(id);
+  if (!img) {
+    img = new Image();
+    img.src = pngUrl(id);
+    pngCache.set(id, img);
+  }
+  return img;
+}
 const png = (id: string, size: number, cls: string) =>
   `<img class="svgi art png ${cls}" src="${import.meta.env.BASE_URL}assets/ui/${PNG[id]}.png" width="${size}" height="${size}" alt="" draggable="false">`;
 

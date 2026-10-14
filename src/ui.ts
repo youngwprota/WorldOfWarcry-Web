@@ -5,7 +5,7 @@ import {
 } from './config';
 import { ARMOR_SLOTS, EQUIP_BAR, cellHtml, type ArmorSlot, type Item } from './items';
 import { DAMAGE_TYPE_ICON, fmtK, icon, iconImage, resistIcons, rewardChips } from './icons';
-import { STAT_ICON, art, mini, tintedArt } from './art';
+import { STAT_ICON, art, hasPng, mini, tintedArt } from './art';
 import type { MobDef } from './config';
 import { sfx } from './audio';
 import type { World } from './world';
@@ -17,20 +17,19 @@ const GAIN_SHOW = 2.5;
 export interface HudState {
   hp: number; maxHp: number;
   stats: { power: number; hp: number; regen: number; speed: number };
-  goal: string;
   buffs: string[];
   /** Boss widgets on the left: seconds until respawn, 0 = alive. */
   bosses: { name: string; left: number }[];
 }
 
-/** Butcher-style timer: 9h 23m, 4m 05s, 12s. */
+/** Butcher-style timer: 9ч 23м, 4м 05с, 12с. */
 function fmtTime(sec: number) {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = Math.floor(sec % 60);
-  if (h) return `${h}h ${m}m`;
-  if (m) return `${m}m ${String(s).padStart(2, '0')}s`;
-  return `${s}s`;
+  if (h) return `${h}ч ${m}м`;
+  if (m) return `${m}м ${String(s).padStart(2, '0')}с`;
+  return `${s}с`;
 }
 
 /** One line of a dialogue; a line with choices waits for an answer (GDD 4.2: no wrong answers). */
@@ -58,15 +57,14 @@ export interface MapMark {
 
 /** An item icon in a quality-coloured frame (elites and bosses' drops on the maps). */
 function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number, id: string, color: string, s: number) {
-  g.fillStyle = '#1d120bdd';
+  // no backing: just the quality-coloured frame and the item itself painted in the same colour
   g.strokeStyle = color;
   g.lineWidth = 3 * s;
   g.beginPath();
   g.roundRect(x - r, y - r, r * 2, r * 2, 5 * s);
-  g.fill();
   g.stroke();
-  const img = iconImage(id, color);
-  if (img.complete) g.drawImage(img, x - r * 0.85, y - r * 0.85, r * 1.7, r * 1.7);
+  const img = hasPng(id) ? tintedArt(id, color) : iconImage(id, color);
+  if (img && (!(img instanceof HTMLImageElement) || img.complete)) g.drawImage(img, x - r * 0.85, y - r * 0.85, r * 1.7, r * 1.7);
 }
 
 /**
@@ -92,8 +90,8 @@ export function drawMarks(g: CanvasRenderingContext2D, marks: MapMark[], X: (x: 
       continue;
     }
     const r = (m.kind === 'boss' ? 19 : 13) * s;
-    // the skull of the "Убито врагов" stat, tinted red (boss) / orange (micro-boss)
-    const img = tintedArt('skull', m.color);
+    // the main boss: the horned skull in red; a micro-boss: the round skull in orange
+    const img = tintedArt(m.kind === 'boss' ? 'boss' : 'skull', m.color);
     if (img) g.drawImage(img, x - r, y - r, r * 2, r * 2);
     if (m.drop) framedItem(g, x + r * 0.8, y + r * 0.7, 8 * s, m.drop.icon, m.drop.color, s * 0.7);
   }
@@ -173,7 +171,7 @@ export class UI {
     this.lastHud = key;
     const hp = $('hp');
     (hp.querySelector('.fill') as HTMLElement).style.width = `${(s.hp / s.maxHp) * 100}%`;
-    (hp.querySelector('span') as HTMLElement).textContent = `${Math.ceil(s.hp)} / ${s.maxHp}`;
+    (hp.querySelector('span') as HTMLElement).textContent = `${fmtK(Math.ceil(s.hp))} / ${fmtK(s.maxHp)}`;
     const st = s.stats;
     const vals: Record<OrbKind, string> = {
       power: fmtK(st.power), hp: fmtK(st.hp), regen: fmtK(st.regen), speed: fmtK(st.speed),
@@ -181,7 +179,6 @@ export class UI {
     $('stats').querySelectorAll<HTMLElement>('.st').forEach((el) => {
       (el.querySelector('span') as HTMLElement).textContent = vals[el.dataset.k as OrbKind];
     });
-    $('goal').innerHTML = s.goal;
     $('buffs').innerHTML = s.buffs.map((b) => `<div>${b}</div>`).join('');
     $('bosses').innerHTML = s.bosses.map((b) => `<div class="bw ui-block" title="${b.name}">
       ${b.left > 0 ? '' : '<div class="bw-ready">Готово!</div>'}${art('skull', 62, b.left > 0 ? 'dim' : '')}
@@ -251,17 +248,15 @@ export class UI {
   }
 
   zoneBanner(z: ZoneDef) {
-    $('zone-label').textContent = z.name;
     const f = ZONE_FOES[z.id];
-    // over the minimap: the enemies' weapon (red) and what they are weak to (green)
-    $('zone-foes').innerHTML = f
-      ? `<i class="foe atk" title="Враги бьют: ${DAMAGE_TYPE_NAME[f.attack]} урон">${icon(DAMAGE_TYPE_ICON[f.attack], '#fff', 22)}</i>` +
-        f.weak.map((t) => `<i class="foe weak" title="Слабость врагов: ${DAMAGE_TYPE_NAME[t]} урон">${icon(DAMAGE_TYPE_ICON[t], '#fff', 22)}</i>`).join('')
-      : '';
+    // over the minimap: what the location's enemies are weak to (green)
+    const weak = f?.weak ?? [];
+    $('zone-foes').innerHTML = weak
+      .map((t) => `<i class="foe weak" title="Слабость врагов: ${DAMAGE_TYPE_NAME[t]} урон">${icon(DAMAGE_TYPE_ICON[t], '#fff', 22)}</i>`).join('');
     const el = $('zone-banner');
-    el.innerHTML = z.name + (f
-      ? `<small>Враги бьют: ${DAMAGE_TYPE_NAME[f.attack]} · слабость: ${f.weak.map((t) => DAMAGE_TYPE_NAME[t]).join(', ')}</small>`
-      : z.id === 'forest' ? '' : '<small>Безопасная зона</small>');
+    el.innerHTML = z.name + (weak.length
+      ? `<small>Слабость врагов: ${weak.map((t) => DAMAGE_TYPE_NAME[t]).join(', ')}</small>`
+      : f || z.id === 'forest' ? '' : '<small>Безопасная зона</small>');
     el.classList.add('show');
     clearTimeout(this.bannerT);
     this.bannerT = window.setTimeout(() => el.classList.remove('show'), 2600);
@@ -288,7 +283,7 @@ export class UI {
     n.textContent = name;
     n.style.color = color;
     (el.querySelector('.fill') as HTMLElement).style.width = `${(hp / max) * 100}%`;
-    (el.querySelector('span') as HTMLElement).textContent = `${Math.ceil(hp)} / ${max}`;
+    (el.querySelector('span') as HTMLElement).textContent = `${fmtK(Math.ceil(hp))} / ${fmtK(max)}`;
   }
   hideBoss() { $('bossbar').classList.add('hidden'); }
 
@@ -311,14 +306,6 @@ export class UI {
   close() { this.modal.classList.remove('show', 'clear'); this.modal.innerHTML = ''; }
   on(sel: string, fn: () => void) {
     this.modal.querySelector(sel)?.addEventListener('click', () => { sfx.click(); fn(); });
-  }
-
-  showDeath(respawn: () => void) {
-    this.open(`<div class="panel"><h2>Ты пал</h2>
-      <p>Страж Грани шепчет: «Ещё не время… Вернись.»</p>
-      <p>Предметы и прокачка сохранены.</p>
-      <div class="row"><button class="btn primary" id="m-respawn">Вернуться в лагерь</button></div></div>`);
-    this.on('#m-respawn', () => { this.close(); respawn(); });
   }
 
   settings(muted: boolean, lowGfx: boolean, toggleMute: () => void, toggleGfx: () => void, reset: () => void, close: () => void, showLog: () => void) {
@@ -462,7 +449,7 @@ export class UI {
     });
   }
 
-  // ---------- minimap & goal arrow ----------
+  // ---------- minimap ----------
   minimap(hero: THREE.Vector3, facing: number, units: THREE.Vector3[], world: World, marks: MapMark[]) {
     const g = this.mm;
     const S = 220;
@@ -488,24 +475,5 @@ export class UI {
     g.moveTo(0, -12); g.lineTo(8, 9); g.lineTo(-8, 9); g.closePath();
     g.fill();
     g.restore();
-  }
-
-  edgeArrow(target: THREE.Vector3 | null, camera: THREE.Camera) {
-    const el = $('edge-arrow');
-    if (!target) { el.style.display = 'none'; return; }
-    const v = target.clone().setY(1).project(camera);
-    const { w, h } = this.size();
-    const on = Math.abs(v.x) < 0.95 && Math.abs(v.y) < 0.95 && v.z < 1;
-    if (on) { el.style.display = 'none'; return; }
-    let x = v.x;
-    let y = v.y;
-    if (v.z > 1) { x = -x; y = -y; }
-    // keep clear of the HUD corners
-    const m = Math.max(Math.abs(x) / 0.85, y > 0 ? y / 0.55 : -y / 0.62);
-    x /= m;
-    y /= m;
-    const { x: px, y: py } = this.toHud((x * 0.5 + 0.5) * w, (-y * 0.5 + 0.5) * h);
-    el.style.display = 'block';
-    el.style.transform = `translate(${px - 13}px, ${py - 13}px) rotate(${Math.atan2(-y, x)}rad)`;
   }
 }

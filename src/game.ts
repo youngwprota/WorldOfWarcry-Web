@@ -5,6 +5,7 @@ import { Falls, Orbits, type Orbit } from './orbits';
 import { HELPER_SEEK, Helpers, type Helper } from './helpers';
 import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from './offhand';
 import { Creature } from './creature';
+import { StaticBody } from './staticbody';
 import {
   COMBOS, DUAL, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
   mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StatId, type WeaponDef, type ZoneDef, isPctStat,
@@ -20,8 +21,7 @@ import { writeSave, type SaveData } from './save';
 import { GATE, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
 import { UI, type MapMark } from './ui';
-import { CampNpc } from './npc';
-import { fmtK, icon, resistIcons, rewardChips } from './icons';
+import { fmtK, lootHtml, resistIcons } from './icons';
 import { heroDeaths, logFight, logSnap } from './balancelog';
 import { addPct, addStat, armorMul, critAvg, critChance, critMul, dodgeChance, gearOf, guardMul, handMulOf, heroDps, heroStats } from './balance';
 
@@ -45,8 +45,8 @@ function fmtRespawn(sec: number) {
   const s = Math.max(0, Math.ceil(sec));
   const p2 = (n: number) => String(n).padStart(2, '0');
   const u = (n: number | string, unit: string) => `${n}<small>${unit}</small>`; // smaller unit letters keep it inside the ring
-  return s >= 3600 ? u(Math.floor(s / 3600), 'h') + u(p2(Math.floor(s / 60) % 60), 'm')
-    : s >= 60 ? u(Math.floor(s / 60), 'm') + u(p2(s % 60), 's') : u(s, 's');
+  return s >= 3600 ? u(Math.floor(s / 3600), 'ч') + u(p2(Math.floor(s / 60) % 60), 'м')
+    : s >= 60 ? u(Math.floor(s / 60), 'м') + u(p2(s % 60), 'с') : u(s, 'с');
 }
 
 /** Respawn loader at a spawn point: progress ring, timer and one bar per spawner charge. */
@@ -112,6 +112,8 @@ abstract class Unit {
   /** HP bar: height above the ground and how near the hero must be to see it. */
   abstract get barY(): number;
   abstract get barRange(): number;
+  /** Never fights back (props, static units): the hero turns to it only when no enemy is in reach. */
+  get passive() { return true; }
   /** The respawn loader may show (a mob's corpse has to sink first). */
   get loaderReady() { return true; }
   /** Back at the spawn point, full HP. */
@@ -128,7 +130,7 @@ abstract class Unit {
 
 class Mob extends Unit {
   readonly kind = 'mob';
-  ch: Character | Creature;
+  ch: Character | Creature | StaticBody;
   state: 'idle' | 'chase' | 'return' | 'dead' = 'idle';
   atkCd = 0;
   impact = -1;
@@ -145,10 +147,10 @@ class Mob extends Unit {
   knock = new THREE.Vector3();
   /** Knockback applied once the death freeze (KILL_FX) is over. */
   deathKnock = new THREE.Vector3();
-  /** Orbs and items wait for the death clip to finish. */
-  rewardsDue = false;
+  /** The death clip is still playing (the corpse sinks once it is over). */
+  dying = false;
   loot: Item[] = [];
-  /** deadT when the rewards were paid; the corpse sinks after that. */
+  /** deadT when the death clip ended; the corpse sinks after that. */
   paidAt = 0;
   radius: number;
   /** Spawned by a prop (grave): no respawn, removed after death. */
@@ -169,8 +171,6 @@ class Mob extends Unit {
   /** Reinforcement of this boss: removed when the fight resets, pays no gacha pull. */
   owner: Mob | null = null;
   awake = true;
-  /** Damage type of the mob's hits (its location's, config ZONE_FOES); the hero's armour resists it. */
-  dmgType: DamageType;
   /** Dagger stacks (WeaponDef.stack): each adds to the hero's damage on this mob; game time of the last one. */
   stacks = 0;
   stackAt = -99;
@@ -180,47 +180,45 @@ class Mob extends Unit {
   dmg: number;
   constructor(public def: MobDef, spawn: THREE.Vector3, faction: 'human' | 'orc', layer: HTMLElement,
     mul = { hp: 1, dmg: 1, reward: 1, scale: 1 }) {
-    // Bosses, micro-bosses and elites get a bigger HP bar with their name and HP numbers: a boss's name is
-    // coloured by difficulty, a micro-boss's is orange with its stat bonus, an elite's has its drop's quality colour and icon.
+    // Bosses, micro-bosses and elites get a bigger HP bar with their name: a boss's is coloured by difficulty,
+    // a micro-boss's is orange, an elite's has its drop's quality colour. Over the bar: the loot (lootHtml);
+    // right of it: weaknesses and resistances.
     const reward: Partial<Record<OrbKind, number>> = {};
     for (const [k, n] of Object.entries(def.reward) as [OrbKind, number][]) reward[k] = Math.round(n * mul.reward);
     const named = !!(def.boss || def.rank);
-    // a main boss also shows the item it drops under its name
-    const bossDrop = def.boss && def.drop
-      ? `<div class="bdrop" style="color:${RARITY[def.drop.rarity].color}">${icon(dropIconId(def.drop), RARITY[def.drop.rarity].color, 16)} ${itemName(dropItem(def.drop), faction)}</div>`
-      : '';
-    const title = def.boss ? `<div class="bname">${def.boss.titles[faction]}</div>${bossDrop}`
+    const title = def.boss ? `<div class="bname">${def.boss.titles[faction]}</div>`
       : def.rank === 'mini' ? `<div class="bname" style="color:${MARK_COLOR.mini}">${def.name}</div>`
-      : def.drop ? `<div class="bname" style="color:${RARITY[def.drop.rarity].color}">${icon(dropIconId(def.drop), RARITY[def.drop.rarity].color, 18)} ${def.name}</div>`
+      : def.drop ? `<div class="bname" style="color:${RARITY[def.drop.rarity].color}">${def.name}</div>`
       : '';
-    super(spawn, layer, named ? 'mobui boss' : 'mobui',
-      title +
-      // a micro-boss shows its permanent bonus (+500 HP) in the stat chips instead of its orbs
-      `<div class="mside"><div class="rws">${def.bonus ? rewardChips({ reward: def.bonus }, true) : rewardChips({ reward })}</div><div class="ris">${resistIcons(def, named ? 27 : 24)}</div></div>` +
-      '<div class="mobhp"><div></div><span></span></div><div class="stk"></div>',
+    // an item drop shows only the item; a micro-boss its permanent bonus (+500 HP) instead of its orbs
+    const item = def.drop ? { icon: dropIconId(def.drop), color: RARITY[def.drop.rarity].color } : null;
+    const loot = def.bonus ? lootHtml(def.bonus, null, true) : lootHtml(reward, item);
+    super(spawn, layer, named ? 'mobui boss' : 'mobui', title + unitBar(loot, resistIcons(def, named ? 27 : 24)) + '<div class="stk"></div>',
       'respawn' + (named ? ' boss' : ''));
     this.stackEl = this.uiEl.querySelector('.stk')!;
     this.reward = reward;
     const [model, weapon] = def.model[faction];
-    this.dmgType = def.attack;
     const scale = def.scale * mul.scale;
-    this.ch = def.creature ? new Creature(model, scale) : new Character(model, weapon, scale, def.skin);
+    this.ch = def.static ? new StaticBody(model, scale)
+      : def.creature ? new Creature(model, scale) : new Character(model, weapon, scale, def.skin);
     this.dmg = def.dmg * mul.dmg;
     this.ch.position.copy(spawn);
     this.ch.facing = Math.random() * Math.PI * 2;
     this.maxHp = this.hp = Math.round(def.hp * mul.hp);
-    this.radius = (def.creature ? 0.7 : 0.45) * scale;
+    this.radius = def.static ? 0.8 : (def.creature ? 0.7 : 0.45) * scale;
     this.wander.copy(spawn);
   }
+  /** Stands on its spawn point: no AI, no knockback (MobDef.static). */
+  get passive() { return !!this.def.static; }
   get alive() { return this.state !== 'dead'; }
   get pos() { return this.ch.position; }
   get visible() { return this.ch.root.visible; }
   get boss() { return !!this.def.boss; }
   get mark() { return this.def.boss ? 'boss' as const : this.def.rank ?? null; }
   get hittable() { return this.alive && this.awake && this.rise <= 0; }
-  get barY() { return 2.15 * this.def.scale * this.ch.root.scale.x; }
+  get barY() { return (this.ch instanceof StaticBody ? this.ch.height + 0.3 : 2.15 * this.def.scale) * this.ch.root.scale.x; }
   get barRange() { return this.def.boss || this.def.rank ? 24 : 16; }
-  get loaderReady() { return !this.temp && ((!this.rewardsDue && this.deadT - this.paidAt > 2.2) || this.boss); }
+  get loaderReady() { return !this.temp && ((!this.dying && this.deadT - this.paidAt > 2.2) || this.boss); }
   /** Sets the dagger stacks and their badge (text only changes here, never per frame). */
   setStacks(n: number, at: number) {
     this.stackAt = at;
@@ -232,7 +230,7 @@ class Mob extends Unit {
   respawn() {
     this.setStacks(0, -99);
     this.fight = null;
-    this.rewardsDue = false;
+    this.dying = false;
     this.loot = [];
     this.knock.set(0, 0, 0);
     this.deathKnock.set(0, 0, 0);
@@ -252,7 +250,7 @@ class Mob extends Unit {
     this.state = 'dead';
     this.ch.root.visible = false;
     this.deadT = 99;
-    this.rewardsDue = false;
+    this.dying = false;
   }
 }
 
@@ -268,9 +266,7 @@ class Prop extends Unit {
   shootCd = 1.5;
   constructor(spot: SpawnPoint, layer: HTMLElement) {
     const def = BREAKABLES[spot.kind];
-    super(new THREE.Vector3(spot.x, 0, spot.z), layer, 'mobui prop',
-      `<div class="mside"><div class="rws">${rewardChips(def)}</div><div class="ris">${resistIcons(def, 24)}</div></div><div class="mobhp"><div></div><span></span></div>`,
-      'respawn prop');
+    super(new THREE.Vector3(spot.x, 0, spot.z), layer, 'mobui prop', unitBar(lootHtml(def.reward), resistIcons(def, 24)), 'respawn prop');
     this.def = def;
     this.reward = def.reward;
     this.obj = makeBreakable(spot.kind);
@@ -358,7 +354,6 @@ export class Game {
   /** A full-screen window covers the world: main.ts skips rendering it. */
   offscreen = false;
   private moveDir = new THREE.Vector3();
-  private npc: CampNpc;
   /** Player HP floating above the hero's head. */
   private heroBar!: { el: HTMLDivElement; fill: HTMLDivElement; text: HTMLSpanElement };
 
@@ -399,6 +394,7 @@ export class Game {
 
     for (const s of this.world.spawns) {
       const u = s.unit === 'mob' ? this.addMob(MOBS[s.kind], new THREE.Vector3(s.x, 0, s.z), labels, s.depth) : this.addProp(s, labels);
+      if (u instanceof Mob && u.passive) u.ch.facing = s.rot;
       u.spawner = s;
       // a cooldown still running from an earlier session
       const rec = save.spawners?.[s.id];
@@ -434,8 +430,7 @@ export class Game {
     this.orbits = new Orbits(this.scene);
     this.falls = new Falls(this.scene);
     this.helpers = new Helpers(this.scene);
-    this.npc = new CampNpc(this.scene, labels, ui, input, save.faction);
-    this.world.obstacles.push(this.npc.obstacle);
+    // (no camp NPC by the gate for now: src/npc.ts CampNpc is kept for later)
     this.camPos.copy(this.hero.position);
     this.refreshHud(true);
   }
@@ -599,10 +594,9 @@ export class Game {
     hb.el.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
     hb.el.classList.toggle('dead', this.dead);
     hb.fill.style.width = `${(this.hp / this.maxHp) * 100}%`;
-    hb.text.textContent = `${Math.ceil(this.hp)}`;
+    hb.text.textContent = fmtK(Math.ceil(this.hp));
     hb.el.classList.toggle('low', this.hp < this.maxHp * 0.3);
     this.updateMobBars(w, h);
-    this.npc.update(dt, hp, this.camera, w, h);
     this.hudT -= dt;
     if (this.hudT <= 0) { this.hudT = 0.1; this.refreshHud(false); }
   }
@@ -612,7 +606,8 @@ export class Game {
     if (this.dead) {
       this.deadT += dt;
       ch.update(dt, false);
-      if (this.deadT > 1.6 && !this.ui.modalOpen) this.ui.showDeath(() => this.respawnInCamp());
+      // no death window: once the death clip has played, straight back to the camp
+      if (this.deadT > 1.6) this.respawnInCamp();
       return;
     }
     const [ix, iy] = this.input.vector;
@@ -653,17 +648,17 @@ export class Game {
       if (!t.hittable || t.pos.distanceTo(p) > reach + t.radius + 1) this.target = null;
     }
     const cur = this.target;
-    if (!cur || cur.kind === 'prop' || !this.inStrike(cur, strike)) {
-      // the nearest unit in strike distance; any mob goes before props
+    if (!cur || cur.passive || !this.inStrike(cur, strike)) {
+      // the nearest unit in strike distance; any fighting mob goes before props and static units
       let best: Unit | null = null;
       let bd = Infinity;
       for (const u of this.units) {
         if (!u.hittable || !this.inStrike(u, strike)) continue;
-        const score = u.pos.distanceTo(p) - u.radius + (u.kind === 'prop' ? 1000 : 0);
+        const score = u.pos.distanceTo(p) - u.radius + (u.passive ? 1000 : 0);
         if (score < bd) { bd = score; best = u; }
       }
-      // a prop being struck stays the target unless a mob came in
-      if (best && !(cur && cur.kind === 'prop' && best.kind === 'prop' && this.inStrike(cur, strike))) this.target = best;
+      // a passive unit being struck stays the target unless a fighting mob came in
+      if (best && !(cur && cur.passive && best.passive && this.inStrike(cur, strike))) this.target = best;
     }
 
     // facing
@@ -816,7 +811,7 @@ export class Game {
     const radius = pull.radius * (finisher ? 2 : 1);
     let n = 0;
     for (const m of this.mobs) {
-      if (!m.hittable || m.def.boss || m.pos.distanceTo(p) - m.radius > radius) continue;
+      if (!m.hittable || m.def.boss || m.passive || m.pos.distanceTo(p) - m.radius > radius) continue;
       // knockback slides 1/9 of its speed (it decays ×(1 − 9·dt)), so speed = 9 × the distance to cover
       m.knock.set(at.x - m.pos.x, 0, at.z - m.pos.z).multiplyScalar(9 * pull.force);
       if (m.state === 'idle') m.state = 'chase';
@@ -993,7 +988,7 @@ export class Game {
       // up they go; the damage lands with them (updateMobs)
       for (const m of this.mobs) {
         if (!m.hittable || !this.inShape(m.pos, m.radius, 'arc', 160, WEAPONS[it.def].range)) continue;
-        if (m.def.boss) { cut(m, n.mult, 0); continue; }
+        if (m.def.boss || m.passive) { cut(m, n.mult, 0); continue; }
         const { dmg } = this.damageFor(it, m.def, n.mult);
         m.air = m.airDur = 0.9;
         m.airDmg = dmg;
@@ -1193,7 +1188,7 @@ export class Game {
     m.hurtAt = this.time;
     m.ch.hit();
     m.state = m.state === 'return' ? 'return' : 'chase';
-    if (!m.def.boss) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
+    if (!m.def.boss && !m.passive) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
     const head = this.unitTextAt(m);
     const lift = m.uiEl.offsetHeight;
     const text = fx === 'crit' ? `-${fmtK(dmg)}!` : `-${fmtK(dmg)}`;
@@ -1208,7 +1203,7 @@ export class Game {
   /** World point the over-head block (HP bar + chips) is anchored to; damage numbers start there plus its height. */
   private unitTextAt(u: Unit, out = v1) { return out.copy(u.pos).setY(u.barY); }
 
-  /** Lethal hit: death clip, blood, shake and the knockback now; orbs and items in grantKillRewards. */
+  /** Lethal hit: death clip, blood, shake, the knockback and the loot (grantKillRewards) at once. */
 
   private killMob(m: Mob) {
     m.setStacks(0, -99);
@@ -1224,7 +1219,7 @@ export class Game {
     this.endFight(m, 'kill');
     const d = m.def;
     m.loot = [];
-    m.rewardsDue = true;
+    m.dying = true;
     this.unitDied(m, false);
     if (d.boss) this.killBoss(m);
     else {
@@ -1232,12 +1227,11 @@ export class Game {
       if (d.drop) m.loot.push(dropItem(d.drop));
       if (m.temp) m.respawnAt = Infinity;
     }
+    this.grantKillRewards(m);
   }
 
-  /** Once the death clip has finished: stat orbs, items and a micro-boss's bonus. */
+  /** Right on the kill: stat orbs, items, a micro-boss's bonus, the gacha pull. */
   private grantKillRewards(m: Mob) {
-    m.rewardsDue = false;
-    m.paidAt = m.deadT;
     this.payRewards(m);
     for (const it of m.loot) this.pickups.spawnItem(m.pos, it);
     m.loot = [];
@@ -1283,7 +1277,7 @@ export class Game {
     u.respawnAt = this.time + u.respawnTotal;
   }
 
-  /** Stat orbs of a dead unit (a mob's wait for its death clip, see grantKillRewards). */
+  /** Stat orbs of a dead unit. */
   private payRewards(u: Unit) {
     for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(u.pos, k);
   }
@@ -1379,14 +1373,14 @@ export class Game {
         m.deadT += dt;
         if (held && m.deadT >= holdEnd) m.knock.copy(m.deathKnock);
         const holding = m.deadT > KILL_FX.holdAt && m.deadT < holdEnd;
-        m.ch.update(dt, false, !holding && m.rewardsDue && dHero < 34);
+        m.ch.update(dt, false, !holding && m.dying && dHero < 34);
         if (m.knock.lengthSq() > 0.001) {
           m.pos.addScaledVector(m.knock, dt);
           m.knock.multiplyScalar(Math.max(0, 1 - dt * 9));
         }
-        // Off-screen corpses do not animate, so their clip never finishes: pay out right after the freeze.
-        if (m.rewardsDue && m.deadT >= holdEnd && (m.ch.deathDone || dHero >= 34)) this.grantKillRewards(m);
-        const gone = m.rewardsDue ? 0 : m.deadT - m.paidAt;
+        // Off-screen corpses do not animate, so their clip never finishes: end it right after the freeze.
+        if (m.dying && m.deadT >= holdEnd && (m.ch.deathDone || dHero >= 34)) { m.dying = false; m.paidAt = m.deadT; }
+        const gone = m.dying ? 0 : m.deadT - m.paidAt;
         if (gone > 0.4) m.ch.position.y = -(gone - 0.4) * 0.8;
         if (gone > 2.2) m.ch.root.visible = false;
         if (m.temp && gone > 2.7) { this.removeMob(m); removed = true; }
@@ -1396,6 +1390,8 @@ export class Game {
       const def = m.def;
       let moving = false;
       if (m.hp < m.maxHp && this.time - m.hurtAt > MOB_REGEN_DELAY) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * def.regen * dt);
+      // a static unit only stands: no chasing, no blows, no wandering
+      if (m.passive) { m.ch.update(dt, false); continue; }
       if (m.air > 0) {
         // nagamaki launch: up and down, the blow lands with the mob
         m.air -= dt;
@@ -1766,6 +1762,7 @@ export class Game {
     this.fx.spawn(at.setY(2.9), hits ? 'Контратака!' : 'Блок', 'dmg weak', 0.7, { color: '#9fd0ff' });
   }
 
+  /** After a death: in the camp with HERO.respawnHp of the HP (the camp regen fills the rest fast). */
   private respawnInCamp() {
     this.hero.position.set(SPAWN.x, 0, SPAWN.z);
     this.camPos.copy(this.hero.position);
@@ -1774,7 +1771,7 @@ export class Game {
 
   private revive() {
     this.dead = false;
-    this.hp = this.maxHp;
+    this.hp = Math.max(1, Math.round(this.maxHp * HERO.respawnHp));
     this.hero.revive();
     this.ui.flash();
     this.persist();
@@ -1837,7 +1834,7 @@ export class Game {
         u.hpFill.style.width = `${Math.max(0, u.hp / u.maxHp) * 100}%`;
         if (u.hpText) {
           // every unit has the same bar: current HP only
-          const t = `${Math.ceil(u.hp)}`;
+          const t = fmtK(Math.ceil(u.hp));
           if (u.hpText.textContent !== t) u.hpText.textContent = t;
         }
         if (u instanceof Mob && u.def.boss) (u.uiEl.querySelector('.bname') as HTMLElement).style.color = this.bossColor(u);
@@ -1968,21 +1965,8 @@ export class Game {
   }
 
   // ---------- HUD / save ----------
-  private goal() {
-    const b = this.save.bosses;
-    const forest = this.world.bosses[0];
-    const cem = this.world.bosses[1];
-    const fm = this.mobs.find((m) => m.def.id === forest.mob)!;
-    const cm = this.mobs.find((m) => m.def.id === cem.mob)!;
-    if (!b[forest.mob]?.firstKill) return { text: `Победи <b>${MOBS[forest.mob].boss!.titles[this.faction]}</b> на Опушке леса`, at: fm };
-    if (!b[cem.mob]?.firstKill) return { text: 'Пройди через кладбище и одолей <b>Смерть</b>', at: cm };
-    const alive = [fm, cm].filter((m) => m.alive);
-    if (alive.length) return { text: 'Боссы вернулись — <b>фарм</b> снаряжения', at: alive[alive.length - 1] };
-    const t = Math.ceil(Math.min(fm.respawnAt, cm.respawnAt) - this.time);
-    return { text: `Боссы вернутся через <b>${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}</b>`, at: null };
-  }
+  // No goal hints (text, edge arrow, map line): the player finds the way himself.
 
-  /** Snapshot for the full-screen world map. */
   /** Map red dots: every living unit (mobs and props alike) in explored land, bosses excluded (they get a skull). */
   private mapDots(near = Infinity) {
     const hp = this.hero.position;
@@ -2015,22 +1999,19 @@ export class Game {
     return out;
   }
 
+  /** Snapshot for the full-screen world map. */
   mapInfo() {
-    const g = this.goal();
     return {
       hero: { x: this.hero.position.x, z: this.hero.position.z, facing: this.hero.facing },
-      goal: { text: g.text, x: g.at?.spawn.x ?? null, z: g.at?.spawn.z ?? null },
       units: this.mapDots().map((p) => ({ x: p.x, z: p.z })),
       marks: this.mapMarks(),
     };
   }
 
   refreshHud(full: boolean) {
-    const g = this.goal();
     this.ui.hud({
       hp: this.hp, maxHp: this.maxHp,
       stats: { power: Math.round(this.power), hp: this.maxHp, regen: this.regen, speed: this.speedStat },
-      goal: g.text,
       buffs: [
         inCamp(this.hero.position.x, this.hero.position.z) && this.hp < this.maxHp ? '🏠 Лагерь: быстрое восстановление' : '',
       ].filter(Boolean),
@@ -2046,7 +2027,6 @@ export class Game {
       this.ui.gachaBadge(this.save.pulls ?? 0);
     }
     this.ui.minimap(this.hero.position, this.hero.facing, this.mapDots(45), this.world, this.mapMarks(45));
-    this.ui.edgeArrow(g.at && g.at.alive ? g.at.pos : null, this.camera);
   }
 
   /** Quality preset: shadows, mist and grass are the expensive parts on phones. */
@@ -2282,9 +2262,14 @@ const rndSort = () => Math.random() - 0.5;
 /** Map / name colours of special mobs (an elite uses its drop's quality colour). */
 const MARK_COLOR = { boss: '#ff3b3b', mini: '#ff9a2e', elite: '#ffffff' };
 
-/** "+500 HP · +25 реген" */
+/** The block over a unit: loot on top, the HP bar under it, weakness / resistance icons right of the bar. */
+function unitBar(loot: string, resist: string) {
+  return `<div class="mloot">${loot}</div><div class="mrow"><div class="mobhp"><div></div><span></span></div><div class="ris">${resist}</div></div>`;
+}
+
+/** "+500 хп · +25 хп/с" */
 function bonusText(b: Partial<Record<OrbKind, number>> | undefined) {
-  const unit: Record<OrbKind, string> = { hp: 'HP', regen: 'реген HP/с', power: 'урон', speed: 'бег' };
+  const unit: Record<OrbKind, string> = { hp: 'хп', regen: 'хп/с', power: 'урон', speed: 'бег' };
   return Object.entries(b ?? {}).map(([k, v]) => `+${v} ${unit[k as OrbKind]}`).join(' · ');
 }
 
