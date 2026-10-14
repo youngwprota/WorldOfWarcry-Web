@@ -6,9 +6,9 @@
 
 - [Смержить ветку visual в main](cards/261014-34cd.md) — приоритет: high
 
-## BACKLOG (1)
+## BACKLOG (0)
 
-- [Как пользоваться доской](cards/261014-5d2f.md) — `инфо`
+_пусто_
 
 ## Manual test (0)
 
