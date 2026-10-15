@@ -288,22 +288,136 @@ def build_shields():
     return out
 
 
+def _linked(bsdf, socket):
+    links = bsdf.inputs[socket].links
+    return links[0].from_node if links else None
+
+
+def _sample(img, uv, cache):
+    """Nearest texel of `img` at `uv` (wrapped), as linear RGB."""
+    px = cache.get(img.name)
+    if px is None:
+        px = cache[img.name] = list(img.pixels)
+    w, h = img.size
+    x = int((uv[0] % 1.0) * w) % w
+    y = int((uv[1] % 1.0) * h) % h
+    i = (y * w + x) * 4
+    c = px[i:i + 3]
+    return c if img.colorspace_settings.name != "sRGB" else [v ** 2.2 for v in c]
+
+
+def _mix(node, a):
+    """Blender's MixRGB on linear colours: COLOR keeps A's value with B's hue and saturation, MULTIPLY multiplies."""
+    import colorsys
+    by_id = {i.identifier: i for i in node.inputs}
+    fac = (by_id.get("Factor_Float") or by_id["Fac"]).default_value
+    b = list((by_id.get("B_Color") or by_id["Color2"]).default_value)[:3]
+    if node.blend_type == "COLOR":
+        h, s_, _ = colorsys.rgb_to_hsv(*b)
+        _, _, v = colorsys.rgb_to_hsv(*a)
+        r = colorsys.hsv_to_rgb(h, s_, v)
+    elif node.blend_type == "MULTIPLY":
+        r = [x * y for x, y in zip(a, b)]
+    else:
+        r = b
+    return [x + (y - x) * fac for x, y in zip(a, r)]
+
+
+def bake_colors(ob, me):
+    """
+    The artist's base colours come from a vertex colour (blades) or a character texture tinted by a Mix node
+    (grips, shafts). The game loads GLB without images and reads only COLOR_0, so the final base colour of every
+    corner is baked into one colour attribute and those materials export with a white base colour.
+    Returns {material index: white copy} for the baked slots, or None when nothing needs baking.
+    """
+    plan = {}
+    for i, slot in enumerate(ob.material_slots):
+        m = slot.material
+        bsdf = m and next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        src = bsdf and _linked(bsdf, "Base Color")
+        if not src:
+            continue
+        if src.type == "VERTEX_COLOR":
+            plan[i] = ("vcol", me.color_attributes.get(src.layer_name) or me.color_attributes[0], None)
+        elif src.type in ("MIX", "MIX_RGB"):
+            tex = next((l.from_node for inp in src.inputs if inp.enabled for l in inp.links if l.from_node.type == "TEX_IMAGE"), None)
+            if tex and tex.image:
+                plan[i] = ("tex", tex.image, src)
+        elif src.type == "TEX_IMAGE" and src.image:
+            plan[i] = ("tex", src.image, None)
+    if not plan:
+        return None
+    vcols = {id(v[1]): [list(d.color) for d in v[1].data] for v in plan.values() if v[0] == "vcol"}
+    uv = me.uv_layers.active.data if me.uv_layers.active else None
+    cache = {}
+    out = [(1.0, 1.0, 1.0, 1.0)] * len(me.loops)
+    for poly in me.polygons:
+        p = plan.get(poly.material_index)
+        if not p:
+            continue
+        for li in poly.loop_indices:
+            if p[0] == "vcol":
+                c = vcols[id(p[1])][li][:3]
+            else:
+                c = _sample(p[1], uv[li].uv, cache) if uv else [0.5, 0.5, 0.5]
+                if p[2]:
+                    c = _mix(p[2], c)
+            out[li] = (*c, 1.0)
+    for a in list(me.color_attributes):
+        me.color_attributes.remove(a)
+    attr = me.color_attributes.new("bake", "FLOAT_COLOR", "CORNER")
+    for li, c in enumerate(out):
+        attr.data[li].color = c
+    me.color_attributes.active_color = attr
+    whites = {}
+    for i in plan:
+        m = ob.material_slots[i].material.copy()
+        bsdf = next(n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+        for l in list(bsdf.inputs["Base Color"].links):
+            m.node_tree.links.remove(l)
+        bsdf.inputs["Base Color"].default_value = (1, 1, 1, 1)
+        whites[i] = m
+    return whites
+
+
 def export_glb(ob, name):
-    """A copy of `ob` alone at the origin, scaled to centimetres, written as GLB without images."""
+    """A copy of `ob` alone at the origin, scaled to centimetres, written as GLB without images.
+    Colours are baked (bake_colors) and normals recalculated outward: some of the artist's faces point inward and the
+    game culls back faces."""
     me = ob.data.copy()
     tmp = bpy.data.objects.new(name + "_export", me)
     bpy.context.scene.collection.objects.link(tmp)
     me.transform(tmp.matrix_world.copy().to_3x3().to_4x4())  # rotation/scale only: the location is dropped
     me.transform(__import__("mathutils").Matrix.Scale(100, 4))
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(me)
+    bm.free()
+    renamed = {}
+    whites = bake_colors(tmp, me)
+    if whites:
+        for i, w in whites.items():
+            orig = me.materials[i]
+            if orig.name not in renamed:
+                renamed[orig.name] = orig
+                orig.name = orig.name + "__src"
+            w.name = orig.name[:-5]
+            me.materials[i] = w
     bpy.ops.object.select_all(action="DESELECT")
     tmp.select_set(True)
     bpy.context.view_layer.objects.active = tmp
     path = os.path.join(MODELS, name + ".glb")
     bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", use_selection=True, export_yup=True,
                               export_apply=True, export_image_format="NONE", export_materials="EXPORT",
-                              export_vertex_color="MATERIAL", export_normals=True, export_animations=False)
+                              export_vertex_color="ACTIVE" if whites else "NONE", export_normals=True,
+                              export_animations=False)
     bpy.data.objects.remove(tmp, do_unlink=True)
     bpy.data.meshes.remove(me)
+    for w in (whites or {}).values():
+        bpy.data.materials.remove(w)
+    for n, orig in renamed.items():
+        orig.name = n
     print("wrote", path, os.path.getsize(path))
 
 

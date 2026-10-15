@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import './grade';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { assets, ANIMS } from './assets';
-import { attachWeapon } from './rig';
+import { attachWeapon, SHIELD_GRIP } from './rig';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
@@ -20,7 +20,7 @@ const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 20
 camera.position.set(0, 2.5, 7);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1, 0);
-Object.assign(window, { camera, controls, scene });
+Object.assign(window, { camera, controls, scene, SHIELD_GRIP, attachWeapon });
 
 const pairs: [string, string, string?][] = [
   ['human_knight', 'sword_human_knight'], ['orc_grunt', 'axe_orc_grunt'], ['paladin', 'hammer_human_paladin'],

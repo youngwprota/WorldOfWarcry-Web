@@ -37,10 +37,12 @@ export const WEAPON_GRIPS: Record<string, { tilt?: number; out?: number; grip?: 
 /** Shields (`shield_<type>_<quality>`): authored with the grip at the origin, face toward +Z, up +Y (cm). */
 export const SHIELD_GRIP = {
   scale: 0.72,
-  /** Offset of the grip from the palm, hand space (cm). */
-  at: new THREE.Vector3(-10, 7, 0),
-  /** Extra turn of the face (radians) around the fist axis and toward the forearm. */
-  yaw: 0, pitch: 0,
+  /** The grip bar's centre behind the plate (shield space, cm): it goes into the palm. */
+  handle: new THREE.Vector3(0, 0, -3),
+  /** Tilt of the shield's up axis from the forearm (hand +X) toward the fist axis (hand +Z), radians. */
+  lean: 0.6,
+  /** Push from the palm out of the body (hand +Y, cm): the big cartoon fist stays behind the plate. */
+  at: new THREE.Vector3(0, 9, 0),
 };
 
 const QUALITY = /_(common|uncommon|rare|epic|legendary|mythic)$/;
@@ -118,19 +120,20 @@ export function attachWeapon(character: THREE.Object3D, weapon: string, left = f
 }
 
 /**
- * A shield on the forearm: its up axis up the forearm (hand +X), its face out from the body (hand +Y),
- * the grip at the palm. Same mirroring as weapons for the left hand.
+ * A shield held by its grip bar in the fist: the bar sits in the palm, the face looks out from the body (hand +Y),
+ * the top leans from the forearm toward the fist axis (SHIELD_GRIP.lean). Same mirroring as weapons for the left hand.
  */
 function attachShield(hand: THREE.Object3D, name: string, left: boolean): THREE.Object3D {
   const g = SHIELD_GRIP;
   const inner = assets.clone(name);
+  inner.position.copy(g.handle).negate();
   const holder = new THREE.Group();
   holder.name = 'weapon';
   holder.add(inner);
-  // shield +Y (up) → hand +X (up the forearm), shield +Z (face) → hand +Y (out from the body), width along the fist
-  const basis = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0));
+  // shield +Y (up) → between the forearm and the fist axis, shield +Z (face) → hand +Y (out from the body)
+  const c = Math.cos(g.lean), s = Math.sin(g.lean);
+  const basis = new THREE.Matrix4().makeBasis(new THREE.Vector3(-s, 0, c), new THREE.Vector3(c, 0, s), new THREE.Vector3(0, 1, 0));
   holder.quaternion.setFromRotationMatrix(basis);
-  holder.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(g.pitch, g.yaw, 0)));
   holder.position.copy(PALM).add(g.at);
   holder.userData.tip = new THREE.Box3().setFromObject(inner).max.y;
   if (left) mirrorX(holder);
