@@ -112,6 +112,9 @@ export const mobRank = (d: MobDef): MobRank => (d.boss ? 'boss' : d.rank ?? 'nor
 
 const RARITY_IDS = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
 const staffTiers = (el: StaffElement) => RARITY_IDS.map((r) => `staff_${el}_${r}`);
+/** Mage armour skin: the caster body parts of a rarity (FBX with its own materials, src/assets.ts keepsMaterials). */
+export const casterModel = (faction: FactionId, rarity: number) => `caster_${faction}_${RARITY_IDS[rarity]}`;
+export const CASTER_MODELS = (['human', 'orc'] as const).flatMap((f) => RARITY_IDS.map((_, i) => casterModel(f, i)));
 /** Model of a weapon item: its rarity tier if the weapon has tiers, else the faction model. */
 export const weaponModel = (def: string, rarity: number, faction: FactionId) => WEAPONS[def].tiers?.[rarity] ?? WEAPONS[def].model[faction];
 
@@ -167,17 +170,17 @@ export const WEAPONS: Record<string, WeaponDef> = {
     swing: ['bash'],
   },
   staff_fire: {
-    id: 'staff_fire', name: 'Посох огня', type: 'magic', dmgMul: 1.9, aps: 0.495, shape: 'arc', arc: 60, range: 4.6,
+    id: 'staff_fire', name: 'Посох огня', type: 'magic', dmgMul: 1.9, aps: 0.495, shape: 'arc', arc: 60, range: 3.2,
     anim: 'MagicAttack', model: { human: 'mage_staff', orc: 'mage_staff' }, icon: '🔥', staff: 'fire',
     tiers: staffTiers('fire'),
   },
   staff_ice: {
-    id: 'staff_ice', name: 'Посох льда', type: 'magic', dmgMul: 0.5, aps: 1.8, shape: 'arc', arc: 60, range: 4.6,
+    id: 'staff_ice', name: 'Посох льда', type: 'magic', dmgMul: 0.5, aps: 1.8, shape: 'arc', arc: 60, range: 3.2,
     anim: 'MagicAttack', model: { human: 'mage_staff', orc: 'mage_staff' }, icon: '❄️', single: true, staff: 'ice',
     tiers: staffTiers('ice'),
   },
   staff_wind: {
-    id: 'staff_wind', name: 'Посох ветра', type: 'magic', dmgMul: 0.45, aps: 1.15, shape: 'arc', arc: 90, range: 4.6,
+    id: 'staff_wind', name: 'Посох ветра', type: 'magic', dmgMul: 0.45, aps: 1.15, shape: 'arc', arc: 90, range: 3.2,
     anim: 'MagicAttack', model: { human: 'mage_staff', orc: 'mage_staff' }, icon: '🌪️', staff: 'wind',
     tiers: staffTiers('wind'),
   },

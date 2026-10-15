@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { HIT_FLASH, applyHitFlash } from './hitflash';
-import { SKINS, assets } from './assets';
+import { SKINS, assets, keepsMaterials } from './assets';
 import { attachWeapon } from './rig';
 import { Swinger, type SwingKind } from './swing';
 import { PART_PREFIXES, type VisualPart } from './items';
@@ -91,7 +91,7 @@ export class Character {
   private spinT = 0;
   private spinDur = 0;
   private baseParts = new Map<VisualPart, THREE.Mesh[]>();
-  private outfitParts = new Map<VisualPart, { model: string; meshes: THREE.Mesh[] }>();
+  private outfitParts = new Map<VisualPart, { model: string; meshes: THREE.Mesh[]; mats: THREE.MeshLambertMaterial[] }>();
 
   constructor(modelName: string, weaponName: string | null, scale = 1, skin?: string) {
     this.model = assets.clone(modelName);
@@ -180,7 +180,7 @@ export class Character {
     this.highlighted = on;
     this.model.scale.multiplyScalar(on ? 1.12 : 1 / 1.12);
     this.baseColor.setScalar(1);
-    for (const m of this.materials) m.color.copy(this.baseColor);
+    for (const m of this.materials) if (!m.userData.own) m.color.copy(this.baseColor);
     this.rebuildOutline();
   }
 
@@ -239,10 +239,8 @@ export class Character {
       const cur = this.outfitParts.get(part);
       if ((cur?.model ?? null) === want) continue;
       if (cur) {
-        for (const m of cur.meshes) {
-          m.removeFromParent();
-          this.materials = this.materials.filter((x) => x !== m.material);
-        }
+        for (const m of cur.meshes) m.removeFromParent();
+        this.materials = this.materials.filter((x) => !cur.mats.includes(x));
         this.outfitParts.delete(part);
       }
       const base = this.baseParts.get(part) ?? [];
@@ -255,8 +253,20 @@ export class Character {
         if (sm.isSkinnedMesh && PART_PREFIXES[part].some((p) => sm.name.startsWith(p))) meshes.push(sm);
       });
       const parent = base[0]?.parent ?? this.model;
-      const mat = (meshes[0]?.material as THREE.MeshLambertMaterial | undefined)?.clone();
-      if (mat) { mat.color.copy(this.baseColor); this.materials.push(mat); }
+      // caster parts keep each mesh's own materials (cloth, metal, glow) and their colours; others share one tinted clone
+      const own = keepsMaterials(want);
+      const clones = new Map<THREE.Material, THREE.MeshLambertMaterial>();
+      const cloneOf = (src: THREE.Material) => {
+        let c = clones.get(src);
+        if (!c) {
+          c = src.clone() as THREE.MeshLambertMaterial;
+          if (own) c.userData.own = true;
+          else c.color.copy(this.baseColor);
+          clones.set(src, c);
+        }
+        return c;
+      };
+      const shared = meshes[0]?.material as THREE.Material;
       for (const sm of meshes) {
         const bones = sm.skeleton.bones.map((b) => this.ownBone(b) as THREE.Bone);
         const skel = new THREE.Skeleton(bones, sm.skeleton.boneInverses);
@@ -266,9 +276,12 @@ export class Character {
         sm.bind(skel, bind);
         sm.frustumCulled = false;
         sm.castShadow = true;
-        if (mat) sm.material = mat;
+        if (own) sm.material = Array.isArray(sm.material) ? sm.material.map(cloneOf) : cloneOf(sm.material);
+        else sm.material = cloneOf(shared);
       }
-      this.outfitParts.set(part, { model: want, meshes });
+      const mats = [...clones.values()];
+      this.materials.push(...mats);
+      this.outfitParts.set(part, { model: want, meshes, mats });
     }
     if (this.highlighted) this.rebuildOutline();
   }
@@ -380,7 +393,7 @@ export class Character {
   setTint(c: THREE.ColorRepresentation, opacity = 1) {
     this.baseColor.set(c);
     for (const m of this.materials) {
-      m.color.copy(this.baseColor);
+      if (!m.userData.own) m.color.copy(this.baseColor);
       m.transparent = opacity < 1;
       m.opacity = opacity;
       m.depthWrite = opacity >= 1;

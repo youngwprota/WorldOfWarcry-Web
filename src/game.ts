@@ -7,10 +7,10 @@ import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from '.
 import { Creature } from './creature';
 import { StaticBody } from './staticbody';
 import {
-  COMBOS, DUAL, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS, weaponModel,
+  COMBOS, DUAL, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS, casterModel, weaponModel,
   mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type StatId, type WeaponDef, type ZoneDef, isPctStat,
 } from './config';
-import { FloatingText, Particles, Pickups, Shockwaves, Spells, Telegraphs, type PickupKind } from './fx';
+import { FloatingText, Particles, Pickups, Shockwaves, Spells, Telegraphs, type Bolt, type PickupKind } from './fx';
 import {
   ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
@@ -18,7 +18,7 @@ import {
 import { Input } from './input';
 import { sfx } from './audio';
 import { classKit, writeSave, type SaveData } from './save';
-import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, canWield, type HeroClass } from './party';
+import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, canWield, heroModel, type HeroClass } from './party';
 import { GATE, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
 import { UI, type MapMark } from './ui';
@@ -318,6 +318,8 @@ export class Game {
   readonly camera: THREE.PerspectiveCamera;
   world: World;
   hero: Character;
+  /** Model of the hero on the field (class body, see heroModel). */
+  heroBody: string;
   private hemi: THREE.HemisphereLight;
   private sun: THREE.DirectionalLight;
   private env = { sky: new THREE.Color(), fog: new THREE.Color(), hemiSky: new THREE.Color(), hemiGround: new THREE.Color(), density: 0.015 };
@@ -389,7 +391,6 @@ export class Game {
 
   constructor(public save: SaveData, private input: Input, public ui: UI, labels: HTMLElement) {
     this.labels = labels;
-    const f = FACTIONS[save.faction];
     this.camera = new THREE.PerspectiveCamera(54, 9 / 16, 0.5, 90);
     this.scene.fog = new THREE.FogExp2(0xbfe0f5, 0.015);
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 2.0);
@@ -410,7 +411,8 @@ export class Game {
     if (save.gatesOpen) this.world.openAllGates(true);
     this.world.fog.load(save.fog); // a new hero knows only the camp
 
-    this.hero = new Character(f.hero, null, 1);
+    this.heroBody = heroModel(this.heroClass, save.faction);
+    this.hero = new Character(this.heroBody, null, 1);
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
     this.hero.setHighlight(true);
@@ -502,6 +504,7 @@ export class Game {
     delete s.kits[c];
     this.newItems += s.bag.length - bag;
     s.cls = c;
+    this.swapHeroBody();
     this.particles.burst(this.hero.position.clone().setY(1), new THREE.Color(CLASSES[c].color[0]).getHex(), 18, 0.14, 4, 0.6);
     this.ui.toast(CLASSES[c].name, 1200);
     this.afterGearChange();
@@ -546,6 +549,21 @@ export class Game {
     return [m(this.save.weapons[0], 0), left && WEAPONS[left.def].orb ? null : m(left, 1)];
   }
 
+  /** The class has its own body (mage): a new Character takes the old one's place; weapons and outfit follow in afterGearChange. */
+  private swapHeroBody() {
+    const body = heroModel(this.heroClass, this.faction);
+    if (body === this.heroBody) return;
+    const old = this.hero;
+    this.heroBody = body;
+    this.hero = new Character(body, null, 1);
+    this.hero.setHighlight(true);
+    this.hero.position.copy(old.position);
+    this.hero.root.scale.copy(old.root.scale);
+    this.hero.facing = old.facing;
+    this.scene.add(this.hero.root);
+    old.dispose();
+  }
+
   private equipVisual() {
     this.pair = swordPair(this.save.weapons[0]?.def, this.save.weapons[1]?.def);
     const [right, left] = this.save.weapons;
@@ -563,9 +581,10 @@ export class Game {
   /** Body parts borrowed from other characters for the equipped armour. */
   outfit(): Partial<Record<VisualPart, string>> {
     const o: Partial<Record<VisualPart, string>> = {};
+    const caster = this.heroClass === 'mage'; // armour is a class skin: the caster part of the item's rarity
     for (const part of ['head', 'chest', 'arms', 'legs'] as VisualPart[]) {
       const it = this.save.equip[part];
-      const src = it ? ARMOR[it.def].source?.[this.faction] : undefined;
+      const src = !it ? undefined : caster ? casterModel(this.faction, it.rarity) : ARMOR[it.def].source?.[this.faction];
       if (src) o[part] = src;
     }
     return o;
@@ -837,7 +856,12 @@ export class Game {
     }
     if (h.launch >= 0) {
       h.launch -= dt;
-      if (h.launch < 0 && w.staff && t) this.spells.bolt(this.castPoint(v1), t.pos, h.flight, STAVES[w.staff].bolt);
+      if (h.launch < 0 && w.staff && t) { h.bolt = this.spells.bolt(this.castPoint(v1), t.pos, h.flight, STAVES[w.staff].bolt); h.aim = t; }
+    }
+    // the mob left the staff's reach: the bolt fizzles and the hit is lost
+    if (h.bolt && h.impact >= 0 && !this.inStrike(h.aim!, w.range + (w.ahead ?? 0))) {
+      this.spells.drop(h.bolt);
+      h.impact = -1;
     }
     if (h.impact >= 0) {
       h.impact -= dt;
@@ -845,6 +869,7 @@ export class Game {
         if (h.special) this.nagaSpecial(h);
         else this.heroStrike(h);
       }
+      if (h.impact < 0) { h.bolt = null; h.aim = null; }
     }
   }
 
@@ -2483,11 +2508,13 @@ interface Hand {
   i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean;
   /** Staff: seconds until the bolt leaves the staff (< 0 = none pending), and its flight time. */
   launch: number; flight: number;
+  /** Staff: the bolt in flight and the mob it flies at. */
+  bolt: Bolt | null; aim: Unit | null;
   /** Nagamaki pair: the next swing is this 4th blow. */
   special: NagaSpecial | null;
 }
 function newHand(i: 0 | 1): Hand {
-  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false, special: null, launch: -1, flight: 0 };
+  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false, special: null, launch: -1, flight: 0, bolt: null, aim: null };
 }
 
 /** What a thrown scythe carries (Orbit.tag). */

@@ -37,7 +37,7 @@ export const PART_PREFIXES: Record<VisualPart, string[]> = {
   head: ['head_', 'helmet_', 'face_plate_'],
   chest: ['chest_', 'torso_', 'cape_'],
   arms: ['arms_'],
-  legs: ['legs_', 'hip_', 'hips_'],
+  legs: ['legs_', 'hip_', 'hips_', 'kilt_'],
 };
 
 export const BONUS_NAME: Record<BonusStat, string> = {

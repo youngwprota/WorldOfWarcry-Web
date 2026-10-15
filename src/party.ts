@@ -1,4 +1,4 @@
-import { WEAPONS } from './config';
+import { FACTIONS, WEAPONS, type FactionId } from './config';
 
 /**
  * The party: three heroes of different classes, one of them on the field at a time.
@@ -17,6 +17,8 @@ export interface ClassDef {
   key: string;
   /** Wields only staves (and nobody else can). */
   staves?: boolean;
+  /** Own body model per faction; missing = FACTIONS[faction].hero. */
+  model?: Record<FactionId, string>;
   /** First weapon in hand and extra weapons put into the bag when the class first takes the field; missing = the
    *  faction's start weapon. */
   kit?: { hand: string; left?: string; bag: string[] };
@@ -28,11 +30,13 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
   hunter: { name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2' },
   mage: {
     name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
-    staves: true, kit: { hand: 'staff_fire', left: 'orb_vigor', bag: ['staff_ice', 'staff_wind', 'orb_fury'] },
+    staves: true, model: { human: 'mage', orc: 'orc_shaman' }, kit: { hand: 'staff_fire', left: 'orb_vigor', bag: ['staff_ice', 'staff_wind', 'orb_fury'] },
   },
 };
 
 export const CLASS_IDS = Object.keys(CLASSES) as HeroClass[];
+
+export const heroModel = (c: HeroClass, faction: FactionId) => CLASSES[c].model?.[faction] ?? FACTIONS[faction].hero;
 
 /** Seconds between two switches, so a double tap does not flip the hero back and forth. */
 export const SWITCH_COOLDOWN = 0.5;

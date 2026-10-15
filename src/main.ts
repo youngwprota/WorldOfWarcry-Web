@@ -7,8 +7,9 @@ import './grade';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { FACTIONS, FORGE3D, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
+import { CASTER_MODELS, FACTIONS, FORGE3D, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
 import { Game } from './game';
+import { CLASSES } from './party';
 import { Input } from './input';
 import { Inventory } from './inventory';
 import { DebugPanel } from './debug';
@@ -66,6 +67,8 @@ for (const f of Object.values(FACTIONS)) {
   models.add(f.campfire);
 }
 for (const w of Object.values(WEAPONS)) if (!w.orb) Object.values(w.model).forEach((m) => models.add(m));
+for (const c of Object.values(CLASSES)) Object.values(c.model ?? {}).forEach((m) => models.add(m)); // class bodies (mage)
+CASTER_MODELS.forEach((m) => models.add(m)); // mage armour skins
 models.add('sickle').add('kitchen_knife'); // sword stand-ins in sword pairs (src/offhand.ts)
 models.add('sword_undead_king'); // the Lich King's sword: prologue and the faction choice scene
 const props = new Set<string>();

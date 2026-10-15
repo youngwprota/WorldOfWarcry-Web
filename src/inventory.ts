@@ -253,7 +253,6 @@ export class Inventory {
   open() {
     if (this.opened) return;
     this.opened = true;
-    const f = FACTIONS[this.game.faction];
     const tab = (bf: BagFilter, ic: string) => `<button class="tab ${this.bagFilter === bf ? 'on' : ''}" data-filter="${bf}">${art(ic, 34)}</button>`;
     this.ui.open(`${this.statsPanel()}
     <div class="inv-equipped"><div class="eq-title">Экипировано</div>
@@ -270,7 +269,7 @@ export class Inventory {
       <div class="sheet-body"><div id="b-grid"></div></div>
       <p class="hint-line">Нажми на предмет: надеть, сравнить или выбросить</p>
     </div>`);
-    this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, f.hero);
+    this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, this.game.heroBody);
     this.ui.on('#i-close', () => this.close());
     this.ui.on('#i-info', () => this.showInfo());
     this.ui.modal.querySelector('#i-rl')!.addEventListener('click', () => this.preview?.nudge(-1));
