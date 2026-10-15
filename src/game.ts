@@ -9,9 +9,9 @@ import {
   ATTACK_HIT, COMBOS, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
   mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
-import { ArenaFog, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, Telegraphs, type Bolt, type PickupKind } from './fx';
+import { ArenaFog, FloatingText, FogPuffs, Particles, Shockwaves, Spells, Telegraphs, type Bolt } from './fx';
 import {
-  ARMOR, BAG_SIZE, armorTrim, copyGain, dropIconId, dropItem, itemClass, itemModel, itemName, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, armorTrim, copyGain, dropIconId, dropItem, itemClass, itemIcon, itemModel, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
@@ -24,7 +24,8 @@ import { Arrows } from './arrows';
 import { PET_SEEK, Pet } from './pet';
 import { GATE, ISLAND, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
-import { UI, type MapMark } from './ui';
+import { UI, type FlyEl, type MapMark } from './ui';
+import { art } from './art';
 import { fmtK, lootHtml, resistIcons } from './icons';
 import { heroDeaths, logFight, logSnap } from './balancelog';
 import { addPct, addStat, armorMul, critAvg, critChance, critMul, dodgeChance, gearOf, guardMul, heroDps, heroStats, statBreakdown } from './balance';
@@ -36,6 +37,8 @@ const SOUL_BARKS = ['Восстаньте, души!', 'Служите мне в
 const releaseHold = (m: Mob, anim: BossAnim, impactIn: number) => { if (m.ch instanceof Character) m.ch.release(anim, impactIn); };
 /** Debris colour of hits and kills: bone dust for skeletons and spirits, blood for the rest. */
 const bloodColor = (m: Mob) => m.def.id.startsWith('skel') || m.def.id === 'ghost' || m.def.id === 'death' ? 0xd8d4c8 : 0xc0392b;
+/** Screen px between the icons of one kill's drops, before the HUD scale. */
+const DROP_GAP = 56;
 /** White-yellow sparks of a non-lethal hit (blood is for the kill). */
 const HIT_SPARK = 0xfff3a8;
 
@@ -326,7 +329,6 @@ export class Game {
   /** The hunter's pet while he is on the field. */
   private pet: Pet | null = null;
   private telegraphs: Telegraphs;
-  private pickups: Pickups;
   private waves: Shockwaves;
   private spells: Spells;
   /** Ice staff: the mob hit in a row and the hits on it toward the freeze; wind staff: landed swings toward the orb. */
@@ -449,8 +451,7 @@ export class Game {
     this.particles = new Particles(this.scene);
     this.arrows = new Arrows(this.scene);
     this.telegraphs = new Telegraphs(this.scene);
-    this.pickups = new Pickups(this.scene);
-    this.pickups.onCollect = (k, it) => this.collect(k, it);
+    this.ui.onFlyEnd = this.flyEnd;
     this.waves = new Shockwaves(this.scene);
     this.spells = new Spells(this.scene);
     this.syncPet();
@@ -577,7 +578,9 @@ export class Game {
 
   /** Model names of the right / left hand weapons. */
   handModels(): [string | null, string | null] {
-    const m = (it: Item | null) => (it ? itemModel(it, this.faction) : null);
+    // a debug set (Game.debugSet) shows the equipped weapons at the set's quality
+    const r = this.debugLooks[this.heroClass];
+    const m = (it: Item | null) => (it ? itemModel(r >= 0 ? { ...it, rarity: r } : it, this.faction) : null);
     // the mage's orb is not held: it floats over the shoulder (Character.setOrb)
     const left = this.save.weapons[1];
     return [m(this.save.weapons[0]), left && WEAPONS[left.def].orb ? null : m(left)];
@@ -689,7 +692,6 @@ export class Game {
     this.telegraphs.update(dt);
     this.particles.update(dt);
     this.arrows.update(dt);
-    this.pickups.update(dt, this.hero.position);
     this.waves.update(dt);
     this.updateGusts(dt);
     this.spells.update(dt);
@@ -1282,21 +1284,39 @@ export class Game {
   /** Right on the kill: stat orbs, items, a micro-boss's bonus, the gacha pull. */
   private grantKillRewards(m: Mob) {
     this.payRewards(m);
-    for (const it of m.loot) this.pickups.spawnItem(m.pos, it);
+    const pull = !m.owner && Math.random() < tokenChance(mobRank(m.def), this.world.zoneAt(m.spawn.x, m.spawn.z).id);
+    const n = m.loot.length + (pull ? 1 : 0);
+    m.loot.forEach((it, i) => this.flyDrop(m.pos, i, n, itemIcon(it, 44), RARITY[it.rarity].color, 'btn-bag', it));
     m.loot = [];
     if (m.def.bonus) this.grantBonus(m);
-    if (!m.owner && Math.random() < tokenChance(mobRank(m.def), this.world.zoneAt(m.spawn.x, m.spawn.z).id)) this.grantPull(m);
+    if (pull) this.grantPull(m, n - 1, n);
     if (m.def.boss) this.persist();
   }
 
   /** A kill dropped a gacha pull. */
-  private grantPull(m: Mob) {
+  private grantPull(m: Mob, slot: number, count: number) {
     this.save.pulls = (this.save.pulls ?? 0) + 1;
     this.fx.spawn(v1.copy(m.pos).setY(2.6), '+1 крутка', 'loot', 1.6, { color: '#ffb347' });
-    this.ui.gachaBadge(this.save.pulls);
+    this.flyDrop(m.pos, slot, count, art('anvil', 44), '#ffb347', 'btn-gacha');
     sfx.levelUp();
     this.persist();
   }
+
+  /**
+   * A drop's icon flies from the unit to its HUD button; the item reaches the bag on arrival (flyEnd).
+   * The `count` drops of one kill start side by side under the unit, `slot` is this one's place in the row.
+   */
+  private flyDrop(at: THREE.Vector3, slot: number, count: number, html: string, color: string, to: FlyEl['to'], item?: Item) {
+    const { w, h } = this.ui.size();
+    v1.copy(at).project(this.camera);
+    const x = (v1.x * 0.5 + 0.5) * w + (slot - (count - 1) / 2) * DROP_GAP * this.ui.scale;
+    this.ui.fly(html, color, x, (-v1.y * 0.5 + 0.5) * h, to, item);
+  }
+
+  private flyEnd = (el: FlyEl) => {
+    if (el.item) this.lootItem(el.item);
+    else this.ui.gachaBadge(this.save.pulls ?? 0);
+  };
 
   /** Micro-boss kill: permanent stats straight onto the hero. */
   private grantBonus(m: Mob) {
@@ -1326,9 +1346,9 @@ export class Game {
     u.respawnAt = this.time + u.respawnTotal;
   }
 
-  /** Stat orbs of a dead unit. */
+  /** Stats of a dead unit go straight to the hero (a mob's wait for its death clip, see grantKillRewards). */
   private payRewards(u: Unit) {
-    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.pickups.spawn(u.pos, k);
+    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.collect(k);
   }
 
   /** Spawners: a dead unit comes back when its charge's cooldown ends (the hero's position does not matter). */
@@ -1384,17 +1404,12 @@ export class Game {
     return true;
   }
 
-  private collect(kind: PickupKind, item?: Item) {
-    if (kind === 'item' && item) {
-      this.lootItem(item);
-      return;
-    }
+  private collect(k: OrbKind) {
     sfx.orb();
-    const k = kind as OrbKind;
     addStat(this.save, 'enemy', k, ORBS[k].value);
     if (k === 'hp') this.hp = Math.min(this.maxHp, this.hp + ORBS.hp.value);
-    this.ui.gain(kind as OrbKind, this.time);
-    this.ui.popStat(kind as OrbKind);
+    this.ui.gain(k, this.time);
+    this.ui.popStat(k);
   }
 
   // ---------- mobs ----------
@@ -2160,6 +2175,7 @@ export class Game {
       return false;
     }
     const slot = it.kind === 'weapon' ? classSlot(this.heroClass, it.def) : null;
+    if (slot === 1 && this.offFixed()) return false;
     this.save.bag.splice(index, 1);
     if (slot !== null) {
       const old = this.save.weapons[slot];
@@ -2184,10 +2200,12 @@ export class Game {
     return true;
   }
 
+  private offFixed() { return !!CLASSES[kitOf(this.heroClass)].fixedOff; }
+
   /** Only the class item comes off: the weapon slot is never empty, it is only swapped. */
   unequipWeapon(slot: 0 | 1) {
     const it = this.save.weapons[slot];
-    if (slot === 0 || !it || this.save.bag.length >= BAG_SIZE) return false;
+    if (slot === 0 || this.offFixed() || !it || this.save.bag.length >= BAG_SIZE) return false;
     this.save.weapons[slot] = null;
     this.save.bag.push(it);
     this.afterGearChange();

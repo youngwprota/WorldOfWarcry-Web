@@ -240,7 +240,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #zone-foes .foe { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 2.5px solid var(--ink); box-shadow: 0 2px 4px #0008; }
 #zone-foes .foe.weak { background: radial-gradient(circle at 35% 30%, #7dff8e, #1f9e35); }
 #btn-gacha[data-badge]:not([data-badge=""])::after,
-#btn-bag[data-badge]:not([data-badge=""])::after { content: attr(data-badge); position: absolute; top: -8px; right: -8px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; background: linear-gradient(#ff7d93, #e8335a); border: 2px solid var(--ink); font-size: 12px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); display: flex; align-items: center; justify-content: center; }
+#btn-bag[data-badge]:not([data-badge=""])::after { content: attr(data-badge); position: absolute; top: -8px; right: -8px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: linear-gradient(#ff7d93, #e8335a); border: 2px solid var(--ink); font-size: 9px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); display: flex; align-items: center; justify-content: center; }
 #zone-banner { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-weight: 900; font-size: 30px; color: #fff; text-shadow: var(--stroke), 0 4px 0 var(--ink); opacity: 0; transform: scale(0.9); transition: opacity 0.4s, transform 0.4s; text-transform: uppercase; }
 #zone-banner small { display: table; margin: 8px auto 0; font-size: 13px; font-weight: 900; color: #fff; padding: 4px 12px; border-radius: 10px; background: linear-gradient(#ffd04d, #ff8418); border: 2px solid var(--ink); text-shadow: var(--stroke-s); text-transform: none; }
 #zone-banner.show { opacity: 1; transform: none; }
@@ -355,7 +355,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .top-right { width: 170px; gap: 8px; }
 #minimap, #bigmap { width: 140px; height: 140px; }
 #btn-gacha[data-badge]:not([data-badge=""])::after,
-#btn-bag[data-badge]:not([data-badge=""])::after { min-width: 28px; height: 28px; font-size: 15px; border-radius: 14px; top: -10px; right: -10px; }
+#btn-bag[data-badge]:not([data-badge=""])::after { min-width: 20px; height: 20px; font-size: 11px; border-radius: 10px; top: -7px; right: -7px; }
 #bosses { left: 6px; top: 34%; gap: 18px; }
 .bw { width: 104px; }
 .bw .svgi { width: 62px; height: 62px; }
@@ -750,7 +750,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .mobui .mobhp span, .herohp span { position: absolute; inset: auto; left: 50%; top: 50%; transform: translate(-50%, -52%); display: block; font-size: var(--hpfs); font-weight: 900; line-height: 1; color: #fff; text-shadow: var(--stroke-s); white-space: nowrap; }
 /* buffs, then stats gained from kills, under the level badge */
 #buffs { position: static; }
-#gains { display: flex; flex-direction: column; gap: 4px; }
+#gains { position: absolute; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .gain { display: flex; align-items: center; gap: 4px; width: max-content; font-size: 20px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); }
 .gain.pop { animation: gain-pop 0.25s ease-out; }
 @keyframes gain-pop { from { transform: scale(1.4); } }
@@ -769,9 +769,33 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #btn-bag { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); }
 .round-btn.bag { background: linear-gradient(#ffb24a 0 50%, #d8701c 50%); }
 #btn-gacha { position: absolute; right: 14px; top: calc(50% - 110px); }
+/* a drop flying into the bag / forge (UI.fly): glows, shrinks a little on the way, then the button pulses and pops a "+1" */
+.fly { position: absolute; z-index: 6; pointer-events: none; transform: translate(-50%, -50%) scale(calc(var(--s) * 1.5)); filter: drop-shadow(0 0 6px var(--glow)) drop-shadow(0 0 14px var(--glow)); animation: fly-in 0.85s cubic-bezier(0.5, -0.25, 0.7, 1) 0.15s forwards; }
+@keyframes fly-in {
+  0% { transform: translate(-50%, -50%) scale(calc(var(--s) * 1.5)); }
+  25% { transform: translate(calc(-50% + var(--dx) * 0.1), calc(-50% + var(--dy) * 0.1 - 40px)) scale(calc(var(--s) * 1.8)) rotate(-12deg); }
+  100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(calc(var(--s) * 0.7)) rotate(8deg); }
+}
+#btn-bag.pulse, #btn-gacha.pulse { animation: btn-pulse 0.7s cubic-bezier(0.3, 1.6, 0.5, 1); }
+#btn-bag.pulse { --pulse-y: -50%; }
+@keyframes btn-pulse {
+  0% { transform: translateY(var(--pulse-y, 0)) scale(1); filter: none; }
+  20% { transform: translateY(var(--pulse-y, 0)) scale(1.28) rotate(-6deg); filter: brightness(1.5) drop-shadow(0 0 12px #fff6b0); }
+  40% { transform: translateY(var(--pulse-y, 0)) scale(0.9) rotate(4deg); }
+  60% { transform: translateY(var(--pulse-y, 0)) scale(1.1) rotate(-2deg); filter: brightness(1.2) drop-shadow(0 0 6px #fff6b0); }
+  100% { transform: translateY(var(--pulse-y, 0)) scale(1); filter: none; }
+}
+#btn-bag.pulse::after, #btn-gacha.pulse::after { animation: badge-pop 0.5s cubic-bezier(0.3, 1.8, 0.5, 1) 0.1s both; }
+@keyframes badge-pop { 0% { transform: scale(0.3); } 60% { transform: scale(1.5); } 100% { transform: scale(1); } }
+.plus1 { position: absolute; left: 50%; top: 0; font-size: 22px; font-weight: 900; color: #fff6b0; text-shadow: var(--stroke-s); pointer-events: none; animation: plus1 0.9s ease-out forwards; }
+@keyframes plus1 {
+  0% { transform: translate(-50%, 0) scale(0.4); opacity: 0; }
+  25% { transform: translate(-50%, -26px) scale(1.4); opacity: 1; }
+  100% { transform: translate(-50%, -60px) scale(1); opacity: 0; }
+}
 .round-btn.forge { background: linear-gradient(#ff8a4a 0 50%, #b8321c 50%); }
 /* party: class switch buttons bottom-right, above the equip bar; the class on the field is big and lit */
-#party { position: absolute; right: 12px; bottom: calc(150px + env(safe-area-inset-bottom)); display: flex; align-items: flex-end; gap: 10px; }
+#party { position: absolute; right: 12px; bottom: calc(150px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 #party .cls { position: relative; width: 56px; height: 56px; border: 4px solid var(--ink); border-radius: 50%; background: var(--gloss, none), linear-gradient(var(--c1) 0 50%, var(--c2) 50%); box-shadow: inset 0 -5px 0 #0000002e, 0 4px 0 var(--ink); filter: saturate(0.45) brightness(0.8); transition: transform 0.12s, filter 0.12s; }
 #party .cls .svgi { width: 38px; height: 38px; margin: 0; }
 #party .cls b { position: absolute; right: -4px; bottom: -6px; font-size: 14px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); }

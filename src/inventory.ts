@@ -176,6 +176,7 @@ export class Inventory {
     return `<div class="top-stats">
       <div class="sc-title">Характеристики</div>
       <button class="info-btn" id="i-info" title="Все характеристики">i</button>
+      <button class="xbtn" id="i-close" title="Закрыть">✕</button>
       <div class="big-stats" id="i-big"></div>
       <div class="chips" id="i-stats"></div>
     </div>`;
@@ -291,7 +292,7 @@ export class Inventory {
       </div>
     </div>
     <div class="sheet inv">
-      <div class="sheet-head"><div class="sheet-title">Инвентарь</div><button class="xbtn" id="i-close" title="Закрыть">✕</button></div>
+      <div class="sheet-head"><div class="sheet-title">Инвентарь</div></div>
       <div class="tabs">${tab('all', 'bag')}${tab('weapon', 'sword')}${tab('armor', 'chest')}<span class="cap" id="b-sub"></span></div>
       <div class="sheet-body"><div id="b-grid"></div></div>
       <p class="hint-line">Нажми на предмет: надеть, сравнить или выбросить</p>
