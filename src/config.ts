@@ -1,4 +1,5 @@
 import type { SwingKind } from './swing';
+import type { HeroClass } from './party';
 // All gameplay numbers live here (GDD: "все числа — ориентиры").
 
 /** Sword — slash (режущий), axe — chop (рубящий), hammer — crush (дробящий). */
@@ -96,6 +97,15 @@ export interface WeaponDef {
    * bash back with the shield.
    */
   guard?: { reduce: number; counter: Record<MobRank, number>; cd: number };
+  /** Only this party class wields it (and it never drops for the others); no `cls` = the warrior's weapons. */
+  cls?: HeroClass;
+  /** Held in the left hand (the bow). */
+  leftHand?: boolean;
+  /**
+   * Bow: the blow looses an arrow (model by faction) flying at `speed` m/s that homes in on the target and hits on
+   * arrival; the finisher is a volley of `volley` arrows at the nearest units in range.
+   */
+  shot?: { speed: number; arrow: Record<FactionId, string>; volley: number };
 }
 
 export type MobRank = 'normal' | 'elite' | 'mini' | 'boss';
@@ -152,7 +162,40 @@ export const WEAPONS: Record<string, WeaponDef> = {
     guard: { reduce: 0.15, counter: { normal: 0.2, elite: 0.3, mini: 0.4, boss: 0.5 }, cd: 0.4 },
     swing: ['bash'],
   },
+  // hunter (src/party.ts): ~2.5 sword ranges
+  bow: {
+    id: 'bow', name: 'Лук', type: 'slash', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 5.75,
+    anim: 'SwordAttack', model: { human: 'bow_human_archer', orc: 'bow_orc_archer' }, icon: '🏹', single: true,
+    cls: 'hunter', leftHand: true,
+    shot: { speed: 24, arrow: { human: 'arrow_human_archer', orc: 'arrow_orc_archer' }, volley: 3 },
+  },
 };
+
+/**
+ * Hunter's pets: they sit in the hunter's second weapon slot, run after him and bite what he shoots at. Mobs
+ * ignore them for now. A bite deals `dmg` × the damage of the hunter's bow (with his power and crits off).
+ */
+export interface PetDef {
+  id: string;
+  name: string;
+  /** Art icon id (src/art.ts) in the slot. */
+  icon: string;
+  /** GLB creature (src/creature.ts). */
+  model: string;
+  scale: number;
+  type: DamageType;
+  dmg: number;
+  aps: number;
+  /** Bite reach from its centre to the foe's edge, m. */
+  range: number;
+  /** Run speed, m/s: a bit above the hero's so it keeps up. */
+  speed: number;
+}
+export const PETS: Record<string, PetDef> = {
+  boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, type: 'crush', dmg: 0.6, aps: 0.9, range: 1.3, speed: 6.5 },
+};
+/** Pet the hunter starts with. */
+export const START_PET = 'boar';
 
 /** Two weapons at once: each hand hits for `mul` of its damage (both hands ≈ ×1.2 of one). */
 export const DUAL = { mul: 0.6 };
@@ -213,6 +256,8 @@ export const COMBOS: Record<string, ComboDef> = {
   pan: { name: 'БОНК', hits: 3, window: 0.4, mult: 1.6, rangeAdd: 0.4, shape: 'circle', arc: 360, knock: 2, stun: 1.5, spin: false, color: 0xffd28a },
   hidden_blade: { name: 'Казнь', hits: 2, window: 0.8, mult: 1.5, rangeAdd: 0, shape: 'arc', arc: 120, knock: 1, stun: 1, spin: false, color: 0xff4040 },
   shield: { name: 'Таран', hits: 3, window: 0.5, mult: 1.5, rangeAdd: 0.5, shape: 'arc', arc: 140, knock: 9, stun: 0.8, spin: false, color: 0xa0c8ff },
+  // bow: the finisher is a volley (WeaponDef.shot.volley); shape / arc unused
+  bow: { name: 'Залп', hits: 3, window: 0.45, mult: 1.4, rangeAdd: 0.5, shape: 'arc', arc: 60, knock: 4, stun: 0, spin: false, color: 0xc8f07a },
   reaper: { name: 'Жатва', hits: 3, window: 0.45, mult: 1.5, rangeAdd: 0.6, shape: 'circle', arc: 360, knock: 2, stun: 0.5, spin: true, color: 0x9a7bff },
 };
 

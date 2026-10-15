@@ -7,7 +7,7 @@ import './grade';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { FACTIONS, FORGE3D, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
+import { FACTIONS, FORGE3D, MOBS, ORBS, PETS, WEAPONS, type FactionId, type OrbKind } from './config';
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
@@ -21,6 +21,7 @@ import { clearLog, report } from './balancelog';
 import { UI } from './ui';
 import { DragScroll } from './dragscroll';
 import { BREAKABLES } from './world';
+import { CLASSES } from './party';
 
 const ui = new UI();
 const app = ui.app;
@@ -65,11 +66,16 @@ for (const f of Object.values(FACTIONS)) {
   f.campProps.forEach((p) => models.add(p));
   models.add(f.campfire);
 }
-for (const w of Object.values(WEAPONS)) Object.values(w.model).forEach((m) => models.add(m));
+for (const w of Object.values(WEAPONS)) {
+  Object.values(w.model).forEach((m) => models.add(m));
+  if (w.shot) Object.values(w.shot.arrow).forEach((m) => models.add(m));
+}
+for (const c of Object.values(CLASSES)) Object.values(c.model ?? {}).forEach((m) => models.add(m));
 models.add('sickle').add('kitchen_knife'); // sword stand-ins in sword pairs (src/offhand.ts)
 models.add('sword_undead_king'); // the Lich King's sword: prologue and the faction choice scene
 const creatures = new Set<string>();
 for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { (m.creature ? creatures : models).add(c); if (w) models.add(w); }
+for (const p of Object.values(PETS)) creatures.add(p.model);
 for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
 // gacha forge scene (src/forge3d.ts): anvil and decor are cloned from here
 models.add('anvil_big');

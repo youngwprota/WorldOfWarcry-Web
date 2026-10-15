@@ -21,6 +21,9 @@ const TEXTURE_OF: Record<string, string> = {
   orc_shaman: 'orc_shaman_albedo', staff_orc_shaman: 'orc_shaman_albedo',
   elf_warrior: 'elf_warrior_tex', sword_elf_warrior: 'elf_warrior_tex', elf_assassin: 'elf_assassin_tex', elf_worker: 'elf_worker_tex',
   elf_queen: 'elf_queen_tex', glaive_elf_queen: 'elf_queen_tex', elf_priestess: 'elf_priestess_tex', magic_ball: 'elf_priestess_tex',
+  // party classes from the newer Unity kit (tools/import-warcry.mjs): one shared atlas per race
+  human_archer: 'human_albedo', bow_human_archer: 'human_albedo', arrow_human_archer: 'human_albedo',
+  orc_archer: 'orc_albedo', bow_orc_archer: 'orc_albedo', arrow_orc_archer: 'orc_albedo',
 };
 /** Recolours (MobDef.skin): body texture → its recoloured copy. */
 export const SKINS: Record<string, Record<string, string>> = {

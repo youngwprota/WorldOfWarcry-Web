@@ -2,7 +2,7 @@
 // (the rig only has two attack clips, both right-handed), plus a weapon trail ribbon.
 import * as THREE from 'three';
 
-export type SwingKind = 'slashRL' | 'slashLR' | 'thrust' | 'overhead' | 'throw' | 'assassin' | 'uppercut' | 'bash';
+export type SwingKind = 'slashRL' | 'slashLR' | 'thrust' | 'overhead' | 'throw' | 'assassin' | 'uppercut' | 'bash' | 'aim' | 'draw';
 
 /**
  * One key, character space, radians, for the RIGHT hand (the left one is mirrored):
@@ -23,6 +23,10 @@ const KEYS: Record<SwingKind, Key[]> = {
   assassin: [[0.55, -0.9, 0.6, -0.6, -0.5, 0.3], [1, 0.8, 0.45, 0.3, 0.3, 0], [1.6, 0.75, 0.4, 0.25, 0.3, 0]],
   uppercut: [[0.6, -0.3, 0.45, -0.2, -0.2, 0.2], [1, 0.2, -0.3, 2.7, 0.1, 0], [1.4, 0.15, -0.2, 2.4, 0.1, 0]],
   bash: [[0.6, -0.45, -0.05, -0.3, -0.3, 0.2], [1, 0.4, 0.35, 0.5, 0.3, 0], [1.35, 0.35, 0.3, 0.45, 0.25, 0]],
+  // bow shot: `aim` raises the bow arm (the left hand) at the target, `draw` pulls the string with the other one
+  // and turns the torso side-on; the arrow leaves on the impact
+  aim: [[0.45, 0, 0, 1.45, 0.2, 0], [1, 0, 0, 1.5, 0.2, 0], [1.5, 0, 0, 1.35, 0.15, 0]],
+  draw: [[0.45, -0.45, 0, 1.45, 0.55, 0], [0.95, -0.5, 0, 1.35, -0.2, 0.55], [1.2, -0.45, 0, 1.2, -0.45, 0.6]],
 };
 
 const AXIS_X = new THREE.Vector3(1, 0, 0);

@@ -7,18 +7,20 @@ import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from '.
 import { Creature } from './creature';
 import { StaticBody } from './staticbody';
 import {
-  COMBOS, DUAL, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  COMBOS, DUAL, FACTIONS, GACHA, PETS, START_PET, type PetDef, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
   mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StatId, type WeaponDef, type ZoneDef, isPctStat,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
-  ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemName, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemClass, itemName, makeItem, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
 import { sfx } from './audio';
 import { writeSave, type SaveData } from './save';
-import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, type HeroClass } from './party';
+import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, kitOf, type HeroClass } from './party';
+import { Arrows } from './arrows';
+import { Pet } from './pet';
 import { GATE, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
 import { UI, type MapMark } from './ui';
@@ -311,6 +313,9 @@ export class Game {
   private props: Prop[] = [];
   private fx: FloatingText;
   private particles: Particles;
+  private arrows: Arrows;
+  /** The hunter's pet while he is on the field. */
+  private pet: Pet | null = null;
   private telegraphs: Telegraphs;
   private pickups: Pickups;
   private waves: Shockwaves;
@@ -366,7 +371,6 @@ export class Game {
 
   constructor(public save: SaveData, private input: Input, public ui: UI, labels: HTMLElement) {
     this.labels = labels;
-    const f = FACTIONS[save.faction];
     this.camera = new THREE.PerspectiveCamera(54, 9 / 16, 0.5, 90);
     this.scene.fog = new THREE.FogExp2(0xbfe0f5, 0.015);
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 2.0);
@@ -387,7 +391,9 @@ export class Game {
     if (save.gatesOpen) this.world.openAllGates(true);
     this.world.fog.load(save.fog); // a new hero knows only the camp
 
-    this.hero = new Character(f.hero, null, 1);
+    this.wearKit(kitOf(this.heroClass));
+    this.wearGear(this.heroClass);
+    this.hero = new Character(this.heroModel(), null, 1);
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
     this.hero.setHighlight(true);
@@ -428,6 +434,7 @@ export class Game {
     labels.appendChild(hb);
     this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, text: hb.querySelector('span')! };
     this.particles = new Particles(this.scene);
+    this.arrows = new Arrows(this.scene);
     this.telegraphs = new Telegraphs(this.scene);
     this.pickups = new Pickups(this.scene);
     this.pickups.onCollect = (k, it) => this.collect(k, it);
@@ -435,6 +442,7 @@ export class Game {
     this.orbits = new Orbits(this.scene);
     this.falls = new Falls(this.scene);
     this.helpers = new Helpers(this.scene);
+    this.syncPet();
     // (no camp NPC by the gate for now: src/npc.ts CampNpc is kept for later)
     this.camPos.copy(this.hero.position);
     this.refreshHud(true);
@@ -471,15 +479,63 @@ export class Game {
   switchClass(c: HeroClass) {
     if (c === this.heroClass || this.dead || this.time - this.classT < SWITCH_COOLDOWN) return false;
     this.classT = this.time;
+    const model = this.heroModel();
     this.save.cls = c;
-    sfx.click();
+    this.wearKit(kitOf(c));
+    this.wearGear(c);
+    if (this.heroModel() !== model) this.rebuildHero();
+    this.syncPet();
+    this.target = null;
     this.particles.burst(this.hero.position.clone().setY(1), new THREE.Color(CLASSES[c].color[0]).getHex(), 18, 0.14, 4, 0.6);
     this.ui.party(c);
     this.ui.toast(CLASSES[c].name, 1200);
     this.onClassChange(c);
-    this.persist();
+    this.afterGearChange(); // weapons in hand, stats, hands, save, HUD
     return true;
   }
+
+  /** Hero model of the class on the field. */
+  heroModel() { return CLASSES[this.heroClass].model?.[this.faction] ?? FACTIONS[this.faction].hero; }
+
+  /** Puts kit `k`'s weapons into the hands (SaveData.kits); a kit never worn starts with its class weapon. */
+  private wearKit(k: HeroClass) {
+    const cur = this.save.kit ?? 'warrior';
+    if (cur === k) return;
+    const kits = (this.save.kits ??= {});
+    kits[cur] = this.save.weapons;
+    this.save.weapons = kits[k] ?? [makeItem('weapon', CLASSES[k].weapon ?? FACTIONS[this.faction].startWeapon, 0, 1), null];
+    delete kits[k];
+    this.save.kit = k;
+  }
+
+  /** Puts class `c`'s armour on (SaveData.gear): every party member wears his own; a new one starts bare. */
+  private wearGear(c: HeroClass) {
+    const cur = this.save.gearOf ?? 'warrior';
+    if (cur === c) return;
+    const gear = (this.save.gear ??= {});
+    gear[cur] = this.save.equip;
+    this.save.equip = gear[c] ?? {};
+    delete gear[c];
+    this.save.gearOf = c;
+  }
+
+  /** A new hero character for the class model, in the old one's place. */
+  private rebuildHero() {
+    const old = this.hero;
+    const ch = new Character(this.heroModel(), null, 1);
+    ch.position.copy(old.position);
+    ch.facing = old.facing;
+    ch.root.scale.setScalar(this.heroScale);
+    old.dispose();
+    this.hero = ch;
+    this.equipVisual();
+    ch.setOutfit(this.outfit());
+    ch.setHighlight(true);
+    this.scene.add(ch.root);
+  }
+
+  /** The class on the field may use the item (items.ts itemClass); the mage has no weapons of his own yet. */
+  canUse(it: Item) { const c = itemClass(it); return !c || c === this.heroClass; }
   /** Totals from equipped armour and jewellery. */
   gear() { return gearOf(this.save.equip); }
   /** Final stats (base points + gear), see heroStats. */
@@ -517,9 +573,16 @@ export class Game {
     return [m(this.save.weapons[0], 0), m(this.save.weapons[1], 1)];
   }
 
+  /** Weapon models as the hero holds them, [right hand, left hand]: the bow goes into the left hand while that one is free. */
+  heldModels(): [string | null, string | null] {
+    const [r, l] = this.handModels();
+    const main = this.save.weapons[0];
+    return main && WEAPONS[main.def].leftHand && !l ? [null, r] : [r, l];
+  }
+
   private equipVisual() {
     this.pair = swordPair(this.save.weapons[0]?.def, this.save.weapons[1]?.def);
-    this.hero.setWeapon(...this.handModels());
+    this.hero.setWeapon(...this.heldModels());
   }
 
   /** Body parts borrowed from other characters for the equipped armour. */
@@ -552,11 +615,13 @@ export class Game {
     this.updateOrbits(dt);
     this.falls.update(dt);
     this.updateHelpers(dt);
+    this.updatePet(dt);
     if (this.pair?.kind === 'pan') this.fearAura(dt);
     this.updateProps(dt);
     this.updateRespawns();
     this.telegraphs.update(dt);
     this.particles.update(dt);
+    this.arrows.update(dt);
     this.pickups.update(dt, this.hero.position);
     this.waves.update(dt);
     this.world.update(dt, this.time, this.hero.position);
@@ -716,7 +781,7 @@ export class Game {
     for (const h of this.hands) {
       const it = this.save.weapons[h.i];
       const since = this.time - h.lastSwing;
-      const on = !!it && since > h.impactAt * 0.45 && since < h.impactAt * 1.5;
+      const on = !!it && !WEAPONS[it.def].shot && since > h.impactAt * 0.45 && since < h.impactAt * 1.5;
       this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, it ? COMBOS[it.def].color : 0xffffff);
     }
   }
@@ -780,7 +845,11 @@ export class Game {
       h.impactAt = impactAt;
       const kinds = w.swing ?? (h.i === 1 ? LEFT_SWING[w.anim] : null);
       if (h.special) this.hero.swing(h.special === 'launch' ? 'uppercut' : h.special === 'fall' ? 'overhead' : 'thrust', h.i, period, impactAt);
-      else if (kinds) this.hero.swing(kinds[(h.combo - 1) % kinds.length], h.i, period, impactAt);
+      else if (w.shot) {
+        // the bow arm points at the target, the other one draws the string
+        this.hero.swing('aim', 1, period, impactAt);
+        this.hero.swing('draw', 0, period, impactAt);
+      } else if (kinds) this.hero.swing(kinds[(h.combo - 1) % kinds.length], h.i, period, impactAt);
       else this.hero.attack(w.anim, period, impactAt);
       if (pair?.kind === 'hidden_blade' && w.assassin) this.hero.swing('thrust', pair.sword, period, impactAt);
       if (h.special === 'fall') this.dropBlade(impactAt);
@@ -855,6 +924,7 @@ export class Game {
     const w = WEAPONS[it.def];
     const fin = h.finisher ? COMBOS[it.def] : null;
     if (w.orbit) return this.throwScythe(h, it, fin);
+    if (w.shot) return this.shoot(h, it, w, fin);
     const shape = fin ? fin.shape : w.shape;
     const arc = fin ? fin.arc : w.arc;
     const range = w.range + (fin ? fin.rangeAdd : 0);
@@ -949,6 +1019,54 @@ export class Game {
     h.lastSwingHit = hits > 0;
     if (!hits && !w.cycle) h.combo = 0;
     return hits;
+  }
+
+  /**
+   * Bow: looses an arrow at the target (the finisher: a volley at the nearest units in range, mobs first); the damage
+   * lands when each arrow arrives (arrowHit). Returns the number of arrows.
+   */
+  private shoot(h: Hand, it: Item, w: WeaponDef, fin: ComboDef | null) {
+    const shot = w.shot!;
+    const range = w.range + (fin ? fin.rangeAdd : 0);
+    const first = this.target && this.target.hittable && this.inStrike(this.target, range) ? this.target : null;
+    const targets: Unit[] = first ? [first] : [];
+    if (first && fin) {
+      const p = this.hero.position;
+      const score = (u: Unit) => u.pos.distanceTo(p) - u.radius + (u.passive ? 1000 : 0);
+      targets.push(...this.units.filter((u) => u !== first && u.hittable && this.inStrike(u, range))
+        .sort((a, b) => score(a) - score(b)).slice(0, shot.volley - 1));
+    }
+    if (fin) {
+      h.finisher = false;
+      h.combo = 0;
+    }
+    h.lastSwingHit = targets.length > 0;
+    if (!targets.length) { h.combo = 0; return 0; }
+    sfx.swing();
+    const yaw = this.hero.facing;
+    const from = v1.copy(this.hero.position).add(v2.set(Math.sin(yaw) * 0.6, 1.35, Math.cos(yaw) * 0.6));
+    for (const u of targets) this.arrows.fire(shot.arrow[this.faction], from, u, shot.speed, () => this.arrowHit(u, it, w, fin));
+    if (fin) {
+      sfx.combo();
+      this.shake = Math.max(this.shake, 0.2);
+    }
+    return targets.length;
+  }
+
+  /** A bow arrow reaches its unit. */
+  private arrowHit(u: Unit, it: Item, w: WeaponDef, fin: ComboDef | null) {
+    if (u instanceof Prop) {
+      const tier = u.def.resist[w.type] ?? 'normal';
+      this.hitProp(u, (fin ? 3 : 1) * RESIST_MULT[tier], tier);
+      return;
+    }
+    const m = u as Mob;
+    const { dmg, tier, fx } = this.damageFor(it, m.def, fin ? fin.mult : 1);
+    const f = this.fightOf(m);
+    f.hits++;
+    if (fin) f.combos++;
+    this.damageMob(m, dmg, tier, fin ? fin.knock : 1.5, fx);
+    if (fin?.stun && m.alive && !m.def.boss) m.stun = Math.max(m.stun, fin.stun);
   }
 
   /** Reaper pair: more plain mobs around than the reaper's crowd limit — the extra ones (weakest) drop dead. */
@@ -1159,6 +1277,45 @@ export class Game {
     this.fx.spawn(v3.setY(2), kind === 'sickle' ? 'Товарищ!' : 'Рабочий!', 'dmg weak', 0.8, { color: '#ff6060' });
   }
 
+  /** The pet in the class's second slot (the hunter's), or null. */
+  get petDef(): PetDef | null { return CLASSES[this.heroClass].pet ? PETS[this.save.pet ?? START_PET] : null; }
+
+  /** Puts the class's pet on the field (or takes it away). */
+  private syncPet() {
+    const def = this.petDef;
+    if (this.pet?.def === def) return;
+    this.pet?.dispose();
+    this.pet = def ? new Pet(def, this.scene) : null;
+    this.pet?.place(this.hero.position, this.hero.facing);
+  }
+
+  /** The pet goes for the hero's target if it is a mob, else for the nearest mob fighting near the hero. */
+  private updatePet(dt: number) {
+    const pet = this.pet;
+    if (!pet) return;
+    const hp = this.hero.position;
+    pet.update(dt, hp, this.hero.facing, () => {
+      if (this.dead) return null;
+      if (this.target instanceof Mob && this.target.hittable) return this.target;
+      let best: Mob | null = null;
+      let bd = HELPER_SEEK;
+      for (const m of this.mobs) {
+        if (!m.hittable || m.passive || m.state === 'idle') continue;
+        const d = m.pos.distanceTo(hp);
+        if (d < bd) { bd = d; best = m; }
+      }
+      return best;
+    }, (foe) => {
+      const m = foe as Mob;
+      const it = this.weaponItem;
+      const tier = m.def.resist[pet.def.type] ?? 'normal';
+      const dmg = Math.max(1, Math.round(this.itemDamage(it) * pet.def.dmg * RESIST_MULT[tier] * (0.9 + Math.random() * 0.2)));
+      this.fightOf(m).hits++;
+      // only extra damage: mobs never turn on the pet, the bite does not wake or shove them
+      this.damageMob(m, dmg, tier, 0, '', false);
+    });
+  }
+
   private updateHelpers(dt: number) {
     if (!this.helpers.list.length) return;
     const p = SWORD_PAIRS.hammer;
@@ -1199,7 +1356,8 @@ export class Game {
 
 
   /** `fx`: 'crit' shows a bigger number, 'miss' (or no damage at all) — the mob dodged. */
-  private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5, fx: HitFx = '') {
+  /** `aggro` false: plain extra damage (the pet's bites) — the mob keeps doing what it did and is not knocked back. */
+  private damageMob(m: Mob, dmg: number, tier: string, knock = 3.5, fx: HitFx = '', aggro = true) {
     if (fx === 'miss' || dmg <= 0) {
       m.state = m.state === 'return' ? 'return' : 'chase';
       this.fx.spawn(this.unitTextAt(m), 'Промах', 'dmg resist', 0.7, { lift: m.uiEl.offsetHeight });
@@ -1209,8 +1367,8 @@ export class Game {
     m.hp -= dmg;
     m.hurtAt = this.time;
     m.ch.hit();
-    m.state = m.state === 'return' ? 'return' : 'chase';
-    if (!m.def.boss && !m.passive) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
+    if (aggro) m.state = m.state === 'return' ? 'return' : 'chase';
+    if (aggro && !m.def.boss && !m.passive) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
     const head = this.unitTextAt(m);
     const lift = m.uiEl.offsetHeight;
     const text = fx === 'crit' ? `-${fmtK(dmg)}!` : `-${fmtK(dmg)}`;
@@ -1788,6 +1946,7 @@ export class Game {
   private respawnInCamp() {
     this.hero.position.set(SPAWN.x, 0, SPAWN.z);
     this.camPos.copy(this.hero.position);
+    this.pet?.place(this.hero.position, this.hero.facing);
     this.revive();
   }
 
@@ -1884,7 +2043,10 @@ export class Game {
     sfx.levelUp();
     let where = '';
     // A copy of an item the hero already has levels that item up instead.
-    const own = [...this.save.weapons, ...Object.values(this.save.equip), ...this.save.bag].find((x) => x && sameItem(x, item));
+    // (the other party members' weapons and armour count too)
+    const kits = Object.values(this.save.kits ?? {}).flat();
+    const worn = Object.values(this.save.gear ?? {}).flatMap((g) => Object.values(g));
+    const own = [...this.save.weapons, ...kits, ...Object.values(this.save.equip), ...worn, ...this.save.bag].find((x) => x && sameItem(x, item));
     if (own) {
       own.lvl += item.lvl;
       const gain = copyGain(item) * item.lvl;
@@ -1895,9 +2057,9 @@ export class Game {
       this.persist();
       return `Копия: ${text}`;
     }
-    // A weapon goes straight into a free weapon slot.
-    const free = this.save.weapons.findIndex((x) => !x);
-    if (item.kind === 'weapon' && free >= 0) {
+    // A weapon goes straight into a free weapon slot (not the pet's).
+    const free = this.save.weapons.findIndex((x, i) => !x && !(i === 1 && this.petDef));
+    if (item.kind === 'weapon' && free >= 0 && this.canUse(item)) {
       this.save.weapons[free] = item;
       this.fx.spawn(head, `${name} → слот ${free + 1}`, 'loot', 1.4, { color });
       this.ui.toast(`${name}: второй слот оружия. Переключай кнопкой ⇄`);
@@ -1921,10 +2083,15 @@ export class Game {
   equipFromBag(index: number, weaponSlot?: 0 | 1) {
     const it = this.save.bag[index];
     if (!it) return;
+    if (!this.canUse(it)) {
+      this.ui.toast(`${CLASSES[this.heroClass].name}: этот предмет для другого класса`);
+      return;
+    }
     this.save.bag.splice(index, 1);
     if (it.kind === 'weapon') {
       const free = this.save.weapons.findIndex((x) => !x);
-      const slot = weaponSlot ?? (free >= 0 ? (free as 0 | 1) : 0);
+      // the hunter's second slot is his pet's
+      const slot = this.petDef ? 0 : weaponSlot ?? (free >= 0 ? (free as 0 | 1) : 0);
       const old = this.save.weapons[slot];
       this.save.weapons[slot] = it;
       if (old) this.save.bag.splice(index, 0, old);
@@ -1949,7 +2116,8 @@ export class Game {
   unequipWeapon(slot: 0 | 1) {
     const it = this.save.weapons[slot];
     const other = this.save.weapons[1 - slot];
-    if (!it || !other || this.save.bag.length >= BAG_SIZE) return false;
+    // the mage holds the warrior's weapons for now: not his to take off
+    if (!it || !other || !this.canUse(it) || this.save.bag.length >= BAG_SIZE) return false;
     this.save.weapons[slot] = null;
     this.save.bag.push(it);
     this.afterGearChange();
@@ -2044,7 +2212,7 @@ export class Game {
     });
     this.ui.tickGains(this.time);
     if (full) {
-      this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it) * this.handMul(), this.save.equip);
+      this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it) * this.handMul(), this.save.equip, this.petDef);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
       this.ui.gachaBadge(this.save.pulls ?? 0);
       this.ui.party(this.heroClass);

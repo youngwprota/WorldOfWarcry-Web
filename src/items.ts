@@ -1,7 +1,8 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
-import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type StatId } from './config';
+import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type PetDef, type StatId } from './config';
 import { DAMAGE_TYPE_ICON, icon } from './icons';
 import { art, hasPng } from './art';
+import type { HeroClass } from './party';
 
 export type ItemKind = 'weapon' | 'armor';
 export interface Item {
@@ -54,6 +55,8 @@ export interface ArmorDef {
   defense: number;
   bonus: { stat: BonusStat; value: number };
   alwaysBonus?: boolean;
+  /** Only this party class wears it; none = everyone (rings, amulets). */
+  cls?: HeroClass;
 }
 
 // Armour sets reuse other characters of the hero's own race as "outfits". The hero itself is the plainest
@@ -78,6 +81,8 @@ for (const s of SETS) {
       name: { human: `${p.noun} ${s.of.human}`, orc: `${p.noun} ${s.of.orc}` },
       source: s.src, defense: Math.round(p.defense * s.mult),
       bonus: { stat: p.bonus.stat, value: Math.max(1, Math.round(p.bonus.value * s.mult)) },
+      // plate of soldiers, knights and paladins: the warrior's
+      cls: 'warrior',
     };
   }
 }
@@ -87,6 +92,10 @@ ARMOR.amulet_life = { id: 'amulet_life', slot: 'amulet', name: { human: 'Аму�
 ARMOR.amulet_spring = { id: 'amulet_spring', slot: 'amulet', name: { human: 'Амулет родника', orc: 'Тотем крови' }, defense: 2, bonus: { stat: 'regen', value: 1 }, alwaysBonus: true };
 
 export const BAG_SIZE = 128;
+
+/** The party class that may use the item, or null for everyone: bows are the hunter's, other weapons and plate the warrior's. */
+export const itemClass = (it: Item): HeroClass | null =>
+  it.kind === 'weapon' ? WEAPONS[it.def].cls ?? 'warrior' : ARMOR[it.def].cls ?? null;
 
 /** Armour: each extra copy adds 30% of the piece's stats. */
 export const lvlMult = (lvl: number) => 1 + 0.3 * (lvl - 1);
@@ -147,6 +156,11 @@ export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = 
   const badge = it.kind === 'weapon' ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#4a2a12', 12)}</span>` : '';
   return `<button class="cell r${it.rarity} ${cls}" ${attrs}>${art(itemIconId(it), 34, 'ic')}${badge}` +
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
+}
+
+/** The hunter's pet in his second weapon slot (config PETS). */
+export function petCellHtml(pet: PetDef, attrs = '', cls = '', extra = '') {
+  return `<button class="cell pet ${cls}" ${attrs}>${art(pet.icon, 34, 'ic')}${extra}</button>`;
 }
 
 export function scrapValue(it: Item) {

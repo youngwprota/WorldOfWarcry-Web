@@ -28,6 +28,9 @@ export const WEAPON_GRIPS: Record<string, { tilt?: number; out?: number; grip?: 
   sickle: { scale: 1.5, grip: 0.12 },
   kitchen_knife: { scale: 1.6, grip: 0.12 },
   spear_undead_warrior: { scale: 0.7, grip: 0.4, tilt: 0.1, out: 0.15 },
+  // held by the middle, the limbs along the fist axis: upright when the arm is raised forward
+  bow_human_archer: { scale: 0.75, grip: 0.5, tilt: 0, out: 0 },
+  bow_orc_archer: { scale: 0.6, grip: 0.5, tilt: 0, out: 0 },
 };
 
 /** Palm centre in hand_r space (cm). */

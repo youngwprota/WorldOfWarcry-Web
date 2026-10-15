@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { Character } from './character';
+import { Creature } from './creature';
 import {
-  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, RARITY, STAT_CURVE, STAT_SOURCE_NAME, WEAPONS, isPctStat, type StatId,
+  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, RARITY, STAT_CURVE, STAT_SOURCE_NAME, WEAPONS, isPctStat, type PetDef, type StatId,
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, slotOf, weaponBase,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, petCellHtml, slotOf, weaponBase,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -32,19 +33,28 @@ const STAT_UI: Record<StatId, { name: string; icon: string; note: string }> = {
   dodge: { name: 'Уклонение', icon: 'dodge', note: `от любых ударов, предел ${pct(STAT_CURVE.dodge.max)}` },
 };
 
-/** Rotatable 3D hero for the character sheet (own small renderer, disposed on close). */
+/** Where the pet stands beside the hero on the preview stage (hero-local, m); the hero steps aside for it. */
+const PET_AT = new THREE.Vector3(0.75, 0, -0.35);
+const HERO_AT_WITH_PET = new THREE.Vector3(-0.4, 0, 0.2);
+
+/**
+ * Rotatable 3D hero for the character sheet (own small renderer, disposed on close): the class on the field and,
+ * for the hunter, his pet beside him; both turn together on one stage.
+ */
 class HeroPreview {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(30, 1, 0.1, 30);
+  private stage = new THREE.Group();
   private ch: Character;
+  private pet: Creature | null = null;
   private clock = new THREE.Clock();
   private raf = 0;
   yaw = 0.4;
   private vel = 0;
   private dragX: number | null = null;
 
-  constructor(private canvas: HTMLCanvasElement, model: string) {
+  constructor(private canvas: HTMLCanvasElement, model: string, pet: PetDef | null = null) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -55,14 +65,27 @@ class HeroPreview {
     rim.position.set(-3, 2, -3);
     this.scene.add(key, rim);
     const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(0.9, 40).rotateX(-Math.PI / 2),
+      new THREE.CircleGeometry(pet ? 1.5 : 0.9, 40).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }),
     );
-    this.scene.add(floor);
+    this.stage.add(floor);
     this.ch = new Character(model, null, 1);
-    this.scene.add(this.ch.root);
-    this.camera.position.set(0, 1.05, 4.4);
-    this.camera.lookAt(0, 0.85, 0);
+    this.stage.add(this.ch.root);
+    if (pet) {
+      this.pet = new Creature(pet.model, pet.scale);
+      this.pet.position.copy(PET_AT);
+      this.stage.add(this.pet.root);
+      this.ch.position.copy(HERO_AT_WITH_PET);
+    }
+    this.scene.add(this.stage);
+    // with a pet: further back and a bit lower, so both fit
+    if (pet) {
+      this.camera.position.set(0, 1.25, 5.6);
+      this.camera.lookAt(0, 0.65, 0);
+    } else {
+      this.camera.position.set(0, 1.05, 4.4);
+      this.camera.lookAt(0, 0.85, 0);
+    }
 
     canvas.addEventListener('pointerdown', (e) => { this.dragX = e.clientX; this.vel = 0; canvas.setPointerCapture(e.pointerId); });
     canvas.addEventListener('pointermove', (e) => {
@@ -92,8 +115,9 @@ class HeroPreview {
       this.yaw += this.vel * dt;
       this.vel *= Math.max(0, 1 - dt * 3);
     }
-    this.ch.facing = this.yaw;
+    this.stage.rotation.y = this.yaw;
     this.ch.update(dt, false);
+    this.pet?.update(dt, false);
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
     if (w && h && (this.canvas.width !== Math.round(w * this.renderer.getPixelRatio()))) {
@@ -252,8 +276,7 @@ export class Inventory {
   open() {
     if (this.opened) return;
     this.opened = true;
-    const f = FACTIONS[this.game.faction];
-    const tab = (bf: BagFilter, ic: string) => `<button class="tab ${this.bagFilter === bf ? 'on' : ''}" data-filter="${bf}">${art(ic, 34)}</button>`;
+    const tab =(bf: BagFilter, ic: string) => `<button class="tab ${this.bagFilter === bf ? 'on' : ''}" data-filter="${bf}">${art(ic, 34)}</button>`;
     this.ui.open(`${this.statsPanel()}
     <div class="inv-equipped"><div class="eq-title">Экипировано</div>
       <div class="eq-doll">
@@ -269,7 +292,7 @@ export class Inventory {
       <div class="sheet-body"><div id="b-grid"></div></div>
       <p class="hint-line">Нажми на предмет: надеть, сравнить или выбросить</p>
     </div>`);
-    this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, f.hero);
+    this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, this.game.heroModel(), this.game.petDef);
     this.ui.on('#i-close', () => this.close());
     this.ui.on('#i-info', () => this.showInfo());
     this.ui.modal.querySelector('#i-rl')!.addEventListener('click', () => this.preview?.nudge(-1));
@@ -295,7 +318,9 @@ export class Inventory {
       const x = ARMOR_SLOTS.find((a) => a.id === id)!;
       return this.cell(s.equip[id], `data-armor="${id}" title="${x.name}"`, x.icon);
     }).join('');
+    const pet = g.petDef;
     const weapons = ([0, 1] as const).map((i) => {
+      if (i === 1 && pet) return petCellHtml(pet, `title="Питомец: ${pet.name}"`, 'active', '<span class="wtag on">питомец</span>');
       const tag = `<span class="wtag ${s.weapons[i] ? 'on' : ''}">${HAND_NAME[i]}</span>`;
       return this.cell(s.weapons[i], `data-weapon="${i}"`, 'sword', tag, s.weapons[i] ? 'active' : '');
     }).join('');
@@ -303,16 +328,19 @@ export class Inventory {
     q('#i-eq-l').innerHTML = armor(EQUIP_BAR.left);
     q('#i-eq-w').innerHTML = weapons;
     q('#i-eq-r').innerHTML = armor(EQUIP_BAR.right);
-    this.preview?.setGear(...g.handModels(), g.outfit());
+    this.preview?.setGear(...g.heldModels(), g.outfit());
     g.newItems = 0;
   }
 
   private renderBag() {
-    const s = this.game.save;
+    const g = this.game;
+    const s = g.save;
     const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
-    q('#b-sub').innerHTML = `<span>${s.bag.length}/${BAG_SIZE}</span>`;
+    // only what the class on the field can use; the rest stays in the bag (and takes room) for the others
+    const hidden = s.bag.filter((it) => !g.canUse(it)).length;
+    q('#b-sub').innerHTML = `<span>${s.bag.length}/${BAG_SIZE}</span>${hidden ? `<small class="b-other">ещё ${hidden} для других классов</small>` : ''}`;
     const section = (kind: 'weapon' | 'armor', title: string) => {
-      const cells = s.bag.map((it, i) => (it.kind === kind ? this.cell(it, `data-bag="${i}"`) : '')).join('');
+      const cells = s.bag.map((it, i) => (it.kind === kind && g.canUse(it) ? this.cell(it, `data-bag="${i}"`) : '')).join('');
       return cells ? `<div class="divider"><span>${title}</span></div><div class="grid">${cells}</div>` : '';
     };
     const f = this.bagFilter;
@@ -415,12 +443,13 @@ export class Inventory {
     if (src.at === 'bag') {
       actions = btn('discard', 'Выбросить');
       if (it.kind === 'weapon') {
-        actions += btn('eq0', 'В правую', 'primary') + btn('eq1', 'В левую', 'primary');
+        // the hunter's left hand is his pet's slot
+        actions += g.petDef ? btn('eq0', 'Взять', 'primary') : btn('eq0', 'В правую', 'primary') + btn('eq1', 'В левую', 'primary');
       } else actions += btn('equip', 'Экипировать', 'primary');
     } else if (src.at === 'armor') {
       actions = btn('unequip', 'Снять', 'red');
     } else {
-      if (s.weapons[1 - src.slot]) actions += btn('unequip', 'Снять', 'red');
+      if (s.weapons[1 - src.slot] && g.canUse(it)) actions += btn('unequip', 'Снять', 'red');
     }
     const type = slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
     tip.innerHTML = `<div class="card-head">${cellHtml(it, 'disabled', '', '', 'big')}

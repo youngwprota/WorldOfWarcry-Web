@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import {
   DAMAGE_TYPE_NAME, FACTIONS, fmtOrb, UI_REF, WEAPONS, ZONE_FOES,
-  type FactionId, type OrbKind, type ZoneDef,
+  type FactionId, type OrbKind, type PetDef, type ZoneDef,
 } from './config';
-import { ARMOR_SLOTS, EQUIP_BAR, cellHtml, type ArmorSlot, type Item } from './items';
+import { ARMOR_SLOTS, EQUIP_BAR, cellHtml, petCellHtml, type ArmorSlot, type Item } from './items';
 import { DAMAGE_TYPE_ICON, fmtK, icon, iconImage, resistIcons, rewardChips } from './icons';
 import { STAT_ICON, art, hasPng, mini, tintedArt } from './art';
 import type { MobDef } from './config';
@@ -248,9 +248,10 @@ export class UI {
   }
 
   /** Bottom "equipped" bar: armour left, the right / left hand weapons in the centre, gloves and jewellery right. */
-  weapons(items: (Item | null)[], dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>) {
+  weapons(items: (Item | null)[], dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>, pet: PetDef | null = null) {
     const box = $('weapons');
     box.innerHTML = [0, 1].map((i) => {
+      if (i === 1 && pet) return petCellHtml(pet, `data-pet title="Питомец: ${pet.name}"`, 'wslot active');
       const it = items[i];
       const title = it ? `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"` : '';
       return cellHtml(it, `data-w="${i}" ${title}`, 'sword', '', it ? 'wslot active' : 'wslot');

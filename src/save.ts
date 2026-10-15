@@ -1,4 +1,4 @@
-import { FACTIONS, HERO, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
+import { FACTIONS, HERO, PETS, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
 import { BASE_STATS, type PctPoints, type StatPoints } from './balance';
 import { ARMOR, makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
 import { CLASSES, type HeroClass } from './party';
@@ -47,6 +47,19 @@ export interface SaveData {
   fog?: string;
   /** The party member on the field (src/party.ts); missing = warrior. */
   cls?: HeroClass;
+  /**
+   * Weapons of the party kits not on the field (src/party.ts kitOf); the kit on the field lives in `weapons`.
+   * A kit missing here has never been on the field: it starts with its class weapon.
+   */
+  kits?: Partial<Record<HeroClass, [Item | null, Item | null]>>;
+  /** Whose kit is in `weapons`; missing = the warrior's. */
+  kit?: HeroClass;
+  /** Armour of the party members not on the field; the one on the field wears `equip`. */
+  gear?: Partial<Record<HeroClass, Partial<Record<ArmorSlot, Item>>>>;
+  /** Whose armour is in `equip`; missing = the warrior's (saves from before the party wore one set for all). */
+  gearOf?: HeroClass;
+  /** The hunter's pet (config PETS id) in his second weapon slot; missing = START_PET. */
+  pet?: string;
 }
 
 const KEY = 'warcry-save-v1';
@@ -101,6 +114,19 @@ export function loadSave(): SaveData | null {
     d.src ??= {};
     d.pct ??= {};
     if (!d.cls || !CLASSES[d.cls]) d.cls = 'warrior';
+    if (d.kit && !CLASSES[d.kit]) delete d.kit;
+    if (d.pet && !PETS[d.pet]) delete d.pet;
+    if (d.gearOf && !CLASSES[d.gearOf]) delete d.gearOf;
+    for (const set of Object.values(d.gear ?? {})) {
+      for (const k of Object.keys(set) as ArmorSlot[]) {
+        const it = set[k] && known(normalizeItem(set[k]!));
+        if (it) set[k] = it; else delete set[k];
+      }
+    }
+    for (const [k, w] of Object.entries(d.kits ?? {}) as [HeroClass, SaveData['weapons']][]) {
+      const kit = w.map((x) => (x ? known(normalizeItem(x)) : null)) as SaveData['weapons'];
+      if (kit[0] || kit[1]) d.kits![k] = kit; else delete d.kits![k];
+    }
     return d;
   } catch {
     return null;
