@@ -70,7 +70,9 @@ const SECTIONS: [string, Action[]][] = [
   ]],
   ['Оружие в левую', [
     ['Меч', (g) => g.debugGiveWeapon('sword', 1)],
-    ['Щит', (g) => g.debugGiveWeapon('shield', 1)],
+    ['Башенный', (g) => g.debugGiveWeapon('shield_tower', 1)],
+    ['Баклер', (g) => g.debugGiveWeapon('shield_buckler', 1)],
+    ['Шипастый', (g) => g.debugGiveWeapon('shield_spiked', 1)],
     ['Пусто', (g) => g.debugClearLeft(), 'wide'],
   ]],
   ['Статы (+очки)', [

@@ -663,8 +663,8 @@ export class Game {
     for (const h of this.hands) {
       const it = this.save.weapons[h.i];
       const since = this.time - h.lastSwing;
-      const on = !!it && since > h.impactAt * 0.45 && since < h.impactAt * 1.5;
-      this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, it ? COMBOS[it.def].color : 0xffffff);
+      const on = !!it && !WEAPONS[it.def].guard && since > h.impactAt * 0.45 && since < h.impactAt * 1.5;
+      this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, (it && COMBOS[it.def]?.color) ?? 0xffffff);
     }
   }
 
@@ -687,9 +687,8 @@ export class Game {
     const it = this.save.weapons[h.i];
     if (!it) { h.combo = 0; h.impact = -1; return; }
     const w = WEAPONS[it.def];
-    // beside a weapon the shield only answers blows (counterStrike); alone (or two shields) it bashes too
-    const other = this.save.weapons[1 - h.i];
-    if (w.guard && other && !WEAPONS[other.def].guard) { h.combo = 0; return; }
+    // the shield never swings, it only answers blows (shieldAnswer)
+    if (w.guard) { h.combo = 0; return; }
     h.atkCd -= dt;
     const period = 1 / w.aps;
     const combo = COMBOS[it.def];
@@ -1307,7 +1306,7 @@ export class Game {
     const crit = !!src && Math.random() < critChance(src.def.crit);
     // GDD 10.5: reduction = defense / (defense + 100).
     const dmg = Math.max(1, Math.round(raw * (crit ? critMul(src!.def.critDmg) : 1) * armorMul(s.defense) * this.guardMul() * (0.9 + Math.random() * 0.2)));
-    if (src) this.tryCounter(src);
+    if (src) this.shieldAnswer(src, dmg);
     if (src) this.fightOf(src).taken += Math.min(dmg, this.hp);
     this.hp -= dmg;
     this.hero.hit();
@@ -1335,29 +1334,26 @@ export class Game {
   private lastCounter = -99;
   private counterHand = newHand(0);
 
-  /** Shield: a blow taken may be answered at once by the other hand (with all its effects) towards the attacker. */
-  private tryCounter(m: Mob) {
-    const items = this.save.weapons;
-    const s = items.findIndex((it) => it && WEAPONS[it.def].guard);
-    if (s < 0 || !m.alive || this.dead) return;
-    const g = WEAPONS[items[s]!.def].guard!;
-    if (this.time - this.lastCounter < g.cd || Math.random() >= g.counter[mobRank(m.def)]) return;
+  /** The class slot's shield: reflects a share of the blow, may counter-strike with the weapon. */
+  private shieldAnswer(m: Mob, dmg: number) {
+    const sh = this.save.weapons[1];
+    const g = sh && WEAPONS[sh.def].guard;
+    if (!g || !m.alive || this.dead) return;
+    if (g.reflect) {
+      const back = Math.max(1, Math.round(dmg * g.reflect));
+      this.damageMob(m, back, 'normal', 0);
+      this.particles.burst(v1.copy(m.pos).setY(1.1 * m.def.scale), 0xff6060, 6, 0.08, 4, 0.35);
+    }
+    const weapon = this.save.weapons[0];
+    if (!weapon || !m.alive || this.time - this.lastCounter < g.cd || Math.random() >= g.counter[mobRank(m.def)]) return;
     this.lastCounter = this.time;
-    const other = (1 - s) as 0 | 1;
-    const striker = items[other] && !WEAPONS[items[other]!.def].guard ? other : (s as 0 | 1);
-    this.counterStrike(m, striker, s as 0 | 1);
-  }
-
-  /** Strike back at `m` with hand `striker` (shield bash when both hands hold shields); `shieldHand` blocks. */
-  private counterStrike(m: Mob, striker: 0 | 1, shieldHand: 0 | 1) {
-    const it = this.save.weapons[striker]!;
-    const w = WEAPONS[it.def];
+    const w = WEAPONS[weapon.def];
     const yaw = Math.atan2(m.pos.x - this.hero.position.x, m.pos.z - this.hero.position.z);
     this.hero.facing = yaw;
-    this.hero.swing('bash', shieldHand, 0.5, 0.12);
-    if (striker !== shieldHand) this.hero.swing(w.swing?.[0] ?? (striker ? LEFT_SWING[w.anim][0] : 'slashRL'), striker, 0.6, 0.15);
+    this.hero.swing('bash', 1, 0.5, 0.12);
+    this.hero.swing(w.swing?.[0] ?? 'slashRL', 0, 0.6, 0.15);
     // a throwaway hand state: a counter neither spends nor builds the combo chain
-    const h = Object.assign(this.counterHand, newHand(striker));
+    const h = Object.assign(this.counterHand, newHand(0));
     const hits = this.heroStrike(h, yaw, m);
     const at = v1.copy(this.hero.position).setY(1.2);
     this.particles.burst(at, 0x9fd0ff, 10, 0.1, 6, 0.4);

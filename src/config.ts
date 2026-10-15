@@ -69,11 +69,11 @@ export interface WeaponDef {
   /** Polearm: the series never breaks (a pause or a whiff does not reset it). */
   cycle?: boolean;
   /**
-   * Shield: never swings by itself; incoming damage × (1 − `reduce`); a hit taken may trigger a counter-strike of
-   * the other hand at the attacker (`counter` chance by its rank), not more often than every `cd` s. Two shields
-   * bash back with the shield.
+   * Shield (the warrior's class slot): never swings; incoming damage × (1 − `reduce`); a hit taken may trigger a
+   * counter-strike of the weapon at the attacker (`counter` chance by its rank), not more often than every `cd` s;
+   * `reflect`: that share of the damage taken goes back to the attacker.
    */
-  guard?: { reduce: number; counter: Record<MobRank, number>; cd: number };
+  guard?: { reduce: number; counter: Record<MobRank, number>; cd: number; reflect?: number };
 }
 
 export type MobRank = 'normal' | 'elite' | 'mini' | 'boss';
@@ -94,15 +94,25 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   // board «Система оружий»: damage a bit under the sword, slow, long reach; thrust → thrust (target only) → spin 360°
   polearm: {
-    id: 'polearm', name: 'Древковое', type: 'slash', dmgMul: 0.9, aps: 0.8, shape: 'arc', arc: 60, range: 3.1,
+    id: 'polearm', name: 'Древковое', type: 'slash', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 3.1,
     anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️', single: true, cycle: true,
     swing: ['thrust', 'thrust', 'slashRL'],
   },
-  shield: {
-    id: 'shield', name: 'Щит', type: 'crush', dmgMul: 0.5, aps: 0.8, shape: 'arc', arc: 120, range: 1.8,
+  // shields: the warrior's class slot (src/party.ts); they never swing, the swing numbers are unused
+  shield_tower: {
+    id: 'shield_tower', name: 'Башенный щит', type: 'crush', dmgMul: 0, aps: 1, shape: 'arc', arc: 0, range: 0,
     anim: 'AxeAttack', model: { human: 'shield', orc: 'shield' }, icon: '🛡️',
-    guard: { reduce: 0.15, counter: { normal: 0.2, elite: 0.3, mini: 0.4, boss: 0.5 }, cd: 0.4 },
-    swing: ['bash'],
+    guard: { reduce: 0.3, counter: { normal: 0.08, elite: 0.12, mini: 0.15, boss: 0.2 }, cd: 0.6 },
+  },
+  shield_buckler: {
+    id: 'shield_buckler', name: 'Баклер', type: 'crush', dmgMul: 0, aps: 1, shape: 'arc', arc: 0, range: 0,
+    anim: 'AxeAttack', model: { human: 'shield', orc: 'shield' }, icon: '🛡️',
+    guard: { reduce: 0.1, counter: { normal: 0.35, elite: 0.45, mini: 0.55, boss: 0.65 }, cd: 0.3 },
+  },
+  shield_spiked: {
+    id: 'shield_spiked', name: 'Шипастый щит', type: 'crush', dmgMul: 0, aps: 1, shape: 'arc', arc: 0, range: 0,
+    anim: 'AxeAttack', model: { human: 'shield', orc: 'shield' }, icon: '🛡️',
+    guard: { reduce: 0.15, counter: { normal: 0.15, elite: 0.2, mini: 0.25, boss: 0.3 }, cd: 0.4, reflect: 0.5 },
   },
 };
 
@@ -126,8 +136,7 @@ export const COMBOS: Record<string, ComboDef> = {
   sword: { name: 'Вихрь', hits: 3, window: 0.35, mult: 1.3, rangeAdd: 0.5, shape: 'circle', arc: 360, knock: 7, stun: 0, spin: true, color: 0x9fe3ff },
   axe: { name: 'Раскол', hits: 3, window: 0.35, mult: 1.6, rangeAdd: 0.8, shape: 'arc', arc: 220, knock: 11, stun: 0.4, spin: false, color: 0xff8a5a },
   hammer: { name: 'Землетрясение', hits: 3, window: 0.4, mult: 1.3, rangeAdd: 0.8, shape: 'circle', arc: 360, knock: 5, stun: 1.6, spin: false, color: 0xffc95a },
-  polearm: { name: 'Прокрут', hits: 3, window: 0.4, mult: 1.2, rangeAdd: 0, shape: 'circle', arc: 360, knock: 6, stun: 0, spin: true, color: 0xffe0a0 },
-  shield: { name: 'Таран', hits: 3, window: 0.5, mult: 1.5, rangeAdd: 0.5, shape: 'arc', arc: 140, knock: 9, stun: 0.8, spin: false, color: 0xa0c8ff },
+  polearm: { name: 'Прокрут', hits: 3, window: 0.4, mult: 1.4, rangeAdd: 0, shape: 'circle', arc: 360, knock: 6, stun: 0, spin: true, color: 0xffe0a0 },
 };
 
 export interface FactionDef {

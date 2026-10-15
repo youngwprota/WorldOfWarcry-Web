@@ -128,6 +128,15 @@ const ART: Record<string, string> = {
   shield: `${P('M32 3L56 11V30C56 45 46 55 32 61C18 55 8 45 8 30V11Z', STEEL)}
     ${P('M32 10L50 16V30C50 41 43 49 32 54C21 49 14 41 14 30V16Z', BLUE)}${N('M32 10L50 16V30C50 41 43 49 32 54Z', BLUE_D)}
     ${P(circ(32, 30, 6.5), GOLD)}${H('M18 20V31C18 36 20 40 23 43', 2.5)}`,
+  // the warrior's shields (WEAPONS.shield_*): tall and blue, small and round, red with spikes
+  shield_tower: `${P(rect(12, 3, 40, 58, 6), STEEL)}${P(rect(17, 8, 30, 48, 4), BLUE)}${N(rect(32, 8, 15, 48, 4), BLUE_D)}
+    ${P(rect(29, 8, 6, 48), GOLD)}${P(rect(17, 26, 30, 6), GOLD)}${H('M21 14V24', 2.5)}`,
+  shield_buckler: `${P(circ(32, 32, 24), WOOD)}${N('M32 8A24 24 0 0 1 32 56Z', WOOD_D)}
+    ${P(circ(32, 32, 17), STEEL)}${N('M32 15A17 17 0 0 1 32 49Z', STEEL_D)}${P(circ(32, 32, 7), GOLD)}${H('M19 24C21 19 25 16 29 15', 2.5)}`,
+  shield_spiked: `${P('M32 0L37 8H27Z', STEEL)}${P('M2 22L11 18V28Z', STEEL)}${P('M62 22L53 18V28Z', STEEL)}${P('M32 64L27 56H37Z', STEEL)}
+    ${P('M32 6L53 13V30C53 44 44 53 32 58C20 53 11 44 11 30V13Z', STEEL_DD)}
+    ${P('M32 12L47 17V30C47 40 41 47 32 52C23 47 17 40 17 30V17Z', RED)}${N('M32 12L47 17V30C47 40 41 47 32 52Z', '#b52a37')}
+    ${P('M32 22L37 32L32 42L27 32Z', STEEL)}${H('M21 21V31', 2.5)}`,
   // party classes (src/party.ts): the warrior's is `shield`
   bow: `<g transform="rotate(45 32 32)">
     <path d="M32 6L32 58" fill="none" stroke="${STEEL}" stroke-width="2.2"/>

@@ -157,6 +157,9 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     const dmg = Math.max(1, raw * armorMul(st.defense) * guardMul(h.weapons) * roll());
     taken += dmg;
     hp -= dmg;
+    // spiked shield: a share of the blow goes back
+    const reflect = h.weapons[1] && WEAPONS[h.weapons[1].def].guard?.reflect;
+    if (reflect) mhp -= dmg * reflect;
   };
   const hit = (it: Item, mult: number) => {
     const w = WEAPONS[it.def];
@@ -185,8 +188,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     for (const hd of hands) {
       if (!hd.it) continue;
       const w = WEAPONS[hd.it.def];
-      const other = h.weapons[1 - hd.i];
-      if (w.guard && other && !WEAPONS[other.def].guard) continue;
+      if (w.guard) continue;
       hd.cd -= DT;
       if (hd.cd > 0 || busy > 0) continue;
       const per = 1 / w.aps;
@@ -204,14 +206,13 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       if (matk <= 0) {
         matk += period;
         hurt(foe.dmg * (phase2 ? boss!.phase2Dmg : 1));
-        // shield: a blow taken may be answered by the other hand
-        const sh = h.weapons.find((x) => x && WEAPONS[x.def].guard);
-        const g = sh && WEAPONS[sh.def].guard!;
-        const other = sh && h.weapons.find((x) => x && x !== sh);
-        if (g && other && t - lastCounter >= g.cd && (mean ? true : chance(g.counter[rank]))) {
+        // shield in the class slot: a blow taken may be answered by the weapon
+        const g = h.weapons[1] && WEAPONS[h.weapons[1].def].guard;
+        const weapon = h.weapons[0];
+        if (g && weapon && t - lastCounter >= g.cd && (mean ? true : chance(g.counter[rank]))) {
           lastCounter = t;
-          if (mean) hit(other, g.counter[rank]);
-          else strike({ i: h.weapons.indexOf(other), it: other, combo: 0 }, true);
+          if (mean) hit(weapon, g.counter[rank]);
+          else strike({ i: 0, it: weapon, combo: 0 }, true);
         }
       }
     }
@@ -492,7 +493,7 @@ if (OPT.bench) {
   };
   console.log('== Стенд: время убийства цели 4000 HP (редкое ур.1, сила 0, без резистов), с');
   for (const w of Object.keys(WEAPONS)) if (!WEAPONS[w].guard) console.log(`${w.padEnd(13)} ${ttk(w, null)}`);
-  console.log(`axe+shield    ${ttk('axe', 'shield')}`);
+  for (const s of Object.keys(WEAPONS)) if (WEAPONS[s].guard) console.log(`sword+${s.padEnd(15)} ${ttk('sword', s)}`);
   process.exit(0);
 }
 
