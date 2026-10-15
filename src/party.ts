@@ -3,7 +3,7 @@
  * Each class has two gear slots: a weapon (save.weapons[0]) and its own class item (save.weapons[1]: the warrior's
  * shield, the hunter's pet, the mage's orb); each keeps its own pair (SaveData.kits).
  */
-import type { FactionId } from './config';
+import { RARITY_IDS, type FactionId } from './config';
 import type { VisualPart } from './items';
 
 export type HeroClass = 'warrior' | 'hunter' | 'mage';
@@ -48,7 +48,7 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
     name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
     model: { human: 'mage', orc: 'orc_shaman' },
     weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_vigor', 'orb_fury'], offName: 'Сфера',
-    kit: { hand: 'staff_fire', left: 'orb_vigor', bag: ['staff_ice', 'staff_wind', 'orb_fury'] },
+    kit: { hand: 'staff_fire', left: 'orb_fury' },
   },
 };
 
@@ -68,20 +68,18 @@ export function weaponClass(def: string): HeroClass | null {
   return CLASS_IDS.find((c) => CLASSES[c].weapons.includes(def) || CLASSES[c].off.includes(def)) ?? null;
 }
 
-/** Hunter looks by quality (tools/import-archers.mjs), in config RARITY order. */
-const ARCHER_RARITY = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
 /** Body part on the hero → part file of the hunter sets. */
 const ARCHER_PART: Record<VisualPart, string> = { head: 'head', chest: 'torso', arms: 'arms', legs: 'legs' };
 
 /** The four body parts of the hunter set of quality `rarity` (RARITY index), as models for Character.setOutfit. */
 export function archerSet(f: FactionId, rarity: number): Record<VisualPart, string> {
-  const r = ARCHER_RARITY[rarity];
+  const r = RARITY_IDS[rarity];
   return Object.fromEntries(Object.entries(ARCHER_PART).map(([part, file]) => [part, `archers/${f}_archer_${file}_${r}`])) as Record<VisualPart, string>;
 }
 
 /** The set's bow; above common there are two variants (`v1`: the one close to the base bow). */
 export function archerBow(rarity: number, v1: boolean) {
-  return rarity === 0 ? 'archers/bow_common' : `archers/bow_${ARCHER_RARITY[rarity]}${v1 ? '_v1' : ''}`;
+  return rarity === 0 ? 'archers/bow_common' : `archers/bow_${RARITY_IDS[rarity]}${v1 ? '_v1' : ''}`;
 }
 
 /** Seconds between two switches, so a double tap does not flip the hero back and forth. */

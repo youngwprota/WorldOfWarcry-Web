@@ -1,11 +1,10 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
-import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type PetDef, type StatId } from './config';
+import { DAMAGE_TYPE_NAME, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type PetDef, type StatId } from './config';
 import { DAMAGE_TYPE_ICON, icon } from './icons';
 import { art, hasPng } from './art';
 import { CLASSES, weaponClass, type HeroClass } from './party';
 
 /** Quality ids in model names (tools/blender/rarity_gear.py): `<def>_<id>`. */
-const RARITY_IDS = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
 
 /** The warrior's weapons and shields have a GLB per quality (tools/blender/rarity_gear.py); other classes' don't. */
 const GEAR_DEFS = [...CLASSES.warrior.weapons, ...CLASSES.warrior.off];
@@ -30,8 +29,11 @@ export function armorTrim(it: Item, faction: FactionId): string | null {
   const jewel = d.slot === 'ring' || d.slot === 'amulet';
   // pieces are fitted to the warrior's plate sets only (the hunter's sets have their own textured parts)
   if (!jewel && (it.rarity === 0 || d.cls !== 'warrior')) return null;
-  return `armor_${jewel ? d.slot : d.id}_${RARITY_IDS[it.rarity]}_${faction}`;
+  return trimModel(jewel ? d.slot : d.id, it.rarity, faction);
 }
+
+/** Quality piece model of armour def (or jewel slot) `id`. */
+export const trimModel = (id: string, rarity: number, faction: FactionId) => `armor_${id}_${RARITY_IDS[rarity]}_${faction}`;
 
 /** Every per-quality GLB model (loaded up-front by main.ts). */
 export const GEAR_MODELS = GEAR_DEFS.flatMap((def) =>

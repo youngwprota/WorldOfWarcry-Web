@@ -96,7 +96,7 @@ export interface WeaponDef {
 export type MobRank = 'normal' | 'elite' | 'mini' | 'boss';
 export const mobRank = (d: MobDef): MobRank => (d.boss ? 'boss' : d.rank ?? 'normal');
 
-const RARITY_IDS = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+export const RARITY_IDS = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
 const staffTiers = (el: StaffElement) => RARITY_IDS.map((r) => `staff_${el}_${r}`);
 /** Mage armour skin: the caster body parts of a rarity (models/casters, loaded on demand; src/assets.ts prepareOwnMaterials). */
 export const casterModel = (faction: FactionId, rarity: number) => `casters/${faction}_caster_${RARITY_IDS[rarity]}`;

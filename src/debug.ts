@@ -4,6 +4,7 @@ import { ZONES } from './config';
 import type { ZoneId } from './config';
 import { ARENA, FOREST_MINI, FORT, GATES, ISLAND, LAND_BOSSES } from './island';
 import type { Game } from './game';
+import { CLASSES, CLASS_IDS, type HeroClass } from './party';
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
@@ -74,6 +75,17 @@ function locationRows(): [string, Action[]][] {
   return rows;
 }
 
+/** Class looks by quality (Game.debugSet; models load on the first pick); "База" = the equipped armour. */
+function setRows(): [string, Action[]][] {
+  const rows = (['warrior', 'hunter', 'mage'] as HeroClass[]).map((c): [string, Action[]] => [`Сет: ${CLASSES[c].name.toLowerCase()}`,
+    ['База', 'Об', 'Необ', 'Ред', 'Эпик', 'Лег', 'Миф'].map((label, i): Action => [label, (g) => g.debugSet(c, i - 1), `set ${c} r${i - 1}`])]);
+  rows.splice(2, 0, ['Лук охотника (от необычного)', [
+    ['Новый', (g) => g.debugSet('hunter', g.debugLooks.hunter, false), 'bowv new'],
+    ['Похожий на базовый', (g) => g.debugSet('hunter', g.debugLooks.hunter, true), 'bowv v1 wide2'],
+  ]]);
+  return rows;
+}
+
 const SECTIONS: [string, Action[]][] = [
   ['Бой', [
     ['ХП 10%', (g) => g.debugSetHp(0.1)],
@@ -117,26 +129,10 @@ const SECTIONS: [string, Action[]][] = [
     ['+10% реген', (g) => g.debugAddStat('regen', 10, true)],
     ['Сбросить дебаг-статы', (g) => g.debugClearStats(), 'wide'],
   ]],
-  // hunter look by quality (models load on the first pick); "Базовый" = the archer as imported
-  ['Сет лучника', [
-    ['Базовый', (g) => g.debugSet('hunter', -1), 'arch r-1'],
-    ...['Обычный', 'Необычный', 'Редкий', 'Эпический', 'Легендарный', 'Мифический'].map(
-      (label, r): Action => [label, (g) => g.debugSet('hunter', r), `arch r${r}`],
-    ),
-  ]],
-  ['Сет мага', [
-    ['Экипировка', (g) => g.debugSet('mage', -1), 'mage r-1'],
-    ...['Обычный', 'Необычный', 'Редкий', 'Эпический', 'Легендарный', 'Мифический'].map(
-      (label, r): Action => [label, (g) => g.debugSet('mage', r), `mage r${r}`],
-    ),
-  ]],
-  ['Лук лучника (от необычного)', [
-    ['Новый', (g) => g.debugSet('hunter', g.archerLook.rarity, false), 'bowv new'],
-    ['Похожий на базовый', (g) => g.debugSet('hunter', g.archerLook.rarity, true), 'bowv v1 wide2'],
-  ]],
   ['Раса', [
     ['Сменить расу (человек ⇄ орк)', (g) => g.debugSwitchFaction(), 'wide'],
   ]],
+  ...setRows(),
   ['Горнило', [
     ['+5 круток', (g) => g.debugAddPulls(5), 'wide'],
   ]],
@@ -241,10 +237,10 @@ export class DebugPanel {
   private render() {
     const d = this.game.debugInfo();
     this.el.querySelector('.god')?.classList.toggle('on', d.god);
-    const look = this.game.archerLook;
-    this.el.querySelectorAll('.arch').forEach((b) => b.classList.toggle('on', b.classList.contains(`r${look.rarity}`)));
-    this.el.querySelectorAll('.mage').forEach((b) => b.classList.toggle('on', b.classList.contains(`r${this.game.mageLook}`)));
-    this.el.querySelectorAll('.bowv').forEach((b) => b.classList.toggle('on', b.classList.contains(look.bowV1 ? 'v1' : 'new')));
+    const looks = this.game.debugLooks;
+    this.el.querySelectorAll<HTMLElement>('.set').forEach((b) =>
+      b.classList.toggle('on', CLASS_IDS.some((c) => b.classList.contains(c) && b.classList.contains(`r${looks[c]}`))));
+    this.el.querySelectorAll('.bowv').forEach((b) => b.classList.toggle('on', b.classList.contains(this.game.bowV1 ? 'v1' : 'new')));
     this.info.textContent = [
       `ХП ${d.hp}/${d.maxHp}${d.god ? '  [бессмертие]' : ''}`,
       `Крит ${pct(d.crit)} ×${d.critMul.toFixed(2)}  уклон ${pct(d.dodge)}  ${d.speed.toFixed(2)} м/с`,

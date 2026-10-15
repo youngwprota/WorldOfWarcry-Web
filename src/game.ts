@@ -6,7 +6,7 @@ import { StaticBody } from './staticbody';
 import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
-  ATTACK_HIT, COMBOS, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS, casterModel,
+  ATTACK_HIT, COMBOS, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
   mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
 import { ArenaFog, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, Telegraphs, type Bolt, type PickupKind } from './fx';
@@ -17,7 +17,8 @@ import {
 import { Input } from './input';
 import { sfx } from './audio';
 import { classKit, writeSave, type SaveData } from './save';
-import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, archerBow, archerSet, classSlot, kitOf, type HeroClass } from './party';
+import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, archerBow, classSlot, kitOf, type HeroClass } from './party';
+import { BODY_PARTS, CLASS_LOOK, debugSetTrims } from './looks';
 import { assets } from './assets';
 import { Arrows } from './arrows';
 import { PET_SEEK, Pet } from './pet';
@@ -407,10 +408,7 @@ export class Game {
     this.wearKit(kitOf(this.heroClass));
     this.wearGear(this.heroClass);
     this.hero = new Character(this.heroModel(), null, 1);
-    this.equipVisual();
-    this.hero.setOutfit(this.outfit());
-    void this.loadOutfit();
-    this.hero.setTrims(this.trims());
+    this.dressHero();
     this.hero.setHighlight(true);
     this.hero.position.set(SPAWN.x, 0, SPAWN.z);
     this.hero.facing = Math.PI;
@@ -544,9 +542,6 @@ export class Game {
     ch.root.scale.setScalar(this.heroScale);
     old.dispose();
     this.hero = ch;
-    this.equipVisual();
-    ch.setOutfit(this.outfit());
-    ch.setTrims(this.trims());
     ch.setHighlight(true);
     this.scene.add(ch.root);
   }
@@ -592,9 +587,8 @@ export class Game {
   heldModels(): [string | null, string | null] {
     let [r, l] = this.handModels();
     const main = this.save.weapons[0];
-    // the hunter in a debug set (archerLook) draws the set's bow
-    const look = this.archerLook;
-    if (main?.def === 'bow' && this.heroClass === 'hunter' && look.rarity >= 0) r = archerBow(look.rarity, look.bowV1);
+    const bow = this.setBow();
+    if (main?.def === 'bow' && bow && assets.has(bow)) r = bow;
     return main && WEAPONS[main.def].leftHand && !l ? [null, r] : [r, l];
   }
 
@@ -603,6 +597,17 @@ export class Game {
 
   /** Model of the mage's orb floating over the shoulder, or null. */
   orbModel() { const o = this.save.weapons[1]; return o && WEAPONS[o.def].orb ? WEAPONS[o.def].model[this.faction] : null; }
+
+  /** The hunter in a debug set draws the set's bow. */
+  private setBow() { const r = this.debugLooks.hunter; return this.heroClass === 'hunter' && r >= 0 ? archerBow(r, this.bowV1) : null; }
+
+  /** Weapons, armour parts and quality pieces on the hero; parts still loading follow (loadOutfit). */
+  private dressHero() {
+    this.equipVisual();
+    this.hero.setOutfit(this.outfit());
+    this.hero.setTrims(this.trims());
+    void this.loadOutfit();
+  }
 
   private equipVisual() {
     this.hero.setWeapon(...this.heldModels(), this.staffInHand());
@@ -623,24 +628,25 @@ export class Game {
   }
 
   private outfitLoad = 0;
-  /** Loads the parts of the outfit that come on demand (caster sets), then dresses the hero in them. */
+  /** Loads the parts of the outfit that come on demand (class sets, the set bow), then dresses the hero in them. */
   private async loadOutfit() {
-    const need = Object.values(this.wantedOutfit()).filter((n) => !assets.has(n));
+    const need = [...Object.values(this.wantedOutfit()), this.setBow()].filter((n): n is string => !!n && !assets.has(n));
     if (!need.length) return;
     const token = ++this.outfitLoad;
     await assets.ensure(need);
-    if (token === this.outfitLoad) this.hero.setOutfit(this.outfit());
+    if (token !== this.outfitLoad) return; // a later change won
+    this.equipVisual();
+    this.hero.setOutfit(this.outfit());
   }
 
   private wantedOutfit(): Partial<Record<VisualPart, string>> {
-    // a hero in a debug set: all four parts of that quality
-    if (this.heroClass === 'hunter' && this.archerLook.rarity >= 0) return archerSet(this.faction, this.archerLook.rarity);
-    if (this.heroClass === 'mage' && this.mageLook >= 0) return Object.fromEntries((['head', 'chest', 'arms', 'legs'] as VisualPart[]).map((p) => [p, casterModel(this.faction, this.mageLook)]));
+    const look = CLASS_LOOK[this.heroClass];
+    const r = this.debugLooks[this.heroClass];
+    if (r >= 0) return look.set(this.faction, r);
     const o: Partial<Record<VisualPart, string>> = {};
-    const caster = this.heroClass === 'mage'; // armour is a class skin: the caster part of the item's rarity
-    for (const part of ['head', 'chest', 'arms', 'legs'] as VisualPart[]) {
+    for (const part of BODY_PARTS) {
       const it = this.save.equip[part];
-      const src = !it ? undefined : caster ? casterModel(this.faction, it.rarity) : ARMOR[it.def].source?.[this.faction];
+      const src = it && look.part(this.faction, it, part);
       if (src) o[part] = src;
     }
     return o;
@@ -648,8 +654,9 @@ export class Game {
 
   /** Quality pieces of the equipped armour (armorTrim). */
   trims(): string[] {
-    // fitted to the warrior's body (the peasant / peon skeleton); other classes wear other models
-    if (this.heroClass !== 'warrior') return [];
+    if (!CLASS_LOOK[this.heroClass].trims) return [];
+    const r = this.debugLooks[this.heroClass];
+    if (r >= 0) return debugSetTrims(this.faction, r);
     const out: string[] = [];
     for (const s of ['head', 'chest', 'arms', 'legs', 'ring', 'amulet'] as ArmorSlot[]) {
       const it = this.save.equip[s];
@@ -2204,10 +2211,7 @@ export class Game {
 
   private afterGearChange() {
     const hpFrac = this.hp / this.maxHp;
-    this.equipVisual();
-    this.hero.setOutfit(this.outfit());
-    void this.loadOutfit();
-    this.hero.setTrims(this.trims());
+    this.dressHero();
     this.hp = Math.min(this.maxHp, Math.max(1, hpFrac * this.maxHp));
     this.resetHands();
     sfx.click();
@@ -2397,25 +2401,17 @@ export class Game {
     this.persist();
   }
 
-  /** Debug: the hunter's look by quality (RARITY index, −1 = the base archer) and the bow variant (`bowV1`). */
-  archerLook = { rarity: -1, bowV1: false };
-  /** Debug: the mage's look by quality (−1 = the equipped armour). */
-  mageLook = -1;
-  private lookLoad = 0;
-  /** Loads the set's parts on demand, then dresses the hunter or the mage (and the inventory preview) in it. */
-  async debugSet(cls: 'hunter' | 'mage', rarity: number, bowV1 = this.archerLook.bowV1) {
-    const token = ++this.lookLoad;
-    if (rarity >= 0) {
-      this.ui.toast('Загрузка сета…', 1500);
-      await assets.ensure(cls === 'hunter' ? [...Object.values(archerSet(this.faction, rarity)), archerBow(rarity, bowV1)] : [casterModel(this.faction, rarity)]);
-    }
-    if (token !== this.lookLoad) return; // a later pick won
-    if (cls === 'hunter') this.archerLook = { rarity, bowV1 };
-    else this.mageLook = rarity;
-    this.equipVisual();
-    this.hero.setOutfit(this.outfit());
-    this.hero.setTrims(this.trims());
-    if (this.heroClass !== cls) this.ui.toast(cls === 'hunter' ? 'Сет виден у охотника (2)' : 'Сет виден у мага (3)', 2000);
+  /** Debug: each class's look by quality (RARITY index, −1 = the equipped armour). */
+  debugLooks: Record<HeroClass, number> = { warrior: -1, hunter: -1, mage: -1 };
+  /** Debug: the hunter's set bow variant (archerBow `v1`). */
+  bowV1 = false;
+  /** Dresses class `cls` in its set of quality `rarity`; the parts load on demand. */
+  debugSet(cls: HeroClass, rarity: number, bowV1 = this.bowV1) {
+    this.debugLooks[cls] = rarity;
+    this.bowV1 = bowV1;
+    if (this.heroClass !== cls) { this.ui.toast(`Сет виден у класса «${CLASSES[cls].name}»`, 2000); return; }
+    if (rarity >= 0) this.ui.toast('Загрузка сета…', 1500);
+    this.dressHero();
   }
 
   debugGiveWeapon(def: string, slot: 0 | 1 = 0) {
