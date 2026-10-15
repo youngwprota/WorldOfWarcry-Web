@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, FOREST_TREES, GLOVES_BANDITS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
+import { FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
-  ARENA, BORDER, BORDER_GATE_R, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_MINI, GATE, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
+  ARENA, BORDER, BORDER_GATE_R, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
   pathAt, pathDist, progressAt, ridgeAway, ridgeDist, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
 } from './island';
 import type { Gate } from './island';
@@ -77,8 +77,6 @@ const local = (cx: number, cz: number, a: number, side: number, fwd: number) =>
   ({ x: cx + side * Math.cos(a) + fwd * Math.sin(a), z: cz - side * Math.sin(a) + fwd * Math.cos(a) });
 /** Position in the frame of the camp exit: `side` to the left as seen walking out, `fwd` outward. */
 const campGate = (side: number, fwd: number) => local(CAMP_EXIT.x, CAMP_EXIT.z, Math.atan2(CAMP_EXIT.dirX, CAMP_EXIT.dirZ), side, fwd);
-/** The gloves elite (bandit_veteran): between the pond and the trail out of the settlement. */
-const GLOVES_AT: [number, number] = [20, -77];
 /** Angle (0 = +Z) of the trail where it leaves a circle of radius r around a point, going backward or forward. */
 function trailExit(cx: number, cz: number, r: number, forward: boolean) {
   const sc = progressAt(cx, cz);
@@ -560,7 +558,7 @@ export class World {
 
   /** Two bandit pairs in the trees by the gloves elite. */
   private glovesGuards() {
-    const packs = [[14, -74], [27, -76]];
+    const packs = GLOVES_PACKS;
     GLOVES_BANDITS.forEach((d, i) => {
       const [px, pz] = packs[i >> 1];
       const x = px + (i & 1 ? 1.6 : -1.6);
@@ -572,12 +570,7 @@ export class World {
 
   /** Wood north of the straight line from the settlement to the fort (hard to push through), bandits either side ([along, side] m). */
   private campToFort(r: () => number) {
-    const ax = ISLAND.campX;
-    const az = ISLAND.campZ;
-    const len = Math.hypot(FORT.x - ax, FORT.z - az);
-    const dx = (FORT.x - ax) / len;
-    const dz = (FORT.z - az) / len;
-    const at = ([u, v]: number[]) => ({ x: ax + u * dx - v * dz, z: az + u * dz + v * dx });
+    const at = campToFortAt;
     const ok = (x: number, z: number) => this.free(x, z, 1.2) && pathDist(x, z) > PATH_W + 1
       && !inCamp(x, z, 1) && Math.hypot(x - FORT.x, z - FORT.z) > FORT.r + 1.5;
     const trees: Inst[] = [];
@@ -592,7 +585,7 @@ export class World {
       this.obstacles.push({ x, z, r: 0.5 });
     }
     this.scatter('elf_tree', trees);
-    [[18, 1], [24, 1.5], [27.5, 0], [20.7, 6.9], [17.5, 4.5]].forEach((uv, i) => {
+    MID_UV.forEach((uv, i) => {
       const { x, z } = at(uv);
       if (!ok(x, z)) return;
       this.taken.push([x, z]);
@@ -613,11 +606,11 @@ export class World {
       for (const p of spots) {
         this.packCenters.push([p.x, p.z]);
         this.taken.push([p.x, p.z]);
-        this.addSpawn(`forest:guard:${gi++}`, { unit: 'mob', id }, p.x, p.z, 'forest', 0, 0);
+        this.addSpawn(`forest:guard:${gi++}`, GUARD_SPAWNERS[id], p.x, p.z, 'forest', 0, 0);
       }
     }
     // Pinned: the mini-boss, the armour and gloves elites, «Громила» by the hills door; the rest spread along the trail up to the fort.
-    this.mobsAlong([[s0, sFort - 28]], SPAWNERS.forest ?? [], 'forest', r, { bandit_warlord: FOREST_MINI, bandit_lumberjack: [-28, -82], bandit_veteran: GLOVES_AT, bandit_brute: [-44, -60] });
+    this.mobsAlong([[s0, sFort - 28]], SPAWNERS.forest ?? [], 'forest', r, FOREST_PINS);
     this.campToFort(r);
     this.glovesGuards();
     this.buildZoo();

@@ -366,7 +366,7 @@ function foes(zone: ZoneId): Pick<MobDef, 'resist'> {
   return { resist };
 }
 
-/** Static trees of the forest (MobDef.static), 1K–4K HP, each with its own loot. */
+/** Static trees of the forest (MobDef.static), 400–2000 HP, each with its own loot: HP early, then damage, regen, speed. */
 function staticTrees(): Record<string, MobDef> {
   const tree = (id: string, name: string, hp: number, scale: number, loot: Pick<MobDef, 'reward' | 'drop'>): MobDef => ({
     id, name, static: true, model: { human: ['elf_tree', null], orc: ['elf_tree', null] },
@@ -374,10 +374,10 @@ function staticTrees(): Record<string, MobDef> {
     ...foes('forest'), respawn: 300, ...loot,
   });
   return {
-    tree_young: tree('tree_young', 'Молодое дерево', 1000, 0.6, { reward: { hp: 3 } }),
-    tree_birch: tree('tree_birch', 'Берёза', 2000, 0.7, { reward: { power: 2 } }),
-    tree_spring: tree('tree_spring', 'Родниковое дерево', 3000, 0.75, { reward: { regen: 1 } }),
-    tree_windy: tree('tree_windy', 'Ветреный дуб', 4000, 0.8, { reward: { speed: 3 } }),
+    tree_young: tree('tree_young', 'Молодое дерево', 400, 0.6, { reward: { hp: 4 } }),
+    tree_birch: tree('tree_birch', 'Берёза', 1000, 0.7, { reward: { power: 2 } }),
+    tree_spring: tree('tree_spring', 'Родниковое дерево', 2000, 0.75, { reward: { regen: 1 } }),
+    tree_windy: tree('tree_windy', 'Ветреный дуб', 2000, 0.8, { reward: { speed: 2 } }),
   };
 }
 
@@ -392,36 +392,37 @@ export const MOBS: Record<string, MobDef> = {
   bandit_thug: {
     id: 'bandit_thug', name: 'Разбойник',
     model: { human: ['orc_peon', 'sword_orc_warrior'], orc: ['peasant', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 220, dmg: 5, aps: 0.7, range: 1.5, speed: 3.0, aggro: 4.5, regen: 0.04, scale: 1,
-    ...foes('forest'), reward: { hp: 2 }, respawn: 45,
+    anim: 'SwordAttack', hp: 150, dmg: 4, aps: 0.7, range: 1.5, speed: 3.0, aggro: 4.5, regen: 0.04, scale: 1,
+    ...foes('forest'), reward: { hp: 3 }, respawn: 45,
   },
   bandit_fighter: {
     id: 'bandit_fighter', name: 'Головорез',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 360, dmg: 10, aps: 0.8, range: 1.6, speed: 3.4, aggro: 5, regen: 0.03, scale: 1.08,
-    ...foes('forest'), reward: { power: 3 }, respawn: 60,
+    anim: 'SwordAttack', hp: 220, dmg: 6, aps: 0.8, range: 1.6, speed: 3.4, aggro: 5, regen: 0.03, scale: 1.08,
+    ...foes('forest'), reward: { power: 1 }, respawn: 60,
   },
   bandit_veteran: {
     id: 'bandit_veteran', name: 'Ветеран', rank: 'elite',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 1400, dmg: 16.5, aps: 0.9, range: 1.8, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.3,
-    ...foes('forest'), reward: { power: 5 }, respawn: 300,
-    // the hero's own starting sword: a copy levels it up
-    drop: { kind: 'weapon', def: 'sword', rarity: 0 },
+    anim: 'SwordAttack', hp: 800, dmg: 8, aps: 0.9, range: 1.8, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.3,
+    ...foes('forest'), reward: { power: 3 }, respawn: 300,
+    // the first armour of the run: the forest's early elite dresses the hero
+    drop: { kind: 'armor', def: 'guard_chest', rarity: 0 },
   },
   bandit_brute: {
     id: 'bandit_brute', name: 'Громила', rank: 'elite',
     model: { human: ['orc_grunt', 'sword_orc_warrior'], orc: ['human_knight', 'sword_human_knight'] },
-    anim: 'SwordAttack', hp: 2592, dmg: 14.4, aps: 0.7, range: 1.8, speed: 3.2, aggro: 5.2, regen: 0.03, scale: 1.35,
-    ...foes('forest'), reward: { hp: 5 }, respawn: 300,
+    anim: 'SwordAttack', hp: 1600, dmg: 14, aps: 0.7, range: 1.8, speed: 3.2, aggro: 5.2, regen: 0.03, scale: 1.35,
+    ...foes('forest'), reward: { hp: 8 }, respawn: 300,
     drop: { kind: 'weapon', def: 'sword', rarity: 1 },
   },
   bandit_lumberjack: {
     id: 'bandit_lumberjack', name: 'Лесоруб', rank: 'elite',
     model: { human: ['orc_peon', 'sword_orc_warrior'], orc: ['peasant', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 1800, dmg: 21, aps: 0.6, range: 1.8, speed: 3.0, aggro: 5.2, regen: 0.03, scale: 1.45,
-    ...foes('forest'), reward: { regen: 1 }, respawn: 300,
-    drop: { kind: 'armor', def: 'guard_chest', rarity: 0 },
+    anim: 'SwordAttack', hp: 2000, dmg: 17, aps: 0.6, range: 1.8, speed: 3.0, aggro: 5.2, regen: 0.03, scale: 1.45,
+    ...foes('forest'), reward: { regen: 3 }, respawn: 300,
+    // the key to the chief, who shrugs off blades: the deepest elite of the forest hands every hero an axe
+    drop: { kind: 'weapon', def: 'axe', rarity: 0 },
   },
   // Reinforcements of the bandit chief: weak, no drops (they leave only a few orbs).
   bandit_runner: {
@@ -442,32 +443,33 @@ export const MOBS: Record<string, MobDef> = {
     anim: 'SwordAttack', hp: 340, dmg: 7, aps: 0.8, range: 1.6, speed: 3.6, aggro: 8, regen: 0, scale: 1,
     ...foes('forest'), reward: { power: 1 }, respawn: 0,
   },
-  // Guards of the hub boss camp and the Snow Pass gate: above every regular forest mob (max hp 1200, dmg 10), no unlocks.
+  // Guards of the hub boss camp and the Snow Pass gate: late in the forest cycle (GUARD_SPAWNERS: forest charges), its biggest damage, no unlocks.
   boss_guard: {
     id: 'boss_guard', name: 'Страж лагеря',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 3600, dmg: 20, aps: 0.8, range: 1.8, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.3,
-    ...foes('forest'), reward: { power: 5 }, respawn: 300,
+    anim: 'SwordAttack', hp: 2000, dmg: 15, aps: 0.8, range: 1.8, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.3,
+    ...foes('forest'), reward: { power: 6 }, respawn: 300,
   },
   gate_guard: {
     id: 'gate_guard', name: 'Страж прохода',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
-    anim: 'SwordAttack', hp: 2400, dmg: 16, aps: 0.8, range: 1.7, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.2,
-    ...foes('forest'), reward: { power: 3 }, respawn: 300,
+    anim: 'SwordAttack', hp: 1500, dmg: 12, aps: 0.8, range: 1.7, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.2,
+    ...foes('forest'), reward: { power: 4 }, respawn: 300,
   },
   bandit_warlord: {
     id: 'bandit_warlord', name: 'Свирепый вожак', rank: 'mini',
     model: { human: ['orc_chieftain', 'sword_orc_warrior'], orc: ['paladin', 'sword_human_knight'] },
-    anim: 'SwordAttack', hp: 4320, dmg: 24, aps: 0.65, range: 2.1, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.55,
-    ...foes('forest'), reward: { hp: 6 }, respawn: 900,
-    bonus: { hp: 500 },
+    anim: 'SwordAttack', hp: 2200, dmg: 17, aps: 0.65, range: 2.1, speed: 3.4, aggro: 5.5, regen: 0.03, scale: 1.55,
+    ...foes('forest'), reward: { hp: 8 }, respawn: 900,
+    bonus: { hp: 100 },
   },
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
     model: { human: ['orc_chieftain', 'sword_orc_warrior'], orc: ['paladin', 'sword_human_knight'] },
-    anim: 'SwordAttack', hp: 4600, dmg: 12, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
+    // tuned to the hero after one forest cycle (every spawner through its charges): a coin flip at ~90% of it
+    anim: 'SwordAttack', hp: 15000, dmg: 38, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
     ...foes('forest'), reward: { power: 12 }, respawn: 900,
-    // the forest's swords barely scratch him (−50%); his hammer is the key to the undead behind the gate
+    // the forest's swords barely scratch him (−50%): the lumberjack's axe cuts through; his hammer is the key to the undead behind the gate
     resist: { slash: 'resist' },
     drop: { kind: 'weapon', def: 'hammer', rarity: 0 },
     boss: {
@@ -486,7 +488,7 @@ export const MOBS: Record<string, MobDef> = {
   boar: {
     id: 'boar', name: 'Вепрь', creature: true, push: 5,
     model: { human: ['orc_boar', null], orc: ['orc_boar', null] },
-    anim: 'AxeAttack', hp: 180, dmg: 5, aps: 0.9, range: 1.6, speed: 2.1, aggro: 4, regen: 0.04, scale: 1.5,
+    anim: 'AxeAttack', hp: 130, dmg: 4, aps: 0.9, range: 1.6, speed: 2.1, aggro: 4, regen: 0.04, scale: 1.5,
     ...foes('forest'), reward: { speed: 1 }, respawn: 40,
   },
   murloc: {
@@ -771,7 +773,8 @@ export const ZONES: ZoneDef[] = [
  */
 export interface DepthDef { hp: number; dmg: number; reward: number; scale: number }
 export const DEPTH: Partial<Record<ZoneId, DepthDef>> = {
-  forest: { hp: 2.2, dmg: 1.8, reward: 2, scale: 1.15 },
+  // the far end of the trail is ×3 tougher and ×2.5 richer: the forest's progression (balance.html → «Цикл леса»)
+  forest: { hp: 3, dmg: 3, reward: 2.5, scale: 1.15 },
 };
 /** Outer lands: HP and damage multiplier of everything spawned there, doubling at each step of the map order. */
 export const ZONE_TIER: Partial<Record<ZoneId, number>> = { peaks: 2, hills: 4, grove: 8, swamp: 16, dunes: 32 };
@@ -840,6 +843,8 @@ const HOUR = 3600;
 /** Forest Edge: every spawner (elites and the micro-boss too) has 3 charges — 4 min, 5 min, 12 h. */
 const FOREST_CHARGES = [4 * MIN, 5 * MIN, 12 * HOUR];
 const spawner = (id: string, charges?: number[]): SpawnerDef => ({ unit: 'mob', id, charges });
+/** Guards of the boss camp and the Snow Pass gate (world.buildForest): forest charges like everyone, so one clear of the forest is one cycle. */
+export const GUARD_SPAWNERS = { boss_guard: spawner('boss_guard', FOREST_CHARGES), gate_guard: spawner('gate_guard', FOREST_CHARGES) };
 /** Mob spawners by location, placed along the trail in list order (first = nearest the location's entrance). */
 export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
   forest: ([

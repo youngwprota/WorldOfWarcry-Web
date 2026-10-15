@@ -35,13 +35,14 @@ export interface SnapRec {
   ttk: Record<string, number>;
 }
 
-interface Log { fights: FightRec[]; snaps: SnapRec[]; deaths: number }
+export interface Log { fights: FightRec[]; snaps: SnapRec[]; deaths: number }
 
 const KEY = 'warcry-balance-log';
 const MAX_FIGHTS = 400;
 let log: Log = load();
 
-function load(): Log {
+/** The stored log (the balance page reads it from the same origin). */
+export function load(): Log {
   try {
     const d = JSON.parse(localStorage.getItem(KEY) ?? '') as Log;
     if (Array.isArray(d.fights) && Array.isArray(d.snaps)) return d;

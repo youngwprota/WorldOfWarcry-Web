@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WarCry Balance</title>
+  <style>
+    :root {
+      --bg: #1b1a18; --panel: #24231f; --panel2: #2c2a26; --fg: #ecebe6; --muted: #a5a093; --line: #3a3833;
+      --accent: #e0a050; --good: #6fcf7f; --bad: #e06a5f; --warn: #e0c050;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif; }
+    .wrap { max-width: 1600px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 1.7rem; margin: 0 0 4px; letter-spacing: .02em; }
+    h2 { font-size: 1.05rem; margin: 22px 0 10px; }
+    h3 { font-size: .9rem; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+    .lede { color: var(--muted); margin: 0 0 18px; max-width: 80ch; line-height: 1.45; }
+    code, .mono { font-family: ui-monospace, Consolas, monospace; font-size: .85em; }
+    .muted { color: var(--muted); }
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 18px; flex-wrap: wrap; }
+    .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 8px 14px;
+      font: inherit; font-weight: 600; cursor: pointer; }
+    .tabs button.on { color: var(--fg); border-bottom-color: var(--accent); }
+    .tabs .badge { margin-left: 6px; background: var(--accent); color: #1b1a18; border-radius: 9px; padding: 0 6px; font-size: .75rem; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; }
+    .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 14px; align-items: end; }
+    label.f { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; color: var(--muted); }
+    label.c { display: flex; gap: 6px; align-items: center; font-size: .85rem; color: var(--muted); }
+    input, select, textarea { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 5px 7px; font: inherit; }
+    input[type=number] { width: 100%; }
+    textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: .8rem; }
+    button.btn { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; cursor: pointer; font: inherit; }
+    button.btn:hover { border-color: var(--muted); }
+    button.btn.primary { background: var(--accent); color: #1b1a18; border-color: var(--accent); font-weight: 600; }
+    button.btn:disabled { opacity: .5; cursor: default; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .bar { height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; flex: 1; min-width: 120px; }
+    .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .1s; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--c, var(--line)); border-radius: 6px; padding: 10px 12px; }
+    .card .big { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .card .sub { color: var(--muted); font-size: .8rem; line-height: 1.5; }
+    .ok { color: var(--good); } .no { color: var(--bad); } .meh { color: var(--warn); }
+    .delta { font-size: .8rem; margin-left: 6px; }
+    .charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+    .chart { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px 6px; }
+    .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+    .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: .75rem; color: var(--muted); margin-top: 4px; }
+    .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+    .legend i.dash { background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px) !important; }
+    .tip { position: fixed; pointer-events: none; background: #111; border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px;
+      font-size: .78rem; line-height: 1.45; z-index: 20; display: none; white-space: nowrap; }
+    table { border-collapse: collapse; width: 100%; font-size: .82rem; font-variant-numeric: tabular-nums; }
+    th, td { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+    th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+    th:first-child, td:first-child, td.l, th.l { text-align: left; }
+    .scroll { overflow: auto; max-height: 460px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+    details > summary { cursor: pointer; color: var(--muted); margin: 10px 0 6px; }
+    .err { color: var(--bad); white-space: pre-wrap; }
+    /* config editor */
+    .cfg { display: grid; grid-template-columns: 220px 1fr; gap: 14px; align-items: start; }
+    @media (max-width: 760px) { .cfg { grid-template-columns: 1fr; } }
+    .groups { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 8px; }
+    .groups button { text-align: left; background: none; border: 0; color: var(--muted); padding: 5px 8px; border-radius: 4px; cursor: pointer; font: inherit; display: flex; justify-content: space-between; }
+    .groups button.on { background: var(--panel2); color: var(--fg); }
+    .groups button b { color: var(--accent); font-weight: 600; }
+    .leaf { display: grid; grid-template-columns: minmax(0, 1fr) 110px 90px 24px; gap: 8px; align-items: center; padding: 3px 6px; border-radius: 4px; }
+    .leaf:hover { background: var(--panel2); }
+    .leaf .p { font-family: ui-monospace, Consolas, monospace; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .leaf .p span { color: var(--muted); }
+    .leaf .d { font-size: .75rem; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+    .leaf.mod .p, .leaf.mod input { color: var(--accent); }
+    .leaf.mod input { border-color: var(--accent); }
+    .leaf button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0; font-size: 1rem; visibility: hidden; }
+    .leaf.mod button { visibility: visible; }
+    .sub-h { font-size: .8rem; color: var(--fg); font-weight: 600; margin: 12px 6px 2px; }
+    .empty { color: var(--muted); padding: 24px; text-align: center; }
+    /* map */
+    .mapwrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(480px, 42%); gap: 14px; align-items: start; }
+    @media (max-width: 1100px) { .mapwrap { grid-template-columns: 1fr; } }
+    #mev { overflow-x: hidden; }
+    #mev table { table-layout: auto; }
+    #mev td { white-space: normal; vertical-align: top; }
+    #mev td:first-child { white-space: nowrap; }
+    .mapbox { background: #16191c; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    .mapbox canvas { display: block; }
+    .mapside .sub { color: var(--muted); font-size: .8rem; line-height: 1.6; }
+    tr.ev.cur td { background: #3a3326; }
+    tr.ev:hover td { background: var(--panel2); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>WarCry Balance</h1>
+    <p class="lede">Симулятор баланса (тот же код, что <code>npm run sim</code>), сравнение оружий, правки чисел конфига и разбор
+      лога баланса из игры. Правки конфига работают как <code>--set</code>: живут только в этой странице, файлы не меняются.</p>
+    <nav class="tabs" id="tabs"></nav>
+    <main id="root"></main>
+  </div>
+  <div class="tip" id="tip"></div>
+  <script type="module" src="/src/balancepage.ts"></script>
+</body>
+</html>

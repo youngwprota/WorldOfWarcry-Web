@@ -399,6 +399,23 @@ export const LAND_TRAILS: [number, number][][] = [
 export const FORT = { x: WAY[FORT_I][0], z: WAY[FORT_I][1], r: 11 };
 /** «Свирепый вожак» of the forest. */
 export const FOREST_MINI: [number, number] = [-10.6, -11.6];
+/** The gloves elite (bandit_veteran): between the pond and the trail out of the settlement. */
+export const GLOVES_AT: [number, number] = [20, -77];
+/** Forest spawners pinned to a spot (the rest spread along the trail): the mini-boss and three elites. */
+export const FOREST_PINS: Record<string, [number, number]> = {
+  bandit_warlord: FOREST_MINI, bandit_lumberjack: [-28, -82], bandit_veteran: GLOVES_AT, bandit_brute: [-44, -60],
+};
+/** Two bandit pairs in the trees by the gloves elite (GLOVES_BANDITS, two per pack). */
+export const GLOVES_PACKS: [number, number][] = [[14, -74], [27, -76]];
+/** Bandits in the wood between the settlement and the fort (MID_SPAWNERS): [along, side] m on the camp → fort line. */
+export const MID_UV: [number, number][] = [[18, 1], [24, 1.5], [27.5, 0], [20.7, 6.9], [17.5, 4.5]];
+/** A point [along, side] on the straight line from the settlement to the fort. */
+export function campToFortAt([u, v]: readonly number[]) {
+  const len = Math.hypot(FORT.x - ISLAND.campX, FORT.z - ISLAND.campZ);
+  const dx = (FORT.x - ISLAND.campX) / len;
+  const dz = (FORT.z - ISLAND.campZ) / len;
+  return { x: ISLAND.campX + u * dx - v * dz, z: ISLAND.campZ + u * dz + v * dx };
+}
 export const ARENA = { x: WAY[WAY.length - 1][0], z: WAY[WAY.length - 1][1], r: 15 };
 
 const STEP = 0.5;
