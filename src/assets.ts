@@ -22,7 +22,7 @@ const TEXTURE_OF: Record<string, string> = {
   undead_worker: 'undead_units_texture', undead_warrior: 'undead_units_texture',
   spear_undead_warrior: 'undead_units_texture', undead_assassin: 'undead_units_texture',
   undead_king: 'undead_units_texture', sword_undead_king: 'undead_units_texture',
-  orc_shaman: 'orc_shaman_albedo', staff_orc_shaman: 'orc_shaman_albedo',
+  mage: 'human_mage_col', orc_shaman: 'orc_shaman_albedo', staff_orc_shaman: 'orc_shaman_albedo',
   elf_warrior: 'elf_warrior_tex', sword_elf_warrior: 'elf_warrior_tex', elf_assassin: 'elf_assassin_tex', elf_worker: 'elf_worker_tex',
   elf_queen: 'elf_queen_tex', glaive_elf_queen: 'elf_queen_tex', elf_priestess: 'elf_priestess_tex', magic_ball: 'elf_priestess_tex',
   // party classes from the newer Unity kit (tools/import-warcry.mjs): one shared atlas per race
@@ -49,13 +49,15 @@ function textureFor(name: string): string {
   return 'proto_human_RTS_color';
 }
 
-/** Models with their own multi-material look (mage armour skins): the FBX materials are kept instead of one shared texture. */
-/** Textures of the caster materials by material name (exact, or by prefix); the FBX texture paths are blanked by the URL modifier. */
-const CASTER_TEXTURES: [string, string][] = [
-  ['human_mage_mat', 'human_mage_col'], ['orc_shaman_mat', 'orc_shaman_albedo'],
-  ['orc_shaman_tint_', 'orc_shaman_albedo_gray'], ['orc_shaman_belt_', 'orc_shaman_albedo_gray'], ['orc_head_mythic_skull_tex', 'orc_shaman_albedo_gray'],
+/**
+ * Caster armour (models/casters): the mage's cloth materials by name prefix → [texture, tinted]. A tinted one keeps its
+ * FBX colour as a multiplier of the (gray) texture; the others are the plain texture, shared like the race atlas.
+ */
+const CASTER_TEXTURES: [string, string, boolean][] = [
+  ['human_mage_mat', 'human_mage_col', false], ['orc_shaman_mat', 'orc_shaman_albedo', false],
+  ['orc_shaman_tint_', 'orc_shaman_albedo_gray', true], ['orc_shaman_belt_', 'orc_shaman_albedo_gray', true],
+  ['orc_head_mythic_skull_tex', 'orc_shaman_albedo_gray', false],
 ];
-export const keepsMaterials = (name: string) => name.startsWith('caster_');
 
 export const ANIMS = ['Idle', 'Walk', 'SwordAttack', 'AxeAttack', 'MagicAttack', 'Hit', 'Death', 'SlashAdvance', 'MeleeHigh', 'MeleeLong', 'MeleeHorizontal'] as const;
 export type AnimName = (typeof ANIMS)[number];
@@ -244,19 +246,14 @@ class Assets {
     g.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(g);
     if (box.max.y - box.min.y > 20) g.scale.setScalar(0.01);
-    if (name.startsWith('archers/')) { this.prepareOwnMaterials(name, g); return; }
-    const own = keepsMaterials(name);
+    if (name.startsWith('archers/') || name.startsWith('casters/')) { this.prepareOwnMaterials(name, g); return; }
     const mat = this.material(textureFor(name));
     g.traverse((o) => {
       if (o.name === 'Character1_RightHand') o.name = 'hand_r';
       else if (o.name === 'Character1_LeftHand') o.name = 'hand_l';
       const m = o as THREE.Mesh;
       if (m.isMesh) {
-        if (!own) m.material = Array.isArray(m.material) ? m.material.map(() => mat) : mat;
-        else for (const cm of Array.isArray(m.material) ? m.material : [m.material]) {
-          const tex = CASTER_TEXTURES.find(([n]) => cm.name.startsWith(n));
-          if (tex) (cm as THREE.MeshPhongMaterial).map = this.texture(tex[1]);
-        }
+        m.material = Array.isArray(m.material) ? m.material.map(() => mat) : mat;
         m.castShadow = false;
         m.receiveShadow = false;
       }
@@ -264,7 +261,7 @@ class Assets {
   }
 
   /**
-   * Hunter set parts and bows keep their own materials (a baked texture, plus flat "metal" and "glow" colours by
+   * Hunter set parts, bows and the mage's caster parts keep their own materials (a baked texture, plus flat "metal" and "glow" colours by
    * quality) as Lambert like the rest of the game; the race's base material becomes our shared atlas, glow emits.
    */
   private prepareOwnMaterials(name: string, g: THREE.Group) {
@@ -275,7 +272,10 @@ class Assets {
       let m = conv.get(src);
       if (m) return m;
       const p = src as THREE.MeshPhongMaterial;
+      const cloth = CASTER_TEXTURES.find(([n]) => p.name.startsWith(n));
       if (/^(human|orc)_archer_mat$/.test(p.name)) m = this.material(atlas);
+      else if (cloth && !cloth[2]) m = this.material(cloth[1]);
+      else if (cloth) m = new THREE.MeshLambertMaterial({ name: p.name, map: this.texture(cloth[1]), color: p.color });
       else {
         const glow = p.name.endsWith('_glow');
         const map = p.map && baked ? p.map : null;

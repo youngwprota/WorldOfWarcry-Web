@@ -708,7 +708,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .dbg-btns button.god { grid-column: span 3; }
 .dbg-btns button.god.on { background: #2fb847; }
 .dbg-btns button.wide2 { grid-column: span 2; }
-.dbg-btns button.arch.on, .dbg-btns button.bowv.on { background: #2fb847; }
+.dbg-btns button.arch.on, .dbg-btns button.mage.on, .dbg-btns button.bowv.on { background: #2fb847; }
 .dbg-build { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; font-size: 10px; }
 .dbg-build input { width: 100%; box-sizing: border-box; border: 2px solid var(--ink); border-radius: 6px; background: #2a2038; color: #fff; font: 700 11px system-ui, sans-serif; padding: 2px 4px; }
 .dbg-build button { grid-column: span 2; min-height: 26px; border: 2px solid var(--ink); border-radius: 7px; background: #4e3f70; color: #fff; font: 700 10px system-ui, sans-serif; }

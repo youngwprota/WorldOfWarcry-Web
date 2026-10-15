@@ -46,6 +46,7 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
   },
   mage: {
     name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
+    model: { human: 'mage', orc: 'orc_shaman' },
     weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_vigor', 'orb_fury'], offName: 'Сфера',
     kit: { hand: 'staff_fire', left: 'orb_vigor', bag: ['staff_ice', 'staff_wind', 'orb_fury'] },
   },

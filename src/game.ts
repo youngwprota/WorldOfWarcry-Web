@@ -412,6 +412,7 @@ export class Game {
     this.hero = new Character(this.heroModel(), null, 1);
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
+    void this.loadOutfit();
     this.hero.setHighlight(true);
     this.hero.position.set(SPAWN.x, 0, SPAWN.z);
     this.hero.facing = Math.PI;
@@ -617,8 +618,25 @@ export class Game {
 
   /** Body parts borrowed from other characters for the equipped armour. */
   outfit(): Partial<Record<VisualPart, string>> {
-    // the hunter in a debug set: all four parts of that quality
+    const o = this.wantedOutfit();
+    for (const part of Object.keys(o) as VisualPart[]) if (!assets.has(o[part]!)) delete o[part]; // still loading
+    return o;
+  }
+
+  private outfitLoad = 0;
+  /** Loads the parts of the outfit that come on demand (caster sets), then dresses the hero in them. */
+  private async loadOutfit() {
+    const need = Object.values(this.wantedOutfit()).filter((n) => !assets.has(n));
+    if (!need.length) return;
+    const token = ++this.outfitLoad;
+    await assets.ensure(need);
+    if (token === this.outfitLoad) this.hero.setOutfit(this.outfit());
+  }
+
+  private wantedOutfit(): Partial<Record<VisualPart, string>> {
+    // a hero in a debug set: all four parts of that quality
     if (this.heroClass === 'hunter' && this.archerLook.rarity >= 0) return archerSet(this.faction, this.archerLook.rarity);
+    if (this.heroClass === 'mage' && this.mageLook >= 0) return Object.fromEntries((['head', 'chest', 'arms', 'legs'] as VisualPart[]).map((p) => [p, casterModel(this.faction, this.mageLook)]));
     const o: Partial<Record<VisualPart, string>> = {};
     const caster = this.heroClass === 'mage'; // armour is a class skin: the caster part of the item's rarity
     for (const part of ['head', 'chest', 'arms', 'legs'] as VisualPart[]) {
@@ -2182,6 +2200,7 @@ export class Game {
     const hpFrac = this.hp / this.maxHp;
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
+    void this.loadOutfit();
     this.hp = Math.min(this.maxHp, Math.max(1, hpFrac * this.maxHp));
     this.resetHands();
     sfx.click();
@@ -2270,6 +2289,13 @@ export class Game {
     this.save.pulls = (this.save.pulls ?? 0) + n;
     this.refreshHud(true);
     this.persist();
+  }
+
+  /** The world, mobs and models are built per faction at start, so the page reloads with the flipped save. */
+  debugSwitchFaction() {
+    this.save.faction = this.save.faction === 'human' ? 'orc' : 'human';
+    this.persist();
+    location.reload();
   }
 
   /** Adds `n` points of stat `k` (source "Дебаг"); `pct`: `n` percent instead (hp / regen / power). */
@@ -2366,19 +2392,22 @@ export class Game {
 
   /** Debug: the hunter's look by quality (RARITY index, −1 = the base archer) and the bow variant (`bowV1`). */
   archerLook = { rarity: -1, bowV1: false };
-  private archerLoad = 0;
-  /** Loads the set's parts on demand, then dresses the hunter (and his inventory preview) in it. */
-  async debugArcherSet(rarity: number, bowV1 = this.archerLook.bowV1) {
-    const token = ++this.archerLoad;
+  /** Debug: the mage's look by quality (−1 = the equipped armour). */
+  mageLook = -1;
+  private lookLoad = 0;
+  /** Loads the set's parts on demand, then dresses the hunter or the mage (and the inventory preview) in it. */
+  async debugSet(cls: 'hunter' | 'mage', rarity: number, bowV1 = this.archerLook.bowV1) {
+    const token = ++this.lookLoad;
     if (rarity >= 0) {
       this.ui.toast('Загрузка сета…', 1500);
-      await assets.ensure([...Object.values(archerSet(this.faction, rarity)), archerBow(rarity, bowV1)]);
+      await assets.ensure(cls === 'hunter' ? [...Object.values(archerSet(this.faction, rarity)), archerBow(rarity, bowV1)] : [casterModel(this.faction, rarity)]);
     }
-    if (token !== this.archerLoad) return; // a later pick won
-    this.archerLook = { rarity, bowV1 };
+    if (token !== this.lookLoad) return; // a later pick won
+    if (cls === 'hunter') this.archerLook = { rarity, bowV1 };
+    else this.mageLook = rarity;
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
-    if (this.heroClass !== 'hunter') this.ui.toast('Сет виден у охотника (2)', 2000);
+    if (this.heroClass !== cls) this.ui.toast(cls === 'hunter' ? 'Сет виден у охотника (2)' : 'Сет виден у мага (3)', 2000);
   }
 
   debugGiveWeapon(def: string, slot: 0 | 1 = 0) {

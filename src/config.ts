@@ -98,9 +98,8 @@ export const mobRank = (d: MobDef): MobRank => (d.boss ? 'boss' : d.rank ?? 'nor
 
 const RARITY_IDS = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
 const staffTiers = (el: StaffElement) => RARITY_IDS.map((r) => `staff_${el}_${r}`);
-/** Mage armour skin: the caster body parts of a rarity (FBX with its own materials, src/assets.ts keepsMaterials). */
-export const casterModel = (faction: FactionId, rarity: number) => `caster_${faction}_${RARITY_IDS[rarity]}`;
-export const CASTER_MODELS = (['human', 'orc'] as const).flatMap((f) => RARITY_IDS.map((_, i) => casterModel(f, i)));
+/** Mage armour skin: the caster body parts of a rarity (models/casters, loaded on demand; src/assets.ts prepareOwnMaterials). */
+export const casterModel = (faction: FactionId, rarity: number) => `casters/${faction}_caster_${RARITY_IDS[rarity]}`;
 
 export const WEAPONS: Record<string, WeaponDef> = {
   sword: {

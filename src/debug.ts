@@ -110,14 +110,23 @@ const SECTIONS: [string, Action[]][] = [
   ]],
   // hunter look by quality (models load on the first pick); "Базовый" = the archer as imported
   ['Сет лучника', [
-    ['Базовый', (g) => g.debugArcherSet(-1), 'arch r-1'],
+    ['Базовый', (g) => g.debugSet('hunter', -1), 'arch r-1'],
     ...['Обычный', 'Необычный', 'Редкий', 'Эпический', 'Легендарный', 'Мифический'].map(
-      (label, r): Action => [label, (g) => g.debugArcherSet(r), `arch r${r}`],
+      (label, r): Action => [label, (g) => g.debugSet('hunter', r), `arch r${r}`],
+    ),
+  ]],
+  ['Сет мага', [
+    ['Экипировка', (g) => g.debugSet('mage', -1), 'mage r-1'],
+    ...['Обычный', 'Необычный', 'Редкий', 'Эпический', 'Легендарный', 'Мифический'].map(
+      (label, r): Action => [label, (g) => g.debugSet('mage', r), `mage r${r}`],
     ),
   ]],
   ['Лук лучника (от необычного)', [
-    ['Новый', (g) => g.debugArcherSet(g.archerLook.rarity, false), 'bowv new'],
-    ['Похожий на базовый', (g) => g.debugArcherSet(g.archerLook.rarity, true), 'bowv v1 wide2'],
+    ['Новый', (g) => g.debugSet('hunter', g.archerLook.rarity, false), 'bowv new'],
+    ['Похожий на базовый', (g) => g.debugSet('hunter', g.archerLook.rarity, true), 'bowv v1 wide2'],
+  ]],
+  ['Раса', [
+    ['Сменить расу (человек ⇄ орк)', (g) => g.debugSwitchFaction(), 'wide'],
   ]],
   ['Горнило', [
     ['+5 круток', (g) => g.debugAddPulls(5), 'wide'],
@@ -225,6 +234,7 @@ export class DebugPanel {
     this.el.querySelector('.god')?.classList.toggle('on', d.god);
     const look = this.game.archerLook;
     this.el.querySelectorAll('.arch').forEach((b) => b.classList.toggle('on', b.classList.contains(`r${look.rarity}`)));
+    this.el.querySelectorAll('.mage').forEach((b) => b.classList.toggle('on', b.classList.contains(`r${this.game.mageLook}`)));
     this.el.querySelectorAll('.bowv').forEach((b) => b.classList.toggle('on', b.classList.contains(look.bowV1 ? 'v1' : 'new')));
     this.info.textContent = [
       `ХП ${d.hp}/${d.maxHp}${d.god ? '  [бессмертие]' : ''}`,
