@@ -101,11 +101,15 @@ class HeroPreview {
     this.loop();
   }
 
-  /** `mainLeft`: the main weapon in the left hand (the mage's staff); `orb`: the mage's orb model over the shoulder. */
-  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>, mainLeft = false, orb: string | null = null) {
+  /**
+   * `mainLeft`: the main weapon in the left hand (the mage's staff); `orb`: the mage's orb model over the shoulder;
+   * `trims`: armour quality pieces (Game.trims).
+   */
+  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>, mainLeft = false, orb: string | null = null, trims: string[] = []) {
     this.ch.setWeapon(weapon, left, mainLeft);
     this.ch.setOrb(orb);
     this.ch.setOutfit(outfit);
+    this.ch.setTrims(trims);
   }
 
   nudge(dir: number) { this.vel = dir * 5; }
@@ -328,7 +332,7 @@ export class Inventory {
     q('#i-eq-l').innerHTML = armor(EQUIP_BAR.left);
     q('#i-eq-w').innerHTML = weapons;
     q('#i-eq-r').innerHTML = armor(EQUIP_BAR.right);
-    this.preview?.setGear(...g.heldModels(), g.outfit(), g.staffInHand(), g.orbModel());
+    this.preview?.setGear(...g.heldModels(), g.outfit(), g.staffInHand(), g.orbModel(), g.trims());
     g.newItems = 0;
   }
 

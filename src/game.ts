@@ -11,7 +11,7 @@ import {
 } from './config';
 import { ArenaFog, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, Telegraphs, type Bolt, type PickupKind } from './fx';
 import {
-  ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemClass, itemModel, itemName, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, armorTrim, copyGain, dropIconId, dropItem, itemClass, itemModel, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
@@ -145,8 +145,6 @@ export class Mob extends Unit {
   wanderT = Math.random() * 3;
   wander = new THREE.Vector3();
   knock = new THREE.Vector3();
-  /** Knockback applied once the death freeze (KILL_FX) is over. */
-  deathKnock = new THREE.Vector3();
   /** The death clip is still playing (the corpse sinks once it is over). */
   dying = false;
   loot: Item[] = [];
@@ -243,7 +241,6 @@ export class Mob extends Unit {
     this.dying = false;
     this.loot = [];
     this.knock.set(0, 0, 0);
-    this.deathKnock.set(0, 0, 0);
     this.state = 'idle';
     this.hp = this.maxHp;
     this.phase2 = false;
@@ -413,6 +410,7 @@ export class Game {
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
     void this.loadOutfit();
+    this.hero.setTrims(this.trims());
     this.hero.setHighlight(true);
     this.hero.position.set(SPAWN.x, 0, SPAWN.z);
     this.hero.facing = Math.PI;
@@ -548,6 +546,7 @@ export class Game {
     this.hero = ch;
     this.equipVisual();
     ch.setOutfit(this.outfit());
+    ch.setTrims(this.trims());
     ch.setHighlight(true);
     this.scene.add(ch.root);
   }
@@ -645,6 +644,19 @@ export class Game {
       if (src) o[part] = src;
     }
     return o;
+  }
+
+  /** Quality pieces of the equipped armour (armorTrim). */
+  trims(): string[] {
+    // fitted to the warrior's body (the peasant / peon skeleton); other classes wear other models
+    if (this.heroClass !== 'warrior') return [];
+    const out: string[] = [];
+    for (const s of ['head', 'chest', 'arms', 'legs', 'ring', 'amulet'] as ArmorSlot[]) {
+      const it = this.save.equip[s];
+      const n = it ? armorTrim(it, this.faction) : null;
+      if (n) out.push(n);
+    }
+    return out;
   }
 
   // ---------- main loop ----------
@@ -1240,8 +1252,7 @@ export class Game {
     m.hp = 0;
     m.deadT = 0;
     m.ch.die();
-    m.deathKnock.copy(m.knock).multiplyScalar(KILL_FX.knockMul);
-    m.knock.set(0, 0, 0);
+    m.knock.multiplyScalar(KILL_FX.knockMul).clampLength(0, KILL_FX.maxKnock);
     this.shake = Math.max(this.shake, KILL_FX.shake);
     this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), bloodColor(m), KILL_FX.blood, 0.12, 6, 0.7);
     this.save.kills++;
@@ -1401,18 +1412,13 @@ export class Game {
       m.ch.root.visible = m.state !== 'dead' ? dHero < 34 : m.ch.root.visible && dHero < 34;
       if (m.state === 'dead') {
         this.arenas.get(m)?.set(false);
-        const holdEnd = KILL_FX.holdAt + KILL_FX.freeze;
-        const held = m.deadT < holdEnd;
         m.deadT += dt;
-        if (held && m.deadT >= holdEnd) m.knock.copy(m.deathKnock);
-        const holding = m.deadT > KILL_FX.holdAt && m.deadT < holdEnd;
-        m.ch.update(dt, false, !holding && m.dying && dHero < 34);
+        m.ch.update(dt, false, m.dying && dHero < 34);
         if (m.knock.lengthSq() > 0.001) {
           m.pos.addScaledVector(m.knock, dt);
           m.knock.multiplyScalar(Math.max(0, 1 - dt * 9));
         }
-        // Off-screen corpses do not animate, so their clip never finishes: end it right after the freeze.
-        if (m.dying && m.deadT >= holdEnd && (m.ch.deathDone || dHero >= 34)) { m.dying = false; m.paidAt = m.deadT; }
+        if (m.dying && (m.ch.deathDone || dHero >= 34)) { m.dying = false; m.paidAt = m.deadT; }
         const gone = m.dying ? 0 : m.deadT - m.paidAt;
         if (gone > 0.4) m.ch.position.y = -(gone - 0.4) * 0.8;
         if (gone > 2.2) m.ch.root.visible = false;
@@ -2201,6 +2207,7 @@ export class Game {
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
     void this.loadOutfit();
+    this.hero.setTrims(this.trims());
     this.hp = Math.min(this.maxHp, Math.max(1, hpFrac * this.maxHp));
     this.resetHands();
     sfx.click();
@@ -2407,6 +2414,7 @@ export class Game {
     else this.mageLook = rarity;
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
+    this.hero.setTrims(this.trims());
     if (this.heroClass !== cls) this.ui.toast(cls === 'hunter' ? 'Сет виден у охотника (2)' : 'Сет виден у мага (3)', 2000);
   }
 
@@ -2414,6 +2422,45 @@ export class Game {
     const old = this.save.weapons[slot];
     this.save.weapons[slot] = dropItem({ kind: 'weapon', def, rarity: 2 });
     if (old && this.save.bag.length < BAG_SIZE) this.save.bag.push(old);
+    this.afterGearChange();
+  }
+
+  /**
+   * Debug: every weapon, shield and armour piece at every quality into the bag (ones already owned are skipped).
+   * Ignores the bag limit, so the bag may end up over 128 until something is thrown away.
+   */
+  debugGiveAll() {
+    // the other party members' weapons and armour count as owned too (like a looted copy, see the pickup above)
+    const kits = Object.values(this.save.kits ?? {}).flat();
+    const worn = Object.values(this.save.gear ?? {}).flatMap((g) => Object.values(g));
+    const own = [...this.save.weapons, ...kits, ...Object.values(this.save.equip), ...worn, ...this.save.bag].filter((x): x is Item => !!x);
+    let n = 0;
+    for (const [kind, defs] of [['weapon', Object.keys(WEAPONS)], ['armor', Object.keys(ARMOR)]] as const) {
+      for (const def of defs) {
+        for (let rarity = 0; rarity < 6; rarity++) {
+          const it = dropItem({ kind, def, rarity });
+          if (own.some((x) => sameItem(x, it))) continue;
+          this.save.bag.push(it);
+          n++;
+        }
+      }
+    }
+    this.newItems += n;
+    this.ui.toast(`Выдано предметов: ${n}`);
+    this.refreshHud(true);
+    this.persist();
+  }
+
+  /** Debug: a whole armour set with a ring and an amulet; the same set again is one quality higher. */
+  debugGiveArmor(set: string) {
+    const head = this.save.equip.head;
+    const rarity = head?.def === `${set}_head` ? (head.rarity + 1) % 6 : 1;
+    const defs: [ArmorSlot, string][] = [
+      ['head', `${set}_head`], ['chest', `${set}_chest`], ['arms', `${set}_arms`], ['legs', `${set}_legs`],
+      ['ring', 'ring_power'], ['amulet', 'amulet_life'],
+    ];
+    for (const [slot, def] of defs) this.save.equip[slot] = dropItem({ kind: 'armor', def, rarity });
+    this.fx.spawn(v1.copy(this.hero.position).setY(2.6), `${set} · ${rarity}`, 'dmg weak', 1);
     this.afterGearChange();
   }
 

@@ -94,6 +94,15 @@ const SECTIONS: [string, Action[]][] = [
     ['Шипастый', (g) => g.debugGiveWeapon('shield_spiked', 1)],
     ['Пусто', (g) => g.debugClearLeft(), 'wide'],
   ]],
+  // a set's 4 pieces + ring + amulet; pressing the same set again raises the quality (common → mythic → common)
+  ['Броня', [
+    ['Стражник', (g) => g.debugGiveArmor('guard')],
+    ['Рыцарь', (g) => g.debugGiveArmor('knight')],
+    ['Паладин', (g) => g.debugGiveArmor('lord')],
+  ]],
+  ['Предметы', [
+    ['Выдать все', (g) => g.debugGiveAll(), 'wide'],
+  ]],
   ['Статы (+очки)', [
     ['+10 урон', (g) => g.debugAddStat('power', 10)],
     ['+50 хп', (g) => g.debugAddStat('hp', 50)],

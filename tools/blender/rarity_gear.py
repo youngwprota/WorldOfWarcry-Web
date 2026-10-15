@@ -15,7 +15,7 @@ import sys
 
 import bmesh
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 SAVE_AS = ARGS[0] if len(ARGS) > 0 and ARGS[0] else None
@@ -328,7 +328,7 @@ def bake_colors(ob, me):
     The artist's base colours come from a vertex colour (blades) or a character texture tinted by a Mix node
     (grips, shafts). The game loads GLB without images and reads only COLOR_0, so the final base colour of every
     corner is baked into one colour attribute and those materials export with a white base colour.
-    Returns {material index: white copy} for the baked slots, or None when nothing needs baking.
+    Returns the indices of the baked material slots (empty when nothing needs baking).
     """
     plan = {}
     for i, slot in enumerate(ob.material_slots):
@@ -346,7 +346,7 @@ def bake_colors(ob, me):
         elif src.type == "TEX_IMAGE" and src.image:
             plan[i] = ("tex", src.image, None)
     if not plan:
-        return None
+        return []
     vcols = {id(v[1]): [list(d.color) for d in v[1].data] for v in plan.values() if v[0] == "vcol"}
     uv = me.uv_layers.active.data if me.uv_layers.active else None
     cache = {}
@@ -369,55 +369,69 @@ def bake_colors(ob, me):
     for li, c in enumerate(out):
         attr.data[li].color = c
     me.color_attributes.active_color = attr
-    whites = {}
-    for i in plan:
-        m = ob.material_slots[i].material.copy()
-        bsdf = next(n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
-        for l in list(bsdf.inputs["Base Color"].links):
-            m.node_tree.links.remove(l)
-        bsdf.inputs["Base Color"].default_value = (1, 1, 1, 1)
-        whites[i] = m
-    return whites
+    # the exporter writes the render colour as COLOR_0 (white when unset) and the active one after it
+    me.color_attributes.render_color_index = me.color_attributes.active_color_index
+    return list(plan)
 
 
-def export_glb(ob, name):
-    """A copy of `ob` alone at the origin, scaled to centimetres, written as GLB without images.
+def white_copy(m):
+    """`m` for export after baking: white base colour, no colour links (the vertex colour carries the colour)."""
+    w = m.copy()
+    bsdf = next(n for n in w.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    for sock in ("Base Color", "Emission Color"):
+        for l in list(bsdf.inputs[sock].links):
+            w.node_tree.links.remove(l)
+    bsdf.inputs["Base Color"].default_value = (1, 1, 1, 1)
+    return w
+
+
+def export_glb(obs, name):
+    """Copies of `obs` (one object or a list) at the origin, scaled to centimetres, written as one GLB without images.
     Colours are baked (bake_colors) and normals recalculated outward: some of the artist's faces point inward and the
-    game culls back faces."""
-    me = ob.data.copy()
-    tmp = bpy.data.objects.new(name + "_export", me)
-    bpy.context.scene.collection.objects.link(tmp)
-    me.transform(tmp.matrix_world.copy().to_3x3().to_4x4())  # rotation/scale only: the location is dropped
-    me.transform(__import__("mathutils").Matrix.Scale(100, 4))
-    bm = bmesh.new()
-    bm.from_mesh(me)
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    bm.to_mesh(me)
-    bm.free()
-    renamed = {}
-    whites = bake_colors(tmp, me)
-    if whites:
-        for i, w in whites.items():
+    game culls back faces. Each object becomes a node with the object's own name."""
+    obs = obs if isinstance(obs, (list, tuple)) else [obs]
+    temps, whites = [], {}  # whites: original material name -> (original, white copy)
+    for ob in obs:
+        node = ob.name
+        ob.name = node + "__src"
+        me = ob.data.copy()
+        tmp = bpy.data.objects.new(node, me)
+        bpy.context.scene.collection.objects.link(tmp)
+        me.transform(ob.matrix_world.copy().to_3x3().to_4x4())  # rotation/scale only: the location is dropped
+        me.transform(Matrix.Scale(100, 4))
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(me)
+        bm.free()
+        for i in bake_colors(tmp, me):
             orig = me.materials[i]
-            if orig.name not in renamed:
-                renamed[orig.name] = orig
-                orig.name = orig.name + "__src"
-            w.name = orig.name[:-5]
-            me.materials[i] = w
+            key = orig.name
+            if key not in whites:
+                whites[key] = (orig, white_copy(orig))
+            me.materials[i] = whites[key][1]
+        temps.append((ob, node, tmp))
+    # the GLB takes material names: the white copies get the originals' names for the export
+    for key, (orig, w) in whites.items():
+        orig.name = key + "__src"
+        w.name = key
     bpy.ops.object.select_all(action="DESELECT")
-    tmp.select_set(True)
-    bpy.context.view_layer.objects.active = tmp
+    for _, _, tmp in temps:
+        tmp.select_set(True)
+    bpy.context.view_layer.objects.active = temps[0][2]
     path = os.path.join(MODELS, name + ".glb")
     bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", use_selection=True, export_yup=True,
                               export_apply=True, export_image_format="NONE", export_materials="EXPORT",
                               export_vertex_color="ACTIVE" if whites else "NONE", export_normals=True,
                               export_animations=False)
-    bpy.data.objects.remove(tmp, do_unlink=True)
-    bpy.data.meshes.remove(me)
-    for w in (whites or {}).values():
+    for ob, node, tmp in temps:
+        me = tmp.data
+        bpy.data.objects.remove(tmp, do_unlink=True)
+        bpy.data.meshes.remove(me)
+        ob.name = node
+    for key, (orig, w) in whites.items():
         bpy.data.materials.remove(w)
-    for n, orig in renamed.items():
-        orig.name = n
+        orig.name = key
     print("wrote", path, os.path.getsize(path))
 
 
@@ -444,16 +458,21 @@ def preview(objs, path):
     bpy.data.objects.remove(cam, do_unlink=True)
 
 
-shields = build_shields()
-if SAVE_AS:
-    bpy.ops.wm.save_as_mainfile(filepath=SAVE_AS, copy=True)
-    print("saved", SAVE_AS)
-for c in WEAPON_COLLECTIONS:
-    for ob in bpy.data.collections[c].objects:
-        if not ob.name.endswith("_common"):
-            export_glb(ob, ob.name)
-for ob in shields:
-    export_glb(ob, ob.name)
-if PREVIEW_DIR:
-    os.makedirs(PREVIEW_DIR, exist_ok=True)
-    preview(shields, os.path.join(PREVIEW_DIR, "shields.png"))
+def main():
+    shields = build_shields()
+    if SAVE_AS:
+        bpy.ops.wm.save_as_mainfile(filepath=SAVE_AS, copy=True)
+        print("saved", SAVE_AS)
+    for c in WEAPON_COLLECTIONS:
+        for ob in bpy.data.collections[c].objects:
+            if not ob.name.endswith("_common"):
+                export_glb(ob, ob.name)
+    for ob in shields:
+        export_glb(ob, ob.name)
+    if PREVIEW_DIR:
+        os.makedirs(PREVIEW_DIR, exist_ok=True)
+        preview(shields, os.path.join(PREVIEW_DIR, "shields.png"))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { HIT_FLASH, applyHitFlash } from './hitflash';
 import { SKINS, assets } from './assets';
-import { WEAPON_GRIPS, attachWeapon } from './rig';
+import { WEAPON_GRIPS, attachTrim, attachWeapon } from './rig';
 import { Swinger, type SwingKind } from './swing';
 import { PART_PREFIXES, type VisualPart } from './items';
 import { ATTACK_HIT, type AttackAnim, type BossAnim } from './config';
@@ -263,6 +263,30 @@ export class Character {
     const graft = b.clone(false);
     parent.add(graft);
     return graft;
+  }
+
+  private trims = new Map<string, THREE.Object3D[]>();
+  private trimsWanted: string[] = [];
+
+  /** Armour quality pieces (GLB names, see armorTrim): loaded on demand, attached to the bones. */
+  setTrims(names: string[]) {
+    this.trimsWanted = names;
+    for (const [n, pieces] of this.trims) {
+      if (names.includes(n)) continue;
+      for (const p of pieces) p.removeFromParent();
+      this.trims.delete(n);
+    }
+    for (const n of names) {
+      if (this.trims.has(n)) continue;
+      assets.gear(n).then(() => {
+        if (!this.trimsWanted.includes(n) || this.trims.has(n)) return;
+        const pieces = attachTrim(this.model, n);
+        for (const p of pieces) p.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
+        this.trims.set(n, pieces);
+        if (this.highlighted) this.rebuildOutline();
+      }, (e) => console.warn('armour trim', n, e));
+    }
+    if (this.highlighted) this.rebuildOutline();
   }
 
   setOutfit(outfit: Partial<Record<VisualPart, string>>) {

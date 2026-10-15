@@ -17,10 +17,12 @@ export const WEAPON_GRIPS: Record<string, {
   sword_soldier: { scale: 0.7, grip: 0.12 },
   sword_orc_warrior: { scale: 0.68, grip: 0.12 },
   sword_undead_king: { scale: 0.75, grip: 0.12 },
-  axe_orc_grunt: { scale: 0.7, grip: 0.16, roll: Math.PI },
-  axe_orc_chieftain: { scale: 0.78, grip: 0.16, roll: Math.PI },
-  axe_orc_peon: { scale: 0.78, grip: 0.18, roll: Math.PI },
-  axe: { scale: 0.78, grip: 0.18, roll: Math.PI },
+  // axes: `roll` turns the blade to face forward-down when the arm hangs (the way the chop lands), measured in
+  // viewer.html; π had every axe edge pointing back over the shoulder
+  axe_orc_grunt: { scale: 0.7, grip: 0.16, roll: -0.92 },
+  axe_orc_chieftain: { scale: 0.78, grip: 0.16, roll: -0.62 },
+  axe_orc_peon: { scale: 0.78, grip: 0.18, roll: -0.86 },
+  axe: { scale: 0.78, grip: 0.18, roll: -0.86 }, // also the per-quality GLB axes (axe_<quality>)
   hammer_human_paladin: { scale: 0.75, grip: 0.16 },
   dagger: { scale: 1.15, grip: 0.15 },
   reaper: { scale: 1.05, grip: 0.3, tilt: 0.1, out: 0.2, left: ['SlashAdvance'] },
@@ -157,6 +159,30 @@ function attachShield(hand: THREE.Object3D, name: string, left: boolean): THREE.
   holder.scale.setScalar(g.scale);
   hand.add(holder);
   return holder;
+}
+
+/**
+ * Armour quality pieces (tools/blender/armor_gear.py): GLB nodes `<name>__<bone>` authored in the characters' mesh
+ * space (bind pose, cm). Each hangs on its bone with the bone's inverse bind matrix, so it sits where it was built
+ * and follows the animation rigidly. Returns the attached pieces.
+ */
+export function attachTrim(character: THREE.Object3D, name: string): THREE.Object3D[] {
+  let sm: THREE.SkinnedMesh | null = null;
+  character.traverse((o) => { if (!sm && (o as THREE.SkinnedMesh).isSkinnedMesh) sm = o as THREE.SkinnedMesh; });
+  const skin = sm as THREE.SkinnedMesh | null;
+  if (!skin) return [];
+  const out: THREE.Object3D[] = [];
+  for (const piece of [...assets.clone(name).children]) {
+    const boneName = piece.name.split('__')[1];
+    const i = skin.skeleton.bones.findIndex((b) => b.name === boneName);
+    if (i < 0) continue;
+    const m = new THREE.Matrix4().copy(skin.skeleton.boneInverses[i]).multiply(skin.bindMatrix);
+    m.decompose(piece.position, piece.quaternion, piece.scale);
+    piece.name = 'trim';
+    skin.skeleton.bones[i].add(piece);
+    out.push(piece);
+  }
+  return out;
 }
 
 /**
