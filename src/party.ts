@@ -26,6 +26,8 @@ export interface ClassDef {
   offName: string;
   /** Slot 2 holds a pet (config PETS) instead of an item. */
   pet?: boolean;
+  /** Slot 2 always holds the kit's `left` item: it never drops and is never swapped or taken off. */
+  fixedOff?: boolean;
   /**
    * What the class holds when it first takes the field, and extra items put into the bag then (src/save.ts classKit);
    * missing = the faction's start weapon.
@@ -47,8 +49,8 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
   mage: {
     name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
     model: { human: 'mage', orc: 'orc_shaman' },
-    weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_vigor', 'orb_fury'], offName: 'Сфера',
-    kit: { hand: 'staff_fire', left: 'orb_fury' },
+    weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_vigor'], offName: 'Сфера', fixedOff: true,
+    kit: { hand: 'staff_fire', left: 'orb_vigor' },
   },
 };
 
@@ -66,6 +68,12 @@ export function classSlot(c: HeroClass, def: string): 0 | 1 | null {
 /** The class whose lists hold weapon def `def` (null: nobody's). */
 export function weaponClass(def: string): HeroClass | null {
   return CLASS_IDS.find((c) => CLASSES[c].weapons.includes(def) || CLASSES[c].off.includes(def)) ?? null;
+}
+
+/** Whether weapon def `def` can drop: it belongs to a class and is not a fixed class item (ClassDef.fixedOff). */
+export function droppable(def: string) {
+  const c = weaponClass(def);
+  return !!c && !(CLASSES[c].fixedOff && CLASSES[c].off.includes(def));
 }
 
 /** Body part on the hero → part file of the hunter sets. */

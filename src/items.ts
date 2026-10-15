@@ -173,9 +173,11 @@ export function itemName(it: Item, f: FactionId) {
   return it.name ?? (it.kind === 'weapon' ? WEAPONS[it.def].name : ARMOR[it.def].name[f]);
 }
 
-/** Icon id for icon(): weapon id or armour slot. */
+/** Icon id for icon(): the weapon's `<def>_<rarity>` PNG when there is one, else the weapon id; armour slot. */
 export function itemIconId(it: Item) {
-  return it.kind === 'weapon' ? it.def : ARMOR[it.def].slot;
+  if (it.kind !== 'weapon') return ARMOR[it.def].slot;
+  const tier = `${it.def}_${RARITY_IDS[it.rarity]}`;
+  return hasPng(tier) ? tier : it.def;
 }
 
 export function itemIcon(it: Item, size = 24) {

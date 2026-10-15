@@ -219,6 +219,11 @@ const PNG: Record<string, string> = {
   crit: 'i-crit', critdmg: 'i-critdmg', defense: 'i-defense',
   // coloured: damage of one blow (hammer), damage per second (sword); blue chevrons of dodge
   hit: 'i-hit', dps: 'i-dps', dodge: 'i-dodge',
+  // weapon item icons per rarity (`<def>_<rarity>`), rendered from their models
+  ...Object.fromEntries(['staff_fire', 'staff_ice', 'staff_wind', 'sword', 'axe', 'hammer', 'polearm', 'shield_tower',
+    'shield_buckler', 'shield_spiked', 'bow'].flatMap((def) =>
+    ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${def}_${r}`, `${def}_${r}`]))),
+  orb_vigor: 'orb_vigor', orb_fury: 'orb_fury',
 };
 /** The id has a pack PNG (art() draws it instead of the vector). */
 export const hasPng = (id: string) => !!PNG[id];

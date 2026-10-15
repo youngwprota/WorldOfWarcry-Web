@@ -152,17 +152,10 @@ function fitHands(d: SaveData, owner: HeroClass, hands: (Item | null)[]): SaveDa
   return out;
 }
 
-/** Mages from before the orbs: the kit's orbs once (left slot if free, the rest into the bag). */
+/** The mage's fixed orb (ClassDef.fixedOff) back into an empty slot: saves from before the orbs or with an orb taken off. */
 function giveOrbs(d: SaveData) {
-  const kit = CLASSES.mage.kit!;
   const hands = (d.kit ?? 'warrior') === 'mage' ? d.weapons : d.kits?.mage;
-  if (!hands) return;
-  const owned = [...hands, ...d.bag].some((it) => it && WEAPONS[it.def].orb);
-  if (owned) return;
-  for (const def of [kit.left!, ...(kit.bag ?? []).filter((x) => WEAPONS[x].orb)]) {
-    if (!hands[1]) hands[1] = makeItem('weapon', def, 0, 1);
-    else if (d.bag.length < BAG_SIZE) d.bag.push(makeItem('weapon', def, 0, 1));
-  }
+  if (hands && !hands[1]) hands[1] = makeItem('weapon', CLASSES.mage.kit!.left!, 0, 1);
 }
 
 /** Gear of a class taking the field for the first time (ClassDef.kit); its extra start items go into the bag. */
