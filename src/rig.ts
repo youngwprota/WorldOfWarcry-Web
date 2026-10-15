@@ -143,6 +143,30 @@ function attachShield(hand: THREE.Object3D, name: string, left: boolean): THREE.
 }
 
 /**
+ * Armour quality pieces (tools/blender/armor_gear.py): GLB nodes `<name>__<bone>` authored in the characters' mesh
+ * space (bind pose, cm). Each hangs on its bone with the bone's inverse bind matrix, so it sits where it was built
+ * and follows the animation rigidly. Returns the attached pieces.
+ */
+export function attachTrim(character: THREE.Object3D, name: string): THREE.Object3D[] {
+  let sm: THREE.SkinnedMesh | null = null;
+  character.traverse((o) => { if (!sm && (o as THREE.SkinnedMesh).isSkinnedMesh) sm = o as THREE.SkinnedMesh; });
+  const skin = sm as THREE.SkinnedMesh | null;
+  if (!skin) return [];
+  const out: THREE.Object3D[] = [];
+  for (const piece of [...assets.clone(name).children]) {
+    const boneName = piece.name.split('__')[1];
+    const i = skin.skeleton.bones.findIndex((b) => b.name === boneName);
+    if (i < 0) continue;
+    const m = new THREE.Matrix4().copy(skin.skeleton.boneInverses[i]).multiply(skin.bindMatrix);
+    m.decompose(piece.position, piece.quaternion, piece.scale);
+    piece.name = 'trim';
+    skin.skeleton.bones[i].add(piece);
+    out.push(piece);
+  }
+  return out;
+}
+
+/**
  * Left hand: mirror the right-hand holder across the hand's X (the bones match in bind pose), then turn it by
  * the left/right asymmetry of the Idle pose (hand_l⁻¹ · mirrored hand_r, measured on the shared Idle clip), so
  * the left weapon is the mirror image of the right one while standing.

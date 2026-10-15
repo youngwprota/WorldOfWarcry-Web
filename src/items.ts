@@ -15,6 +15,18 @@ export function itemModel(it: Item, faction: FactionId) {
   return w.guard || it.rarity > 0 ? `${it.def}_${RARITY_IDS[it.rarity]}` : w.model[faction];
 }
 
+/**
+ * Quality pieces worn over an armour item (tools/blender/armor_gear.py): body slots above common, the ring and the
+ * amulet at every quality. Loaded on demand (Character.setTrims), one GLB per item, fitted per faction.
+ */
+export function armorTrim(it: Item, faction: FactionId): string | null {
+  const d = ARMOR[it.def];
+  if (!d) return null;
+  const jewel = d.slot === 'ring' || d.slot === 'amulet';
+  if (!jewel && it.rarity === 0) return null;
+  return `armor_${jewel ? d.slot : d.id}_${RARITY_IDS[it.rarity]}_${faction}`;
+}
+
 /** Every per-quality GLB model (loaded up-front by main.ts). */
 export const GEAR_MODELS = Object.keys(WEAPONS).flatMap((def) =>
   RARITY_IDS.filter((_, r) => r > 0 || WEAPONS[def].guard).map((id) => `${def}_${id}`));

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import './grade';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { assets, ANIMS } from './assets';
-import { attachWeapon, SHIELD_GRIP } from './rig';
+import { attachTrim, attachWeapon, SHIELD_GRIP } from './rig';
 import { KEYS, Swinger, type SwingKind } from './swing';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -53,6 +53,11 @@ const isGear = (n: string) => /_(common|uncommon|rare|epic|legendary|mythic)$/.t
 const all = [...new Set([...pairs.flat(), ...props, leftName].filter((n): n is string => !!n))];
 if (!gallery) await Promise.all([assets.loadAll(all.filter((n) => !isGear(n)), () => {}), assets.loadGear(all.filter(isGear))]);
 
+/** Armour sets of src/items.ts SETS: character → [set id, faction]. */
+const TRIM_SETS: Record<string, [string, string]> = {
+  soldier: ['guard', 'human'], human_knight: ['knight', 'human'], paladin: ['lord', 'human'],
+  orc_warrior: ['guard', 'orc'], orc_grunt: ['knight', 'orc'], orc_chieftain: ['lord', 'orc'],
+};
 const mixers: THREE.AnimationMixer[] = [];
 const swingers: { s: Swinger; g: THREE.Object3D }[] = [];
 const solo = new URLSearchParams(location.search).get('solo');
@@ -65,6 +70,15 @@ pairs.forEach(([c, w, l], i) => {
   // ?left=model — the same or another weapon in the left hand too (dual wield grip check)
   const left = new URLSearchParams(location.search).get('left');
   if (left || l) attachWeapon(g, left || l!, true);
+  // ?trims=armor_guard_head_rare_human,… — armour quality pieces on the character (fit check)
+  // ?trimq=rare — every armour-set character wears its own set's pieces of that quality, plus a ring and an amulet
+  const q = new URLSearchParams(location.search).get('trimq');
+  const set = q ? TRIM_SETS[c] : undefined;
+  const auto = set ? [...['head', 'chest', 'arms', 'legs'].map((p) => `armor_${set[0]}_${p}_${q}_${set[1]}`),
+    `armor_ring_${q}_${set[1]}`, `armor_amulet_${q}_${set[1]}`] : [];
+  for (const t of [...auto, ...(new URLSearchParams(location.search).get('trims')?.split(',').filter(Boolean) ?? [])]) {
+    assets.gear(t).then(() => attachTrim(g, t));
+  }
   const m = new THREE.AnimationMixer(g);
   m.clipAction(assets.clips.full.Idle).play();
   mixers.push(m);

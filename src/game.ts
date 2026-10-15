@@ -9,7 +9,7 @@ import {
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
-  ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemModel, itemName, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, armorTrim, copyGain, dropIconId, dropItem, itemModel, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
@@ -353,6 +353,7 @@ export class Game {
     this.hero = new Character(f.hero, null, 1);
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
+    this.hero.setTrims(this.trims());
     this.hero.setHighlight(true);
     this.hero.position.set(SPAWN.x, 0, SPAWN.z);
     this.hero.facing = Math.PI;
@@ -482,6 +483,17 @@ export class Game {
       if (src) o[part] = src;
     }
     return o;
+  }
+
+  /** Quality pieces of the equipped armour (armorTrim). */
+  trims(): string[] {
+    const out: string[] = [];
+    for (const s of ['head', 'chest', 'arms', 'legs', 'ring', 'amulet'] as ArmorSlot[]) {
+      const it = this.save.equip[s];
+      const n = it ? armorTrim(it, this.faction) : null;
+      if (n) out.push(n);
+    }
+    return out;
   }
 
   // ---------- main loop ----------
@@ -1553,6 +1565,7 @@ export class Game {
     const hpFrac = this.hp / this.maxHp;
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
+    this.hero.setTrims(this.trims());
     this.hp = Math.min(this.maxHp, Math.max(1, hpFrac * this.maxHp));
     this.resetHands();
     sfx.click();
@@ -1666,6 +1679,19 @@ export class Game {
     const old = this.save.weapons[slot];
     this.save.weapons[slot] = dropItem({ kind: 'weapon', def, rarity: 2 });
     if (old && this.save.bag.length < BAG_SIZE) this.save.bag.push(old);
+    this.afterGearChange();
+  }
+
+  /** Debug: a whole armour set with a ring and an amulet; the same set again is one quality higher. */
+  debugGiveArmor(set: string) {
+    const head = this.save.equip.head;
+    const rarity = head?.def === `${set}_head` ? (head.rarity + 1) % 6 : 1;
+    const defs: [ArmorSlot, string][] = [
+      ['head', `${set}_head`], ['chest', `${set}_chest`], ['arms', `${set}_arms`], ['legs', `${set}_legs`],
+      ['ring', 'ring_power'], ['amulet', 'amulet_life'],
+    ];
+    for (const [slot, def] of defs) this.save.equip[slot] = dropItem({ kind: 'armor', def, rarity });
+    this.fx.spawn(v1.copy(this.hero.position).setY(2.6), `${set} · ${rarity}`, 'dmg weak', 1);
     this.afterGearChange();
   }
 

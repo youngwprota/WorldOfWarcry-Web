@@ -78,9 +78,10 @@ class HeroPreview {
     this.loop();
   }
 
-  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>) {
+  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>, trims: string[]) {
     this.ch.setWeapon(weapon, left);
     this.ch.setOutfit(outfit);
+    this.ch.setTrims(trims);
   }
 
   nudge(dir: number) { this.vel = dir * 5; }
@@ -301,7 +302,7 @@ export class Inventory {
     q('#i-eq-l').innerHTML = armor(EQUIP_BAR.left);
     q('#i-eq-w').innerHTML = weapons;
     q('#i-eq-r').innerHTML = armor(EQUIP_BAR.right);
-    this.preview?.setGear(...g.handModels(), g.outfit());
+    this.preview?.setGear(...g.handModels(), g.outfit(), g.trims());
     g.newItems = 0;
   }
 

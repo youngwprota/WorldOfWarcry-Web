@@ -112,11 +112,25 @@ class Assets {
     );
   }
 
+  private gearLoads = new Map<string, Promise<void>>();
+
+  /** One gear GLB on demand (armour trims): resolves when `name` is ready; loads it once. */
+  gear(name: string): Promise<void> {
+    if (this.sources.has(name)) return Promise.resolve();
+    let p = this.gearLoads.get(name);
+    if (!p) {
+      p = this.loadGear([name]).catch((e) => { this.gearLoads.delete(name); throw e; });
+      this.gearLoads.set(name, p);
+    }
+    return p;
+  }
+
   private lambert(src: THREE.Material) {
     const s = src as THREE.MeshStandardMaterial;
     let m = this.materials.get('gear:' + s.name);
     if (!m) {
-      m = new THREE.MeshLambertMaterial({
+      // `*_glow` (armour gems and shards): unlit vertex colour reads as glowing without bloom
+      m = s.name.endsWith('_glow') ? new THREE.MeshBasicMaterial({ vertexColors: true }) : new THREE.MeshLambertMaterial({
         color: s.color, vertexColors: s.vertexColors, emissive: s.emissive, emissiveIntensity: s.emissiveIntensity, flatShading: true,
       });
       m.name = s.name;
