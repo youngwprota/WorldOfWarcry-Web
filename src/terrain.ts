@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { ZONES } from './config';
 import {
-  BRANCH_PATHS, GATE, GATES, ISLAND, LAND_TRAILS, MAP_BOX, NZ, PATH, PATH_W, ZGRID, ZONE_INDEX, angleOf, fbm, heightAt, inCamp, outside, pathDist, rimCliff, smooth,
+  BRANCH_PATHS, GATE, ISLAND, LAND_TRAILS, OLD_TRAIL, MAP_BOX, NZ, PATH, PATH_W, ZGRID, ZONE_INDEX, angleOf, fbm, heightAt, inCamp, outside, pathDist, rimCliff, smooth,
   walkable, zoneGrid, zoneIdAt, zoneWeights,
 } from './island';
 
@@ -132,7 +132,6 @@ export function bakeGroundMaps(ponds: Pond[]) {
   g.imageSmoothingQuality = 'high';
   g.drawImage(base, 0, 0, G, G);
   drawTrail(g, G / MAP_BOX.size, PATH_W);
-  drawGatePaths(g, G / MAP_BOX.size, PATH_W * 1.5);
   drawLandTrails(g, G / MAP_BOX.size, PATH_W);
 
   // map picture: ground + ocean (+ a slightly wider trail so it reads at minimap scale)
@@ -147,7 +146,6 @@ export function bakeGroundMaps(ponds: Pond[]) {
   seaCanvas.getContext('2d')!.putImageData(sea, 0, 0);
   m.drawImage(seaCanvas, 0, 0, M, M);
   drawTrail(m, M / MAP_BOX.size, 1.8, true);
-  drawGatePaths(m, M / MAP_BOX.size, 2.2, true);
   drawLandTrails(m, M / MAP_BOX.size, 1.8);
   const shoreTex = new THREE.DataTexture(shore, N, N, THREE.RGBAFormat);
   shoreTex.magFilter = shoreTex.minFilter = THREE.LinearFilter;
@@ -196,31 +194,6 @@ function drawTrail(g: CanvasRenderingContext2D, ppm: number, width: number, flat
   g.globalAlpha = 1;
 }
 
-/** A short worn path through each passage between locations (the doors of the hub are on the trail). */
-function drawGatePaths(g: CanvasRenderingContext2D, ppm: number, width: number, flat = false) {
-  const X = (x: number) => (x - MAP_BOX.x) * ppm;
-  const Z = (z: number) => (z - MAP_BOX.z) * ppm;
-  g.lineCap = 'round';
-  g.strokeStyle = DIRT;
-  for (const G of GATES) {
-    if (G.from === 'forest') continue;
-    const line = (len: number, wm: number, alpha: number) => {
-      g.globalAlpha = alpha;
-      g.lineWidth = wm * ppm;
-      g.beginPath();
-      g.moveTo(X(G.x - G.tx * len), Z(G.z - G.tz * len));
-      g.lineTo(X(G.x + G.tx * len), Z(G.z + G.tz * len));
-      g.stroke();
-    };
-    if (flat) { line(8, width, 0.8); continue; }
-    // fades out at both ends: wide faint strokes under a narrower, shorter core
-    line(9, width * 1.6, 0.18);
-    line(8, width * 1.2, 0.3);
-    line(6.5, width, 0.85);
-  }
-  g.globalAlpha = 1;
-}
-
 /** Worn paths through the other locations: a soft underlay and a core, like the trail without the speckles. */
 function drawLandTrails(g: CanvasRenderingContext2D, ppm: number, width: number) {
   const X = (x: number) => (x - MAP_BOX.x) * ppm;
@@ -247,6 +220,18 @@ function drawLandTrails(g: CanvasRenderingContext2D, ppm: number, width: number)
       }
       g.stroke();
     }
+  }
+  // the abandoned path fades out piece by piece past the Snow Pass gate
+  g.strokeStyle = CEM_DIRT;
+  g.lineCap = 'butt';
+  g.lineWidth = width * ppm;
+  const n = OLD_TRAIL.x.length - 1;
+  for (let i = 0; i < n; i++) {
+    g.globalAlpha = 0.55 * (1 - smooth(0.4, 1, i / n));
+    g.beginPath();
+    g.moveTo(X(OLD_TRAIL.x[i]), Z(OLD_TRAIL.z[i]));
+    g.lineTo(X(OLD_TRAIL.x[i + 1]), Z(OLD_TRAIL.z[i + 1]));
+    g.stroke();
   }
   g.globalAlpha = 1;
 }

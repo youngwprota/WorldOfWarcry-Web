@@ -3,11 +3,13 @@ import { Character } from './character';
 import { Trail } from './swing';
 import { Creature } from './creature';
 import { StaticBody } from './staticbody';
+import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
+import type { BossHost, BossKit } from './bosses/kit';
 import {
-  COMBOS, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
-  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type StatId, type WeaponDef, type ZoneDef, isPctStat,
+  ATTACK_HIT, COMBOS, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS, casterModel,
+  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
-import { FloatingText, Particles, Pickups, Shockwaves, Spells, Telegraphs, type PickupKind } from './fx';
+import { ArenaFog, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, Telegraphs, type Bolt, type PickupKind } from './fx';
 import {
   ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemClass, itemModel, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
@@ -19,13 +21,18 @@ import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, archerBow, archerSet, classSlot, k
 import { assets } from './assets';
 import { Arrows } from './arrows';
 import { PET_SEEK, Pet } from './pet';
-import { GATE, SPAWN, inCamp, pathAt, progressAt } from './island';
+import { GATE, ISLAND, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
 import { UI, type MapMark } from './ui';
 import { fmtK, lootHtml, resistIcons } from './icons';
 import { heroDeaths, logFight, logSnap } from './balancelog';
-import { addPct, addStat, armorMul, critAvg, critChance, critMul, dodgeChance, gearOf, guardMul, heroDps, heroStats } from './balance';
+import { addPct, addStat, armorMul, critAvg, critChance, critMul, dodgeChance, gearOf, guardMul, heroDps, heroStats, statBreakdown } from './balance';
 
+/** Death's effects (souls, the ritual, the reap, its blows), teal like its skin, and the fog around them. */
+const SOUL_GREEN = 0x4fe3c4;
+const SOUL_FOG = 0x3fb89a;
+const SOUL_BARKS = ['Восстаньте, души!', 'Служите мне вечно!', 'Ваши кости — мои!'];
+const releaseHold = (m: Mob, anim: BossAnim, impactIn: number) => { if (m.ch instanceof Character) m.ch.release(anim, impactIn); };
 /** Debris colour of hits and kills: bone dust for skeletons and spirits, blood for the rest. */
 const bloodColor = (m: Mob) => m.def.id.startsWith('skel') || m.def.id === 'ghost' || m.def.id === 'death' ? 0xd8d4c8 : 0xc0392b;
 /** White-yellow sparks of a non-lethal hit (blood is for the kill). */
@@ -127,7 +134,7 @@ abstract class Unit {
   }
 }
 
-class Mob extends Unit {
+export class Mob extends Unit {
   readonly kind = 'mob';
   ch: Character | Creature | StaticBody;
   state: 'idle' | 'chase' | 'return' | 'dead' = 'idle';
@@ -163,6 +170,15 @@ class Mob extends Unit {
   cycle = 0;
   /** Reinforcement of this boss: removed when the fight resets, pays no gacha pull. */
   owner: Mob | null = null;
+  /** Death's soul: the hero walks through it. */
+  passable = false;
+  /** Death: seconds since the last soul rose, and seconds left of the summoning flight (untargetable meanwhile). */
+  soulT = 0;
+  ritual = 0;
+  burstDue = false;
+  /** Boss: `animNext` starts in `animDelay` s (a cone clip timed to its telegraph); -1 = none. */
+  animDelay = -1;
+  animNext: BossAnim = 'MeleeHigh';
   awake = true;
   /** Depth-scaled stats (DEPTH in config): use these instead of def.dmg / def.reward. */
   dmg: number;
@@ -180,7 +196,7 @@ class Mob extends Unit {
     // a micro-boss's is orange, an elite's has its drop's quality colour. Over the bar: the loot (lootHtml);
     // right of it: weaknesses and resistances.
     const reward: Partial<Record<OrbKind, number>> = {};
-    for (const [k, n] of Object.entries(def.reward) as [OrbKind, number][]) reward[k] = Math.round(n * mul.reward);
+    for (const [k, n] of Object.entries(def.reward) as [OrbKind, number][]) if (n) reward[k] = Math.round(n * mul.reward);
     const named = !!(def.boss || def.rank);
     const title = def.boss ? `<div class="bname">${def.boss.titles[faction]}</div>`
       : def.rank === 'mini' ? `<div class="bname" style="color:${MARK_COLOR.mini}">${def.name}</div>`
@@ -210,7 +226,7 @@ class Mob extends Unit {
   get visible() { return this.ch.root.visible; }
   get boss() { return !!this.def.boss; }
   get mark() { return this.def.boss ? 'boss' as const : this.def.rank ?? null; }
-  get hittable() { return this.alive && this.awake && this.rise <= 0; }
+  get hittable() { return this.alive && this.awake && this.rise <= 0 && this.ritual <= 0; }
   get barY() { return (this.ch instanceof StaticBody ? this.ch.height + 0.3 : 2.15 * this.def.scale) * this.ch.root.scale.x; }
   get barRange() { return this.def.boss || this.def.rank ? 24 : 16; }
   get loaderReady() { return !this.temp && ((!this.dying && this.deadT - this.paidAt > 2.2) || this.boss); }
@@ -232,6 +248,10 @@ class Mob extends Unit {
     this.hp = this.maxHp;
     this.phase2 = false;
     this.adds = 0;
+    this.soulT = 0;
+    this.ritual = 0;
+    this.burstDue = false;
+    this.animDelay = -1;
     this.cycle = 0;
     this.special = 4;
     this.casting = 0;
@@ -317,6 +337,9 @@ export class Game {
   private windN = 0;
   /** Wind orbs in flight (pooled: `it` null = free): where they land, seconds left, the staff that threw them. */
   private gusts: { at: THREE.Vector3; t: number; it: Item | null }[] = [];
+  private puffs: FogPuffs;
+  /** Fog ring around each Death-like boss's arena (BossDef.souls), shown while it fights. */
+  private arenas = new Map<Mob, ArenaFog>();
   /** Attack state per hand (save.weapons[0] right, [1] left). */
   private hands: [Hand, Hand] = [newHand(0), newHand(1)];
   private comboShown = -1;
@@ -324,6 +347,12 @@ export class Game {
   /** Hit-stop / slow motion: game time runs at `slowK` for `slowT` more real seconds. */
   private slowT = 0;
   private slowK = 1;
+  /** Boss kits (src/bosses), one per boss mob, made on its first fight. */
+  private kits = new Map<Mob, BossKit | null>();
+  /** Hero run speed multiplier set by boss kits for the next frame (BossHost.slowHero). */
+  private heroSlow = 1;
+  /** Short-lived obstacles from boss kits (BossHost.addBlocker). */
+  private blockers: { x: number; z: number; r: number; until: number }[] = [];
   /** Camera push-in 0..1 (assassin strike), eases back by itself. */
   private zoom = 0;
   /** Shove from mob hits (MobDef.push), decays like mob knockback. */
@@ -428,6 +457,7 @@ export class Game {
     this.waves = new Shockwaves(this.scene);
     this.spells = new Spells(this.scene);
     this.syncPet();
+    this.puffs = new FogPuffs(this.scene);
     // (no camp NPC by the gate for now: src/npc.ts CampNpc is kept for later)
     this.camPos.copy(this.hero.position);
     this.refreshHud(true);
@@ -590,9 +620,10 @@ export class Game {
     // the hunter in a debug set: all four parts of that quality
     if (this.heroClass === 'hunter' && this.archerLook.rarity >= 0) return archerSet(this.faction, this.archerLook.rarity);
     const o: Partial<Record<VisualPart, string>> = {};
+    const caster = this.heroClass === 'mage'; // armour is a class skin: the caster part of the item's rarity
     for (const part of ['head', 'chest', 'arms', 'legs'] as VisualPart[]) {
       const it = this.save.equip[part];
-      const src = it ? ARMOR[it.def].source?.[this.faction] : undefined;
+      const src = !it ? undefined : caster ? casterModel(this.faction, it.rarity) : ARMOR[it.def].source?.[this.faction];
       if (src) o[part] = src;
     }
     return o;
@@ -612,6 +643,7 @@ export class Game {
     if (this.input.pressed('KeyM')) { this.onOpenMap(); return; }
     if (this.input.pressed('KeyG')) { this.onOpenGacha(); return; }
     for (const c of CLASS_IDS) if (this.input.pressed(CLASSES[c].key)) this.switchClass(c);
+    if (this.blockers.some((b) => b.until <= this.time)) this.blockers = this.blockers.filter((b) => b.until > this.time);
     this.updateHero(dt);
     this.updateMobs(dt);
     this.updatePet(dt);
@@ -624,6 +656,8 @@ export class Game {
     this.waves.update(dt);
     this.updateGusts(dt);
     this.spells.update(dt);
+    this.puffs.update(dt);
+    for (const a of this.arenas.values()) a.update(dt, this.time);
     this.world.update(dt, this.time, this.hero.position);
     this.render(dt);
     this.saveT += dt;
@@ -701,9 +735,11 @@ export class Game {
     const moving = Math.hypot(ix, iy) > 0.05;
     this.moveDir.set(ix, 0, iy);
     const p = ch.position;
+    const speed = this.speed * this.heroSlow;
+    this.heroSlow = 1;
     if (moving) {
-      p.addScaledVector(this.moveDir, this.speed * dt);
-      ch.walkRate = Math.min(2.4, (this.speed * this.moveDir.length()) / 2.1);
+      p.addScaledVector(this.moveDir, speed * dt);
+      ch.walkRate = Math.min(2.4, (speed * this.moveDir.length()) / 2.1);
     }
     if (this.heroKnock.lengthSq() > 0.001) {
       p.addScaledVector(this.heroKnock, dt);
@@ -711,7 +747,7 @@ export class Game {
     }
     // soft push from living mobs
     for (const m of this.mobs) {
-      if (!m.alive || !m.awake || m.rise > 0) continue;
+      if (!m.alive || !m.awake || m.rise > 0 || m.ritual > 0 || m.passable) continue;
       const dx = p.x - m.pos.x;
       const dz = p.z - m.pos.z;
       const rr = m.radius + HERO.radius;
@@ -724,6 +760,7 @@ export class Game {
       }
     }
     this.world.collide(p, HERO.radius);
+    this.collideBlockers(p, HERO.radius);
 
     // targeting (GDD 6.2): keep the current target while it can be struck; once it is out of the strike
     // distance (or it is a prop and a mob came in) switch to the best unit that can. With nothing else to
@@ -843,11 +880,17 @@ export class Game {
     }
     if (h.launch >= 0) {
       h.launch -= dt;
-      if (h.launch < 0 && w.staff && t) this.spells.bolt(this.castPoint(v1), t.pos, h.flight, STAVES[w.staff].bolt);
+      if (h.launch < 0 && w.staff && t) { h.bolt = this.spells.bolt(this.castPoint(v1), t.pos, h.flight, STAVES[w.staff].bolt); h.aim = t; }
+    }
+    // the mob left the staff's reach: the bolt fizzles and the hit is lost
+    if (h.bolt && h.impact >= 0 && !this.inStrike(h.aim!, w.range)) {
+      this.spells.drop(h.bolt);
+      h.impact = -1;
     }
     if (h.impact >= 0) {
       h.impact -= dt;
       if (h.impact < 0) this.heroStrike(h);
+      if (h.impact < 0) { h.bolt = null; h.aim = null; }
     }
   }
 
@@ -1146,12 +1189,18 @@ export class Game {
       return;
     }
     if (m.burn > 0) dmg = Math.round(dmg * (1 + STAVES.fire.burn.vuln));
+    const kit = this.kitOf(BOSS_KITS[m.def.id] ? m : m.owner);
+    if (kit?.damageTaken) {
+      dmg = Math.round(kit.damageTaken(m, dmg, fx === 'crit'));
+      // the kit shows its own text for a blocked hit
+      if (dmg <= 0) { m.state = m.state === 'return' ? 'return' : 'chase'; return; }
+    }
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
     m.hp -= dmg;
     m.hurtAt = this.time;
     m.ch.hit();
     if (aggro) m.state = m.state === 'return' ? 'return' : 'chase';
-    if (aggro && !m.def.boss && !m.passive) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
+    if (aggro && (!m.def.boss || this.kitOf(m)?.knockable) && !m.passive) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
     const head = this.unitTextAt(m);
     const lift = m.uiEl.offsetHeight;
     const text = fx === 'crit' ? `-${fmtK(dmg)}!` : `-${fmtK(dmg)}`;
@@ -1185,6 +1234,8 @@ export class Game {
     this.unitDied(m, false);
     if (d.boss) this.killBoss(m);
     else {
+      const kit = this.kitOf(m);
+      if (kit) { kit.died?.(); this.despawnMinions(m); }
       // elites: their own item on every kill (spawner charges limit the farming)
       if (d.drop) m.loot.push(dropItem(d.drop));
       if (m.temp) m.respawnAt = Infinity;
@@ -1270,6 +1321,7 @@ export class Game {
     m.respawnAt = this.time + d.respawn;
     m.respawnTotal = d.respawn;
     this.telegraphs.clear();
+    this.kitOf(m)?.died?.();
     this.despawnMinions(m);
     this.shake = 0.6;
     sfx.levelUp();
@@ -1330,6 +1382,7 @@ export class Game {
       m.awake = dHero < 40;
       m.ch.root.visible = m.state !== 'dead' ? dHero < 34 : m.ch.root.visible && dHero < 34;
       if (m.state === 'dead') {
+        this.arenas.get(m)?.set(false);
         const holdEnd = KILL_FX.holdAt + KILL_FX.freeze;
         const held = m.deadT < holdEnd;
         m.deadT += dt;
@@ -1358,6 +1411,23 @@ export class Game {
       }
       // a static unit only stands: no chasing, no blows, no wandering
       if (m.passive) { m.ch.update(dt, false); continue; }
+      if (def.boss?.souls) {
+        if (m.state === 'chase') this.raiseSouls(m, def.boss.souls, dt);
+        let arena = this.arenas.get(m);
+        if (!arena) this.arenas.set(m, arena = new ArenaFog(this.scene, this.puffs, m.spawn, 16, SOUL_FOG));
+        arena.set(m.state === 'chase');
+        // the boss itself smokes with soul fog
+        if (m.visible && Math.random() < dt * 14) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.4 + Math.random() * 0.9;
+          v1.set(m.pos.x + Math.sin(a) * r, m.pos.y + 0.4 + Math.random() * 2.6, m.pos.z + Math.cos(a) * r);
+          this.puffs.spawn(v1, SOUL_FOG, 1 + Math.random() * 1.2, 1.6, 0.4);
+        }
+      }
+      if (m.animDelay >= 0) {
+        m.animDelay -= dt;
+        if (m.animDelay < 0) m.ch.attack(m.animNext, ATTACK_HIT[m.animNext] + 0.5, ATTACK_HIT[m.animNext]);
+      }
       if (m.stun > 0) {
         m.stun -= dt;
       } else if (m.casting > 0) {
@@ -1379,17 +1449,21 @@ export class Game {
             }
           }
         } else if (m.state === 'chase') {
-          if (this.dead || heroInCamp || dSpawn > leash || hp.distanceTo(m.spawn) > leash + 4) {
+          // Death's souls have no leash: they chase the hero even after their boss gives up
+          const outOfLeash = !m.passable && (dSpawn > leash || hp.distanceTo(m.spawn) > leash + 4);
+          if (this.dead || heroInCamp || outOfLeash) {
             m.state = 'return';
             this.endFight(m, 'reset');
-            if (def.boss) { m.adds = 0; this.despawnMinions(m); }
+            if (def.boss) { m.adds = 0; m.soulT = 0; m.ritual = 0; m.pos.y = 0; releaseHold(m, def.boss.souls?.anim ?? 'MeleeHigh', 0.3); m.burstDue = false; m.animDelay = -1; this.despawnMinions(m, true); }
+            else if (this.kitOf(m)) this.despawnMinions(m);
+            this.kitOf(m)?.reset?.();
           } else {
             const reach = def.range + m.radius * 0.5 + HERO.radius;
             if (def.boss) {
               // A boss on your tail keeps you in combat: no out-of-combat regen while kiting.
               this.bossLogic(m, dt, dHero);
-            }
-            if (m.casting <= 0) {
+            } else this.kitOf(m)?.fight?.(dt, dHero);
+            if (m.casting <= 0 && m.ritual <= 0) {
               const back = m.ch instanceof Creature ? m.ch.backstep() : 0;
               if (back > 0) {
                 m.pos.x -= Math.sin(m.ch.facing) * back;
@@ -1400,9 +1474,9 @@ export class Game {
               if (dHero < reach && m.atkCd <= 0 && m.impact < 0) {
                 const period = 1 / def.aps;
                 const impactAt = mobImpact(m.ch.hitTime(def.anim), period);
-                m.ch.attack(def.anim, period, impactAt);
+                // the next swing waits for this clip to finish
+                m.atkCd = m.ch.attack(def.anim, period, impactAt);
                 m.impact = impactAt;
-                m.atkCd = period;
               }
             }
           }
@@ -1449,8 +1523,15 @@ export class Game {
         }
       }
       this.world.collide(m.pos, m.radius);
+      this.collideBlockers(m.pos, m.radius);
       // mobs never enter the camp
-      if (m.pos.z > -20) m.pos.z = -20;
+      if (inCamp(m.pos.x, m.pos.z, m.radius)) {
+        const dx = m.pos.x - ISLAND.campX;
+        const dz = m.pos.z - ISLAND.campZ;
+        const k = (ISLAND.campR + m.radius) / (Math.hypot(dx, dz) || 1);
+        m.pos.x = ISLAND.campX + dx * k;
+        m.pos.z = ISLAND.campZ + dz * k;
+      }
       m.ch.update(dt, moving, dHero < 34 && this.time - m.hurtAt >= HIT_FREEZE && m.frozen <= 0);
     }
     if (removed) {
@@ -1521,15 +1602,21 @@ export class Game {
     }
     if (b.reinforce && m.adds < b.reinforce.at.length && m.hp < m.maxHp * b.reinforce.at[m.adds]) {
       while (m.adds < b.reinforce.at.length && m.hp < m.maxHp * b.reinforce.at[m.adds]) m.adds++;
-      this.callReinforcements(m, b.reinforce.pool);
+      this.callReinforcements(m, b.reinforce);
     }
+    const kit = this.kitOf(m);
+    kit?.fight?.(dt, dHero);
+    if (kit?.ownSpecials) return;
     m.special -= dt;
-    if (m.special > 0 || m.impact >= 0) return;
+    if (m.special > 0 || m.impact >= 0 || m.ritual > 0) return;
     // Specials wait until the hero is in reach: no slams into thin air while the hero runs off.
     const chase = m.phase2 && dHero < b.chaseRange && Math.random() < b.chance;
-    // cycle step 0 = the slam around the boss, 1.. = the cones in order
-    const step = b.cones ? m.cycle % (b.cones.length + 1) : 0;
-    const cone = step > 0 ? b.cones![step - 1] : null;
+    // cycle step 0 = the slam around the boss (unless noSlam), then the cones in order, then the reap
+    const cones = b.cones?.length ?? 0;
+    const attacks = cones + (b.reap ? 1 : 0);
+    const slam0 = b.noSlam && attacks ? 0 : 1;
+    const step = m.cycle % (attacks + slam0) - slam0;
+    const cone = step < 0 ? null : step < cones ? b.cones![step] : b.reap!;
     if (!chase && dHero > (cone ? cone.len * 0.75 : b.slamRadius) + HERO.radius) return;
     m.special = m.phase2 ? b.cdPhase2 : b.cd;
     if (!chase) m.cycle++;
@@ -1538,7 +1625,8 @@ export class Game {
         if (m.state === 'dead') return;
         sfx.slam();
         this.shake = Math.max(this.shake, 0.45);
-        this.particles.burst(v2.copy(at).setY(0.2), 0x8a7a6a, 14, 0.18, 7, 0.7);
+        this.particles.burst(v2.copy(at).setY(0.2), b.souls ? SOUL_GREEN : 0x8a7a6a, 14, 0.18, 7, 0.7);
+        if (b.souls) this.puffs.cloud(at, radius, SOUL_FOG, 10);
         const f = this.fightOf(m);
         f.slams++;
         if (!this.dead && this.hero.position.distanceTo(at) < radius + HERO.radius) {
@@ -1557,13 +1645,18 @@ export class Game {
         }, i * b.chaseGap * 1000);
       }
     } else if (cone) {
-      m.casting = 1.35;
-      m.ch.attack('AxeAttack', 1.35, 1.25);
+      const delay = cone.delay ?? b.slamDelay;
+      // stands still through the clip's follow-through, so the next swing does not cut it
+      const follow = cone.anim && m.ch instanceof Character ? m.ch.clipLength(cone.anim) - ATTACK_HIT[cone.anim] : 0.1;
+      m.casting = delay + follow;
+      // a cone's own clip starts so that its hit marker lands with the telegraph
+      if (cone.anim) { m.animDelay = Math.max(0, delay - ATTACK_HIT[cone.anim]); m.animNext = cone.anim; }
+      else m.ch.attack('AxeAttack', 1.35, 1.25);
       const yaw = Math.atan2(this.hero.position.x - m.pos.x, this.hero.position.z - m.pos.z);
       m.ch.facing = yaw;
-      for (const off of cone.yaws) {
-        const tag: ConeTag = { boss: m, at: m.pos.clone(), yaw: yaw + off, half: cone.half, len: cone.len, mul: cone.mul };
-        this.telegraphs.addCone(tag.at, tag.yaw, cone.half, cone.len, b.slamDelay, this.coneHit, tag);
+      for (const off of 'yaws' in cone ? cone.yaws : [0]) {
+        const tag: ConeTag = { boss: m, at: m.pos.clone(), yaw: yaw + off, half: cone.half, len: cone.len, mul: cone.mul, reap: 'heal' in cone ? cone.heal : undefined };
+        this.telegraphs.addCone(tag.at, tag.yaw, cone.half, cone.len, delay, this.coneHit, tag);
       }
     } else {
       m.casting = 1.35;
@@ -1577,27 +1670,131 @@ export class Game {
     if (c.boss.state === 'dead') return;
     sfx.slam();
     this.shake = Math.max(this.shake, 0.35);
-    this.particles.burst(v2.set(c.at.x + Math.sin(c.yaw) * c.len * 0.5, 0.2, c.at.z + Math.cos(c.yaw) * c.len * 0.5), 0x8a7a6a, 10, 0.18, 7, 0.7);
+    const souls = !!c.boss.def.boss!.souls;
+    v2.set(c.at.x + Math.sin(c.yaw) * c.len * 0.5, 0.2, c.at.z + Math.cos(c.yaw) * c.len * 0.5);
+    this.particles.burst(v2, souls ? SOUL_GREEN : 0x8a7a6a, 10, 0.18, 7, 0.7);
+    if (souls) this.puffs.cloud(v2, c.len * 0.4, SOUL_FOG, 8);
     const f = this.fightOf(c.boss);
     f.slams++;
-    if (this.dead) return;
-    const dx = this.hero.position.x - c.at.x;
-    const dz = this.hero.position.z - c.at.z;
-    const d = Math.hypot(dx, dz);
-    if (d > c.len + HERO.radius) return;
-    const a = Math.atan2(dx, dz) - c.yaw;
-    const off = Math.atan2(Math.sin(a), Math.cos(a));
-    // the hero's body widens the cone a little
-    if (Math.abs(off) > c.half + Math.asin(Math.min(1, HERO.radius / Math.max(d, HERO.radius)))) return;
+    if (c.reap) this.reapSouls(c);
+    if (this.dead || !inCone(c, this.hero.position, HERO.radius)) return;
     f.slamHits++;
     this.hurtHero(c.boss.dmg * c.mul, c.at, c.boss);
   };
 
-  /** 3–4 mobs of different kinds run in from the fort entrance and go for the hero. */
-  private callReinforcements(boss: Mob, pool: string[]) {
-    const e = this.world.fortExit;
-    const kinds = pool.slice().sort(rndSort).slice(0, 3 + Math.floor(Math.random() * 2));
-    this.fx.spawn(v1.copy(boss.pos).setY(5.6), 'Ко мне, ребята!', 'bark', 2);
+  /** Scythe sweep (BossDef.reap): every soul of the boss inside the cone dies, each heals the boss by `reap` of its max HP. */
+  private reapSouls(c: ConeTag) {
+    let n = 0;
+    for (const m of this.mobs) {
+      if (m.owner !== c.boss || !m.alive || !inCone(c, m.pos, m.radius)) continue;
+      this.particles.burst(v2.copy(m.pos).setY(1), SOUL_GREEN, 6, 0.1, 4, 0.5);
+      this.killMob(m);
+      n++;
+    }
+    if (!n) return;
+    const b = c.boss;
+    const heal = Math.min(b.maxHp - b.hp, Math.round(b.maxHp * c.reap! * n));
+    b.hp += heal;
+    this.fx.spawn(this.unitTextAt(b), `+${fmtK(heal)}`, 'loot', 1.2, { color: '#6cff7a', lift: b.uiEl.offsetHeight });
+    this.fx.spawn(v1.copy(b.pos).setY(5.6), 'Ваша жизнь — моя!', 'bark', 1.8);
+    this.waves.add(b.pos, 2.5, SOUL_GREEN, 0.5);
+    this.puffs.cloud(b.pos, 2.5, SOUL_FOG, 8);
+  }
+
+  /**
+   * Death's souls: one every `every` s of the fight. At each HP threshold Death flies up, hangs untargetable while a
+   * green aura pulses under it, raises the burst and comes back down with a swipe.
+   */
+  private raiseSouls(m: Mob, s: SoulsDef, dt: number) {
+    const f = s.fly;
+    const total = f.up + f.hover + f.down;
+    if (m.ritual <= 0 && m.adds < s.burstAt.length && m.hp < m.maxHp * s.burstAt[m.adds]) {
+      while (m.adds < s.burstAt.length && m.hp < m.maxHp * s.burstAt[m.adds]) m.adds++;
+      m.ritual = total;
+      m.burstDue = true;
+      m.impact = -1;
+      this.arenas.get(m)?.flare();
+      // the swipe holds on its first frame while it rises and hangs
+      m.ch.attack(s.anim, total, total);
+      if (m.ch instanceof Character) m.ch.holdAt(0);
+      if (this.target === m) this.target = null;
+      this.fx.spawn(v1.copy(m.pos).setY(5.6), SOUL_BARKS[Math.floor(Math.random() * SOUL_BARKS.length)], 'bark', 2.2);
+      this.puffs.cloud(m.pos, 1.5, SOUL_FOG, 10);
+      sfx.telegraph();
+    }
+    if (m.ritual > 0) {
+      const before = m.ritual;
+      m.ritual -= dt;
+      const t = total - Math.max(0, m.ritual);
+      m.ch.facing = turn(m.ch.facing, Math.atan2(this.hero.position.x - m.pos.x, this.hero.position.z - m.pos.z), dt * 6);
+      const ease = (k: number) => k * k * (3 - 2 * k);
+      // up, a slow bob while hanging, then a fast drop
+      m.pos.y = t < f.up ? f.height * ease(t / f.up)
+        : t < f.up + f.hover ? f.height + 0.15 * Math.sin((t - f.up) * 5)
+        : f.height * (1 - Math.min(1, (t - f.up - f.hover) / f.down) ** 2);
+      if (m.burstDue && t >= f.up + f.hover) {
+        m.burstDue = false;
+        this.shake = Math.max(this.shake, 0.35);
+        for (let i = 0; i < s.burst; i++) this.raiseSoul(m, s);
+        // the held swipe goes on, its blow lands with the boss
+        releaseHold(m, s.anim, f.down);
+      }
+      // the aura pulses under the boss every 0.4 s of the flight
+      if (Math.ceil(before / 0.4) !== Math.ceil(Math.max(0, m.ritual) / 0.4)) {
+        this.waves.add(m.pos, s.ring[1], SOUL_GREEN, 0.7);
+        this.puffs.cloud(v1.copy(m.pos).setY(0), 2, SOUL_FOG, 3);
+      }
+      if (m.ritual <= 0) {
+        m.pos.y = 0;
+        this.shake = Math.max(this.shake, 0.4);
+        this.waves.add(m.pos, 3.5, SOUL_GREEN, 0.45);
+        this.particles.burst(v1.copy(m.pos).setY(0.2), SOUL_GREEN, 14, 0.16, 6, 0.8);
+        this.puffs.cloud(m.pos, 3, SOUL_FOG, 14);
+        sfx.slam();
+      }
+    }
+    m.soulT += dt;
+    if (m.soulT >= s.every) {
+      m.soulT = 0;
+      this.raiseSoul(m, s);
+    }
+  }
+
+  /** One soul crawls out `ring` m from the boss, anywhere but the cone behind it; HP = `hits` weakest blows of the hero. */
+  private raiseSoul(boss: Mob, s: SoulsDef) {
+    const a = boss.ch.facing + (Math.random() * 2 - 1) * (Math.PI - s.backHalf);
+    const r = s.ring[0] + Math.random() * (s.ring[1] - s.ring[0]);
+    const at = new THREE.Vector3(boss.pos.x + Math.sin(a) * r, 0, boss.pos.z + Math.cos(a) * r);
+    this.world.collide(at, 0.45);
+    const m = this.addMob(MOBS[s.mob], at, this.labels);
+    const it = this.weaponItem;
+    const blow = this.itemDamage(it) * RESIST_MULT[m.def.resist[WEAPONS[it.def].type] ?? 'normal'];
+    // damageFor rolls 0.9-1.1: `hits` blows always kill, one fewer never does
+    m.maxHp = m.hp = Math.max(1, Math.floor(blow * 0.9 * s.hits));
+    m.temp = true;
+    m.owner = boss;
+    m.passable = true;
+    m.state = 'chase';
+    m.atkCd = 0.8;
+    m.rise = 1.3;
+    m.pos.y = -1.9;
+    this.waves.add(at, 1.1, SOUL_GREEN, 1.3);
+    this.particles.burst(v1.copy(at).setY(0.2), SOUL_GREEN, 10, 0.12, 4, 0.9);
+    this.puffs.cloud(at, 1, SOUL_FOG, 4);
+  }
+
+  /** Up to 3–4 mobs from the pool (a fort pack: different kinds) run in and go for the hero. */
+  private callReinforcements(boss: Mob, r: NonNullable<BossDef['reinforce']>) {
+    let e = this.world.fortExit;
+    if (!r.fort) {
+      // the far side of the arena from the hero, the pack's front across the line to the boss
+      v1.set(boss.pos.x - this.hero.position.x, 0, boss.pos.z - this.hero.position.z).normalize();
+      v2.set(boss.pos.x + v1.x * 9, 0, boss.pos.z + v1.z * 9);
+      this.world.collide(v2, 1);
+      e = { x: v2.x, z: v2.z, tx: v1.x, tz: v1.z };
+    }
+    const kinds = r.pool.slice().sort(rndSort).slice(0, 3 + Math.floor(Math.random() * 2));
+    this.fx.spawn(v1.copy(boss.pos).setY(5.6), r.bark, 'bark', 2);
     sfx.telegraph();
     for (let i = 0; i < kinds.length; i++) {
       const side = (i - (kinds.length - 1) / 2) * 1.5;
@@ -1609,9 +1806,86 @@ export class Game {
     }
   }
 
-  private despawnMinions(boss: Mob) {
+  /** The kit (src/bosses) of a boss or a mini-boss, made on first use; null for units without one. */
+  private kitOf(boss: Mob | null) {
+    if (!boss || !BOSS_KITS[boss.def.id]) return null;
+    let kit = this.kits.get(boss);
+    if (kit === undefined) this.kits.set(boss, kit = BOSS_KITS[boss.def.id]?.(this.bossHost, boss) ?? null);
+    return kit;
+  }
+
+  private bossHost = this.makeBossHost();
+
+  private makeBossHost(): BossHost {
+    // getters: this runs before the constructor makes the effects
+    const game = this;
+    return {
+      get scene() { return game.scene; },
+      get fx() { return game.fx; },
+      get particles() { return game.particles; },
+      get telegraphs() { return game.telegraphs; },
+      get waves() { return game.waves; },
+      get puffs() { return game.puffs; },
+      time: () => this.time,
+      heroPos: () => this.hero.position,
+      heroDead: () => this.dead,
+      heroHp: () => this.hp,
+      mobs: () => this.mobs,
+      hurtHero: (raw, from, src, dot) => this.hurtHero(raw, from, src, dot),
+      slowHero: (k) => { this.heroSlow = Math.min(this.heroSlow, k); },
+      addBlocker: (x, z, r, life) => {
+        const b = { x, z, r, until: this.time + life };
+        this.blockers.push(b);
+        return { remove: () => { b.until = 0; } };
+      },
+      spawnMinion: (boss, def, at) => {
+        const m = this.addMob(def, at, this.labels);
+        m.temp = true;
+        m.owner = boss;
+        m.state = 'chase';
+        return m;
+      },
+      kill: (m) => this.killMob(m),
+      bark: (m, text) => this.fx.spawn(v1.copy(m.pos).setY(m.barY + 1), text, 'bark', 2),
+    };
+  }
+
+  /** Pushes `p` out of the boss kits' blockers. */
+  private collideBlockers(p: THREE.Vector3, radius: number) {
+    for (const b of this.blockers) {
+      if (b.until <= this.time) continue;
+      const dx = p.x - b.x;
+      const dz = p.z - b.z;
+      const rr = b.r + radius;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < rr * rr && d2 > 1e-6) {
+        const d = Math.sqrt(d2);
+        p.x = b.x + (dx / d) * rr;
+        p.z = b.z + (dz / d) * rr;
+      }
+    }
+  }
+
+  /** The hero died: the boss is back to full HP and its fight starts over. */
+  private resetBoss(m: Mob) {
+    m.hp = m.maxHp;
+    m.phase2 = false;
+    m.adds = 0;
+    m.cycle = 0;
+    m.soulT = 0;
+    m.ritual = 0;
+    m.pos.y = 0;
+    releaseHold(m, m.def.boss!.souls?.anim ?? 'MeleeHigh', 0.3);
+    m.burstDue = false;
+    m.animDelay = -1;
+    this.despawnMinions(m);
+    this.kitOf(m)?.reset?.();
+  }
+
+  /** `keepSouls`: the boss only lost the hero, its souls stay and keep chasing. */
+  private despawnMinions(boss: Mob, keepSouls = false) {
     for (const m of this.mobs) {
-      if (m.owner !== boss || m.removed) continue;
+      if (m.owner !== boss || m.removed || (keepSouls && m.passable)) continue;
       if (this.target === m) this.target = null;
       this.removeMob(m);
     }
@@ -1638,17 +1912,18 @@ export class Game {
     if (!this.dead && this.hero.position.distanceTo(t.at) < t.r + HERO.radius) this.hurtHero(t.dmg, t.at);
   };
 
-  private hurtHero(raw: number, from: THREE.Vector3, src?: Mob) {
+  /** `dot`: a tick of damage over time — no dodge, no crit, no counter; defense still cuts it. */
+  private hurtHero(raw: number, from: THREE.Vector3, src?: Mob, dot = false) {
     if (this.dead) return;
     const s = this.stats;
     const barY = 2.45 * this.heroScale;
     const lift = this.heroBar.el.offsetHeight + 14;
     // dodge: any blow, boss specials too
-    if (Math.random() < s.dodge) {
+    if (!dot && Math.random() < s.dodge) {
       this.fx.spawn(v1.copy(this.hero.position).setY(barY), 'Уклон', 'hurt', 0.6, { color: '#9fe8ff', lift });
       return;
     }
-    const crit = !!src && Math.random() < critChance(src.def.crit);
+    const crit = !dot && !!src && Math.random() < critChance(src.def.crit);
     // GDD 10.5: reduction = defense / (defense + 100).
     const dmg = Math.max(1, Math.round(raw * (crit ? critMul(src!.def.critDmg) : 1) * armorMul(s.defense) * this.guardMul() * (0.9 + Math.random() * 0.2)));
     if (src) this.shieldAnswer(src, dmg);
@@ -1662,7 +1937,11 @@ export class Game {
     if (this.hp <= 0 && this.god) this.hp = 1; // debug
     if (this.hp <= 0) {
       this.hp = 0;
-      for (const m of this.mobs) this.endFight(m, 'death');
+      for (const m of this.mobs) {
+        this.endFight(m, 'death');
+        if (m.def.boss && m.alive) this.resetBoss(m);
+        else if (m.alive && this.kitOf(m)) { this.despawnMinions(m); this.kitOf(m)!.reset?.(); }
+      }
       this.dead = true;
       this.deadT = 0;
       this.target = null;
@@ -2003,6 +2282,79 @@ export class Game {
     this.persist();
   }
 
+  /** Sets the debug points of `k` so the stat's total becomes `total`; hp counts after the other sources' percents. */
+  debugSetStat(k: 'power' | 'hp', total: number) {
+    const hpFrac = this.hp / this.maxHp;
+    const pts = (this.save.src.debug ??= {});
+    delete this.save.pct.debug?.[k];
+    pts[k] = 0;
+    const b = statBreakdown(this.save, k);
+    pts[k] = (k === 'hp' ? total / b.mult : total) - b.sum;
+    this.hp = Math.max(1, hpFrac * this.maxHp);
+    this.refreshHud(true);
+    this.persist();
+  }
+
+  /**
+   * Debug: sets power and max HP so the boss(es) of `zone` die in about `secs` s of real play. `uptime`: share of the
+   * fight spent hitting (the rest goes to dodging); `taken`: share of the bosses' melee DPS that still lands.
+   * Both are linear: DPS in power (weaponDamage), HP need in incoming DPS × time minus regen.
+   */
+  debugBalanceBoss(zone: ZoneId, secs = 60, uptime = 0.43, taken = 0.75) {
+    const main = this.mobs.filter((m) => m.def.boss?.zone === zone && !m.removed);
+    if (!main.length || !this.save.weapons.some(Boolean)) return false;
+    // the partner spawns only once the fight starts: its numbers as addMob would give them (zone tier, no depth);
+    // a circle swing hits both at once, so then its HP costs nothing extra
+    const tier = ZONE_TIER[zone] ?? 1;
+    const splash = this.save.weapons.some((it) => it && WEAPONS[it.def].shape === 'circle');
+    const bosses = main.flatMap((m) => {
+      const p = BOSS_PARTNERS[m.def.id];
+      const own = { hp: m.maxHp, dps: m.dmg * m.def.aps, resist: m.def.resist };
+      return p ? [own, { hp: splash ? 0 : p.hp * tier, dps: p.dmg * tier * p.aps, resist: p.resist }] : [own];
+    });
+    const s = this.stats;
+    const crit = critAvg(s.critPts, s.critDmgPts);
+    const hp = bosses.reduce((a, b) => a + b.hp, 0);
+    const dps = (p: number) => bosses.reduce((a, b) => a + b.hp * heroDps(this.save.weapons, p, s.powerMul, crit, b.resist), 0) / hp;
+    const d0 = dps(0);
+    const need = hp / (secs * uptime);
+    this.debugSetStat('power', Math.max(0, Math.round((need - d0) / ((dps(100) - d0) / 100))));
+    const inDps = bosses.reduce((a, b) => a + b.dps, 0) * armorMul(s.defense) * this.guardMul() * (1 - s.dodge);
+    this.debugSetStat('hp', Math.max(HERO.hp, Math.round((inDps * taken - s.regen) * secs)));
+    this.hp = this.maxHp;
+    return true;
+  }
+
+  /**
+   * Debug: one weapon, the best DPS against the boss(es) of `zone`, and a full armour `set` (guard / knight / lord)
+   * of `rarity`; the ring and the amulet only with `jewels`. Replaced items go to the bag while it has room.
+   */
+  debugEquipFor(zone: ZoneId, gear: { set: string; rarity: number; weapon: number; jewels: boolean }) {
+    const bosses = this.mobs.filter((m) => m.def.boss?.zone === zone && !m.removed);
+    const s = this.stats;
+    const crit = critAvg(s.critPts, s.critDmgPts);
+    let best: Item | null = null;
+    let bestDps = -1;
+    for (const w of Object.values(WEAPONS)) {
+      if (w.guard) continue;
+      const it = dropItem({ kind: 'weapon', def: w.id, rarity: gear.weapon });
+      const dps = bosses.reduce((a, m) => a + heroDps([it, null], s.power, s.powerMul, crit, m.def.resist), 0);
+      if (dps > bestDps) { best = it; bestDps = dps; }
+    }
+    const stash = (it: Item | null | undefined) => { if (it && this.save.bag.length < BAG_SIZE) this.save.bag.push(it); };
+    stash(this.save.weapons[0]);
+    stash(this.save.weapons[1]);
+    this.save.weapons = [best, null];
+    const pieces = ['head', 'chest', 'arms', 'legs'].map((p) => `${gear.set}_${p}`);
+    if (gear.jewels) pieces.push('ring_power', 'amulet_life');
+    for (const def of pieces) {
+      const slot = ARMOR[def].slot;
+      stash(this.save.equip[slot]);
+      this.save.equip[slot] = dropItem({ kind: 'armor', def, rarity: gear.rarity });
+    }
+    this.afterGearChange();
+  }
+
   /** Removes every debug stat point and percent. */
   debugClearStats() {
     delete this.save.src.debug;
@@ -2217,7 +2569,17 @@ export class Game {
 }
 
 /** A boss cone in flight (Telegraphs tag). */
-interface ConeTag { boss: Mob; at: THREE.Vector3; yaw: number; half: number; len: number; mul: number }
+interface ConeTag { boss: Mob; at: THREE.Vector3; yaw: number; half: number; len: number; mul: number; reap?: number }
+/** A body of radius `r` at `p` is inside the cone (its width widens the cone a little). */
+function inCone(c: ConeTag, p: THREE.Vector3, r: number) {
+  const dx = p.x - c.at.x;
+  const dz = p.z - c.at.z;
+  const d = Math.hypot(dx, dz);
+  if (d > c.len + r) return false;
+  const a = Math.atan2(dx, dz) - c.yaw;
+  const off = Math.atan2(Math.sin(a), Math.cos(a));
+  return Math.abs(off) <= c.half + Math.asin(Math.min(1, r / Math.max(d, r)));
+}
 /** A tower shot in flight (Telegraphs tag). */
 interface ShotTag { at: THREE.Vector3; dmg: number; r: number }
 
@@ -2249,9 +2611,11 @@ interface Hand {
   i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean;
   /** Staff: seconds until the bolt leaves the staff (< 0 = none pending), and its flight time. */
   launch: number; flight: number;
+  /** Staff: the bolt in flight and the mob it flies at. */
+  bolt: Bolt | null; aim: Unit | null;
 }
 function newHand(i: 0 | 1): Hand {
-  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false, launch: -1, flight: 0 };
+  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false, launch: -1, flight: 0, bolt: null, aim: null };
 }
 
 /** How a blow landed: a crit, dodged, or plain (''). */

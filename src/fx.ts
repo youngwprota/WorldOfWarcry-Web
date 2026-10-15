@@ -333,7 +333,7 @@ export class Shockwaves {
   }
 }
 
-interface Bolt { mesh: THREE.Sprite; from: THREE.Vector3; to: THREE.Vector3 | null; t: number; dur: number }
+export interface Bolt { mesh: THREE.Sprite; from: THREE.Vector3; to: THREE.Vector3 | null; t: number; dur: number }
 interface Glow { mesh: THREE.Mesh; vel: THREE.Vector3; t: number; dur: number; size: number }
 
 /**
@@ -407,7 +407,11 @@ export class Spells {
     b.from.copy(from);
     b.to = to;
     b.dur = Math.max(0.05, dur);
+    return b;
   }
+
+  /** Removes bolt `b` mid-flight. */
+  drop(b: Bolt) { b.mesh.visible = false; b.to = null; }
 
   /** A spinning see-through sphere of `radius` m at `at` for `dur` s. */
   swirl(at: THREE.Vector3, radius: number, dur: number, color: number) {
@@ -460,5 +464,142 @@ export class Spells {
       f.mesh.scale.set(f.size * (1 - k), f.size * 1.8 * (1 - k), f.size * (1 - k));
       if (k >= 1) f.mesh.visible = false;
     }
+  }
+}
+
+let puffTex: THREE.Texture | null = null;
+/** Soft round blob, white to transparent. */
+function puffTexture() {
+  if (puffTex) return puffTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  puffTex = new THREE.CanvasTexture(c);
+  return puffTex;
+}
+
+interface Puff { sprite: THREE.Sprite; vel: THREE.Vector3; t: number; life: number; size: number; peak: number; active: boolean }
+
+/** Drifting fog puffs (sprites): swell, rise slowly and fade. */
+export class FogPuffs {
+  private pool: Puff[] = [];
+  private next = 0;
+
+  constructor(scene: THREE.Scene, count = 140) {
+    for (let i = 0; i < count; i++) {
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: puffTexture(), transparent: true, depthWrite: false, opacity: 0 }));
+      sprite.visible = false;
+      sprite.renderOrder = 2;
+      scene.add(sprite);
+      this.pool.push({ sprite, vel: new THREE.Vector3(), t: 0, life: 1, size: 1, peak: 0.5, active: false });
+    }
+  }
+
+  /** One puff of `size` m at `pos`, peak opacity `peak`. */
+  spawn(pos: THREE.Vector3, color: number, size: number, life: number, peak = 0.5) {
+    const p = this.pool[this.next];
+    this.next = (this.next + 1) % this.pool.length;
+    p.active = true;
+    p.t = 0;
+    p.life = life;
+    p.size = size;
+    p.peak = peak;
+    p.vel.set((Math.random() - 0.5) * 0.4, 0.25 + Math.random() * 0.3, (Math.random() - 0.5) * 0.4);
+    p.sprite.position.copy(pos);
+    (p.sprite.material as THREE.SpriteMaterial).color.set(color);
+    p.sprite.material.rotation = Math.random() * Math.PI * 2;
+    p.sprite.visible = true;
+  }
+
+  /** `count` puffs scattered over a disc of `radius` m around `pos`. */
+  cloud(pos: THREE.Vector3, radius: number, color: number, count: number, life = 1.4) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * radius;
+      tmp.set(pos.x + Math.sin(a) * r, pos.y + 0.3 + Math.random() * 0.5, pos.z + Math.cos(a) * r);
+      this.spawn(tmp, color, 1.2 + Math.random() * 1.2, life * (0.7 + Math.random() * 0.6), 0.45);
+    }
+  }
+
+  update(dt: number) {
+    for (const p of this.pool) {
+      if (!p.active) continue;
+      p.t += dt;
+      const k = p.t / p.life;
+      if (k >= 1) { p.active = false; p.sprite.visible = false; continue; }
+      p.sprite.position.addScaledVector(p.vel, dt);
+      p.sprite.scale.setScalar(p.size * (0.6 + 0.6 * k));
+      // fade in over the first fifth, out over the rest
+      (p.sprite.material as THREE.SpriteMaterial).opacity = p.peak * (k < 0.2 ? k / 0.2 : (1 - k) / 0.8);
+    }
+  }
+}
+
+/**
+ * Boss arena: a filled disc of drifting noise fog over `radius` m with no hard edge, plus wisps rising from it.
+ * `set` fades it in or out, `flare` makes it brighter for a while.
+ */
+export class ArenaFog {
+  private mesh: THREE.Mesh;
+  private mat: THREE.ShaderMaterial;
+  private k = 0;
+  private on = false;
+  private wispT = 0;
+  private boost = 0;
+
+  constructor(scene: THREE.Scene, private puffs: FogPuffs, private center: THREE.Vector3, private radius: number, private color: number) {
+    const w = radius * 0.35;
+    this.mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false,
+      uniforms: { uTime: { value: 0 }, uAlpha: { value: 0 }, uBoost: { value: 0 }, uColor: { value: new THREE.Color(color) }, uR: { value: radius }, uW: { value: w } },
+      vertexShader: 'varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `
+        uniform float uTime, uAlpha, uBoost, uR, uW; uniform vec3 uColor; varying vec2 vP;
+        float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
+        float fbm(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * n(p); p *= 2.03; a *= 0.5; } return s; }
+        void main(){
+          float disc = smoothstep(uR + uW, uR - uW, length(vP));
+          vec2 q = vP * 0.18;
+          float f = fbm(q + vec2(uTime * 0.12, -uTime * 0.2)) * fbm(q * 1.7 - vec2(uTime * 0.07, uTime * 0.1));
+          float a = disc * mix(0.25, 1.0, smoothstep(0.05, 0.4, f)) * uAlpha * (0.5 + 0.5 * uBoost);
+          gl_FragColor = vec4(uColor * (0.8 + f + uBoost * 0.8), min(1.0, a * 0.8));
+        }`,
+    });
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry((radius + w * 2) * 2, (radius + w * 2) * 2), this.mat);
+    this.mesh.rotation.x = -Math.PI / 2;
+    this.mesh.position.set(center.x, 0.1, center.z);
+    this.mesh.visible = false;
+    this.mesh.renderOrder = 1;
+    scene.add(this.mesh);
+  }
+
+  set(on: boolean) { this.on = on; }
+
+  flare() { this.boost = 1; }
+
+  update(dt: number, time: number) {
+    this.k = Math.max(0, Math.min(1, this.k + (this.on ? dt : -dt) * 0.8));
+    this.mesh.visible = this.k > 0;
+    if (!this.mesh.visible) return;
+    this.mat.uniforms.uTime.value = time;
+    this.mat.uniforms.uAlpha.value = this.k;
+    // a flare holds for a moment, then fades over ~3 s
+    this.boost = Math.max(0, this.boost - dt * 0.3);
+    this.mat.uniforms.uBoost.value = Math.min(1, this.boost * 1.4);
+    this.wispT -= dt;
+    if (this.wispT > 0) return;
+    this.wispT = 0.06 / (1 + this.boost * 2);
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * this.radius;
+    tmp.set(this.center.x + Math.sin(a) * r, 0.4, this.center.z + Math.cos(a) * r);
+    this.puffs.spawn(tmp, this.color, 2 + Math.random() * 2, 2.5, (0.3 + 0.3 * this.boost) * this.k);
   }
 }

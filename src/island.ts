@@ -124,7 +124,7 @@ const POLYS: { id: ZoneId; pts: [number, number][] }[] = [
     [-90, 42.5], [-122.5, 45], [-135, 20]] },
   { id: 'swamp', pts: [[-25, -15], [-3, -10], [5, 20], [2.5, 65], [-10, 107.5], [-40, 110], [-70, 107.5], [-100, 85], [-122.5, 60], [-122.5, 45],
     [-90, 42.5], [-60, 52.5], [-40, 45], [-25, 25]] },
-  { id: 'dunes', pts: [[-3, -10], [20, -15], [40, -25], [70, -10], [100, -5], [118, 15], [125, 30], [110, 50], [90, 70], [60, 85], [30, 100],
+  { id: 'dunes', pts: [[-3, -10], [20, -15], [40, -25], [50, -34], [64, -24], [70, -10], [100, -5], [118, 15], [125, 30], [110, 50], [90, 70], [60, 85], [30, 100],
     [-10, 107.5], [2.5, 65], [5, 20]] },
 ];
 const BOXES = POLYS.map(({ pts }) => {
@@ -363,7 +363,6 @@ const WAY: [number, number][] = [
   [20.5, -23.6], [28.4, -30], [34, -35],
   [40, -40.5], [58, -40], [70, -34], [88, -24], [98, -32], [98, -52], [92, -70], [84, -80],
 ];
-const FORT_I = 33;
 const inside = (d: { x: number; z: number; tx: number; tz: number }): [number, number] => [d.x - d.tx * 1.5, d.z - d.tz * 1.5];
 /** Branches from the main trail to the hub doors (north, west), as drawn. */
 const BRANCH_WAYS: [number, number][][] = [
@@ -386,17 +385,26 @@ export const ZONE_LABEL = (() => {
 })();
 /**
  * Paths through the outer locations (map drawing): worn decor, and the line their mobs stand along.
- * Order: Rocky Hills, Autumn Grove, Rotten Swamp, Sand Dunes, Snow Pass.
+ * Order: Rocky Hills, Autumn Grove, Rotten Swamp, Sand Dunes, Snow Pass, then side branches.
  */
 export const LAND_TRAILS: [number, number][][] = [
-  [[-72.5, -10], [-92.5, -35], [-105, -60], [-97.5, -90], [-77.5, -102.5], [-57.5, -97.5], [-55, -70], [-52.5, -55]],
-  [[-115, -10], [-110, 5], [-90, 15], [-60, 15], [-47.5, 20], [-37, 34]],
-  [[-95, 55], [-75, 65], [-70, 85], [-50, 95], [-30, 87.5], [-25, 70], [-10, 55], [-6, 18]],
-  [[110, 20], [90, 40], [65, 30], [40, 30], [25, 50], [30, 72.5], [10, 75], [5, 62.5]],
-  [[69.5, -96], [60, -106], [50, -115], [35, -120], [-10, -115], [-20, -125], [-12.5, -140], [10, -150], [17.5, -162.5]],
+  [[-53, -55.5], [-61, -57], [-68.5, -61], [-70.5, -74.5], [-66, -86], [-57, -96], [-52, -100], [-53.5, -106.5], [-60.5, -109.5], [-68.5, -107.5],
+    [-80.5, -96.5], [-93.5, -85], [-105.5, -73.5], [-115.5, -61.5], [-117, -51.5], [-113.5, -38.5], [-105.5, -31], [-90.5, -28.5],
+    [-75.5, -23.5], [-68.5, -15], [-66.5, -6.5]],
+  [[-114.5, -5], [-112, 3.5], [-105.5, 8.5], [-90.5, 11.5], [-70.5, 13.5], [-53.5, 12.5], [-47, 18.5], [-43, 25], [-38.5, 31.5], [-32.5, 35],
+    [-23, 44.5], [-14.5, 52], [-11, 55.5]],
+  [[-3.5, -13.5], [-2, -6.5], [-1.5, -1], [-3.5, 8.5], [-7, 21.5], [-8.5, 35], [-11.5, 48.5], [-11, 55.5], [-15.5, 61.5], [-21, 66.5],
+    [-25, 72], [-30, 87.5], [-50, 95], [-70, 85], [-75, 65], [-91, 56]],
+  [[4, 61.5], [16.5, 63.5], [28, 61.5], [29.5, 48.5], [30.5, 31.5], [33, 15], [39.5, 5], [49.5, 1.5], [59.5, 5], [64.5, 15], [69.5, 25],
+    [78, 30], [88, 28.5], [99.5, 23.5], [111.5, 19.5]],
+  [[3, -105], [1.5, -114.5], [-1, -123], [-3.5, -127.5], [-3.5, -135], [-1.5, -143], [3.5, -149], [11.5, -155], [18, -160], [33, -161],
+    [49.5, -160.5], [63, -157.5], [73, -154.5], [80.5, -150.5]],
+  [[-66.5, -6], [-64.5, 1.5], [-60.5, 6.5], [-53.5, 12.5]],
+  [[-11, 55.5], [-3.5, 60], [4, 61.5]],
+  [[88, 28.5], [87, 38.5], [84.5, 48.5], [78, 56.5]],
+  [[-3.5, -127], [-13.5, -128.5], [-23.5, -131], [-35.5, -132.5]],
 ];
 /** The enemy boss camp (bandit fort): the east edge of the hub, in front of the cemetery gate. */
-export const FORT = { x: WAY[FORT_I][0], z: WAY[FORT_I][1], r: 11 };
 /** «Свирепый вожак» of the forest. */
 export const FOREST_MINI: [number, number] = [-10.6, -11.6];
 /** The gloves elite (bandit_veteran): between the pond and the trail out of the settlement. */
@@ -461,6 +469,8 @@ function buildCurve(way: [number, number][]) {
 }
 export const PATH = buildCurve(WAY);
 export const BRANCH_PATHS = BRANCH_WAYS.map(buildCurve);
+/** Abandoned path on from the arena through the Snow Pass gate; drawn fading out, overgrown. */
+export const OLD_TRAIL = buildCurve([[84, -80], [76, -89], [68.5, -96], [58.5, -102.5], [49, -107], [40.5, -111]]);
 
 /** Point and unit tangent on the trail at arc length s. */
 export function pathAt(s: number) {
@@ -519,15 +529,8 @@ export function progressAt(x: number, z: number) {
 const flank = (x: number, z: number, tx: number, tz: number, gap: number) => [
   { x: x + tz * gap, z: z - tx * gap }, { x: x - tz * gap, z: z + tx * gap },
 ];
-/** Elite guards of the boss camp: on the trail just before the fort's west entrance. */
-export const BOSS_GUARDS = (() => {
-  let s = progressAt(FORT.x, FORT.z);
-  while (s > 0 && Math.hypot(pathAt(s).x - FORT.x, pathAt(s).z - FORT.z) < FORT.r) s -= STEP;
-  const p = pathAt(s - 4);
-  return flank(p.x, p.z, p.tx, p.tz, 2.4);
-})();
 /** Guards just inside the north gate (hub → Snow Pass), either side of the door. */
-export const GATE_GUARDS = flank(DOOR_PEAKS.x - DOOR_PEAKS.tx * 2.5, DOOR_PEAKS.z - DOOR_PEAKS.tz * 2.5, DOOR_PEAKS.tx, DOOR_PEAKS.tz, 2.6);
+export const GATE_GUARDS = flank(DOOR_PEAKS.x - DOOR_PEAKS.tx * 8, DOOR_PEAKS.z - DOOR_PEAKS.tz * 8, DOOR_PEAKS.tx, DOOR_PEAKS.tz, 2.6);
 
 /** The ridge gate: where the trail crosses from the forest into the cemetery. */
 export const GATE = (() => {
@@ -537,6 +540,18 @@ export const GATE = (() => {
     }
   }
   throw new Error('trail never enters the cemetery');
+})();
+/** Bandit fort on the trail before the ridge gate; its palisade runs on into the ridge, the gate is its only back way out. */
+export const FORT = (() => {
+  const p = pathAt(GATE.s - 12);
+  return { x: p.x, z: p.z, r: Math.hypot(GATE.x - p.x, GATE.z - p.z) + 1.5 };
+})();
+/** Elite guards of the boss camp: on the trail just before the fort's west entrance. */
+export const BOSS_GUARDS = (() => {
+  let s = progressAt(FORT.x, FORT.z);
+  while (s > 0 && Math.hypot(pathAt(s).x - FORT.x, pathAt(s).z - FORT.z) < FORT.r) s -= STEP;
+  const p = pathAt(s - 4);
+  return flank(p.x, p.z, p.tx, p.tz, 2.4);
 })();
 
 /** A passage through a ridge. (tx, tz) is the unit direction of travel from `from` into `to`. */
@@ -556,11 +571,10 @@ export const GATES: Gate[] = (() => {
 })();
 /** Main boss and «Свирепый вожак» spots of the cemetery and the outer locations (map drawing; slid onto walkable land). */
 export const LAND_BOSSES: { zone: ZoneId; boss?: [number, number]; minis: [number, number][] }[] = [
-  { zone: 'cemetery', minis: [[81.5, -17.5]] },
-  { zone: 'peaks', boss: [-40, -130], minis: [[36.5, -131], [63.5, -85]] },
+  { zone: 'peaks', boss: [89.5, -149], minis: [[36.5, -131], [-40, -130]] },
   { zone: 'hills', boss: [-122.5, -52.5], minis: [[-70, -87.5]] },
-  { zone: 'grove', boss: [-113.5, -18.5], minis: [[-61.5, 30]] },
-  { zone: 'swamp', boss: [-107.5, 52.5], minis: [[-47.5, 72.5]] },
+  { zone: 'grove', boss: [-118.5, 4.5], minis: [[-61.5, 30]] },
+  { zone: 'swamp', boss: [-93.5, 55.5], minis: [[-47.5, 72.5]] },
   { zone: 'dunes', boss: [74, 61], minis: [[111.5, 20]] },
 ];
 
@@ -602,9 +616,22 @@ export function heightAt(x: number, z: number) {
 /** No-go band along every ridge between locations (m from the ridge line), open only round the gates. */
 export const BORDER = 5.5;
 export const BORDER_GATE_R = 6;
+/** No-walk band along the ridges: BORDER wide, narrowing smoothly through each passage (negative right in it). */
+export function borderAt(x: number, z: number) {
+  return (BORDER + 1) * smooth(1.5, BORDER_GATE_R + 3, gateDist(x, z)) - 1;
+}
+/** Metres of room beyond the ridge border (< 0 inside it). */
+export const borderRoom = (x: number, z: number) => ridgeDist(x, z) - borderAt(x, z);
+/** Unit direction out of the ridge border (up borderRoom, which also bends round the passage funnels). */
+export function borderAway(x: number, z: number) {
+  const gx = borderRoom(x + 1, z) - borderRoom(x - 1, z);
+  const gz = borderRoom(x, z + 1) - borderRoom(x, z - 1);
+  const l = Math.hypot(gx, gz) || 1;
+  return { x: gx / l, z: gz / l };
+}
 export function walkable(x: number, z: number, pad = 0) {
   if (outside(x, z) > -pad) return false;
-  return ridgeDist(x, z) > BORDER + pad || gateDist(x, z) < BORDER_GATE_R - 1;
+  return borderRoom(x, z) > pad;
 }
 /** Unit direction away from the nearest ridge. */
 export function ridgeAway(x: number, z: number) {

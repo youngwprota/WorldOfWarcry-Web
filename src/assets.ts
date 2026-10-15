@@ -49,7 +49,15 @@ function textureFor(name: string): string {
   return 'proto_human_RTS_color';
 }
 
-export const ANIMS = ['Idle', 'Walk', 'SwordAttack', 'AxeAttack', 'MagicAttack', 'Hit', 'Death'] as const;
+/** Models with their own multi-material look (mage armour skins): the FBX materials are kept instead of one shared texture. */
+/** Textures of the caster materials by material name (exact, or by prefix); the FBX texture paths are blanked by the URL modifier. */
+const CASTER_TEXTURES: [string, string][] = [
+  ['human_mage_mat', 'human_mage_col'], ['orc_shaman_mat', 'orc_shaman_albedo'],
+  ['orc_shaman_tint_', 'orc_shaman_albedo_gray'], ['orc_shaman_belt_', 'orc_shaman_albedo_gray'], ['orc_head_mythic_skull_tex', 'orc_shaman_albedo_gray'],
+];
+export const keepsMaterials = (name: string) => name.startsWith('caster_');
+
+export const ANIMS = ['Idle', 'Walk', 'SwordAttack', 'AxeAttack', 'MagicAttack', 'Hit', 'Death', 'SlashAdvance', 'MeleeHigh', 'MeleeLong', 'MeleeHorizontal'] as const;
 export type AnimName = (typeof ANIMS)[number];
 
 /** Bones that belong to the upper-body layer (spine_01 and its descendants). */
@@ -206,7 +214,9 @@ class Assets {
     const upper = {} as Record<AnimName, THREE.AnimationClip>;
     const lower = {} as Record<AnimName, THREE.AnimationClip>;
     for (const n of ANIMS) {
-      const src = this.sources.get(n)!.animations[0];
+      // Mixamo exports on our rig also carry the bind pose as a 'Take 001' clip
+      const anims = this.sources.get(n)!.animations;
+      const src = anims.find((a) => a.name.includes('mixamo')) ?? anims[0];
       const tracks = src.tracks
         .filter((t) => !t.name.endsWith('.scale'))
         .map((t) => {
@@ -235,13 +245,18 @@ class Assets {
     const box = new THREE.Box3().setFromObject(g);
     if (box.max.y - box.min.y > 20) g.scale.setScalar(0.01);
     if (name.startsWith('archers/')) { this.prepareOwnMaterials(name, g); return; }
+    const own = keepsMaterials(name);
     const mat = this.material(textureFor(name));
     g.traverse((o) => {
       if (o.name === 'Character1_RightHand') o.name = 'hand_r';
       else if (o.name === 'Character1_LeftHand') o.name = 'hand_l';
       const m = o as THREE.Mesh;
       if (m.isMesh) {
-        m.material = Array.isArray(m.material) ? m.material.map(() => mat) : mat;
+        if (!own) m.material = Array.isArray(m.material) ? m.material.map(() => mat) : mat;
+        else for (const cm of Array.isArray(m.material) ? m.material : [m.material]) {
+          const tex = CASTER_TEXTURES.find(([n]) => cm.name.startsWith(n));
+          if (tex) (cm as THREE.MeshPhongMaterial).map = this.texture(tex[1]);
+        }
         m.castShadow = false;
         m.receiveShadow = false;
       }

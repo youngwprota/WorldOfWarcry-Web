@@ -59,7 +59,7 @@ export const PART_PREFIXES: Record<VisualPart, string[]> = {
   // (the archer's quiver goes with the chest: the hunter sets' torso brings its own)
   chest: ['chest_', 'torso_', 'cape_', 'quiver_'],
   arms: ['arms_'],
-  legs: ['legs_', 'hip_', 'hips_'],
+  legs: ['legs_', 'hip_', 'hips_', 'kilt_'],
 };
 
 export const BONUS_NAME: Record<BonusStat, string> = {
