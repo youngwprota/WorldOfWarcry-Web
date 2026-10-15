@@ -62,14 +62,13 @@ const SECTIONS: [string, Action[]][] = [
     ['Бессмертие', (g) => { g.god = !g.god; }, 'god'],
     ['Убить рядом', (g) => g.debugKillNearby(), 'wide'],
   ]],
-  ['Оружие в руку', [
+  ['Оружие', [
     ['Меч', (g) => g.debugGiveWeapon('sword')],
     ['Топор', (g) => g.debugGiveWeapon('axe')],
     ['Молот', (g) => g.debugGiveWeapon('hammer')],
     ['Древковое', (g) => g.debugGiveWeapon('polearm')],
   ]],
-  ['Оружие в левую', [
-    ['Меч', (g) => g.debugGiveWeapon('sword', 1)],
+  ['Щит', [
     ['Башенный', (g) => g.debugGiveWeapon('shield_tower', 1)],
     ['Баклер', (g) => g.debugGiveWeapon('shield_buckler', 1)],
     ['Шипастый', (g) => g.debugGiveWeapon('shield_spiked', 1)],
