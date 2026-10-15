@@ -6,9 +6,11 @@ import { HELPER_SEEK, Helpers, type Helper } from './helpers';
 import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from './offhand';
 import { Creature } from './creature';
 import { StaticBody } from './staticbody';
+import { BOSS_KITS } from './bosses';
+import type { BossHost, BossKit } from './bosses/kit';
 import {
   ATTACK_HIT, COMBOS, DUAL, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
-  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type BossAnim, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, isPctStat,
+  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, isPctStat,
 } from './config';
 import { ArenaFog, FloatingText, FogPuffs, Particles, Shockwaves, Telegraphs } from './fx';
 import {
@@ -19,7 +21,7 @@ import { Input } from './input';
 import { art } from './art';
 import { sfx } from './audio';
 import { writeSave, type SaveData } from './save';
-import { GATE, SPAWN, inCamp, pathAt, progressAt } from './island';
+import { GATE, ISLAND, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
 import { UI, type FlyEl, type MapMark } from './ui';
 import { fmtK, lootHtml, resistIcons } from './icons';
@@ -27,6 +29,8 @@ import { heroDeaths, logFight, logSnap } from './balancelog';
 import { addPct, addStat, armorMul, critAvg, critChance, critMul, dodgeChance, gearOf, guardMul, handMulOf, heroDps, heroStats, statBreakdown } from './balance';
 
 /** Debris colour of hits and kills: bone dust for skeletons and spirits, blood for the rest. */
+/** Screen px between the icons of one kill's drops, before the HUD scale. */
+const DROP_GAP = 56;
 /** Death's effects (souls, the ritual, the reap, its blows), teal like its skin, and the fog around them. */
 const SOUL_GREEN = 0x4fe3c4;
 const SOUL_FOG = 0x3fb89a;
@@ -134,7 +138,7 @@ abstract class Unit {
   }
 }
 
-class Mob extends Unit {
+export class Mob extends Unit {
   readonly kind = 'mob';
   ch: Character | Creature | StaticBody;
   state: 'idle' | 'chase' | 'return' | 'dead' = 'idle';
@@ -352,6 +356,12 @@ export class Game {
   /** Hit-stop / slow motion: game time runs at `slowK` for `slowT` more real seconds. */
   private slowT = 0;
   private slowK = 1;
+  /** Boss kits (src/bosses), one per boss mob, made on its first fight. */
+  private kits = new Map<Mob, BossKit | null>();
+  /** Hero run speed multiplier set by boss kits for the next frame (BossHost.slowHero). */
+  private heroSlow = 1;
+  /** Short-lived obstacles from boss kits (BossHost.addBlocker). */
+  private blockers: { x: number; z: number; r: number; until: number }[] = [];
   /** Camera push-in 0..1 (assassin strike), eases back by itself. */
   private zoom = 0;
   /** Shove from mob hits (MobDef.push), decays like mob knockback. */
@@ -546,6 +556,7 @@ export class Game {
     if (this.input.pressed('KeyB')) { this.onOpenBag(); return; }
     if (this.input.pressed('KeyM')) { this.onOpenMap(); return; }
     if (this.input.pressed('KeyG')) { this.onOpenGacha(); return; }
+    if (this.blockers.some((b) => b.until <= this.time)) this.blockers = this.blockers.filter((b) => b.until > this.time);
     this.updateHero(dt);
     this.updateMobs(dt);
     this.updateOrbits(dt);
@@ -636,9 +647,11 @@ export class Game {
     const moving = Math.hypot(ix, iy) > 0.05;
     this.moveDir.set(ix, 0, iy);
     const p = ch.position;
+    const speed = this.speed * this.heroSlow;
+    this.heroSlow = 1;
     if (moving) {
-      p.addScaledVector(this.moveDir, this.speed * dt);
-      ch.walkRate = Math.min(2.4, (this.speed * this.moveDir.length()) / 2.1);
+      p.addScaledVector(this.moveDir, speed * dt);
+      ch.walkRate = Math.min(2.4, (speed * this.moveDir.length()) / 2.1);
     }
     if (this.heroKnock.lengthSq() > 0.001) {
       p.addScaledVector(this.heroKnock, dt);
@@ -659,6 +672,7 @@ export class Game {
       }
     }
     this.world.collide(p, HERO.radius);
+    this.collideBlockers(p, HERO.radius);
 
     // targeting (GDD 6.2): keep the current target while it can be struck; once it is out of the strike
     // distance (or it is a prop and a mob came in) switch to the best unit that can. With nothing else to
@@ -1205,12 +1219,18 @@ export class Game {
       this.fx.spawn(this.unitTextAt(m), 'Промах', 'dmg resist', 0.7, { lift: m.uiEl.offsetHeight });
       return;
     }
+    const kit = this.kitOf(BOSS_KITS[m.def.id] ? m : m.owner);
+    if (kit?.damageTaken) {
+      dmg = Math.round(kit.damageTaken(m, dmg, fx === 'crit'));
+      // the kit shows its own text for a blocked hit
+      if (dmg <= 0) { m.state = m.state === 'return' ? 'return' : 'chase'; return; }
+    }
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
     m.hp -= dmg;
     m.hurtAt = this.time;
     m.ch.hit();
     m.state = m.state === 'return' ? 'return' : 'chase';
-    if (!m.def.boss && !m.passive) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
+    if ((!m.def.boss || this.kitOf(m)?.knockable) && !m.passive) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
     const head = this.unitTextAt(m);
     const lift = m.uiEl.offsetHeight;
     const text = fx === 'crit' ? `-${fmtK(dmg)}!` : `-${fmtK(dmg)}`;
@@ -1245,6 +1265,8 @@ export class Game {
     this.unitDied(m, false);
     if (d.boss) this.killBoss(m);
     else {
+      const kit = this.kitOf(m);
+      if (kit) { kit.died?.(); this.despawnMinions(m); }
       // elites: their own item on every kill (spawner charges limit the farming)
       if (d.drop) m.loot.push(dropItem(d.drop));
       if (m.temp) m.respawnAt = Infinity;
@@ -1255,27 +1277,33 @@ export class Game {
   /** Right on the kill: stat orbs, items, a micro-boss's bonus, the gacha pull. */
   private grantKillRewards(m: Mob) {
     this.payRewards(m);
-    for (const it of m.loot) this.flyDrop(m.pos, itemIcon(it, 44), RARITY[it.rarity].color, 'btn-bag', it);
+    const pull = !m.owner && Math.random() < GACHA.token[mobRank(m.def)];
+    const n = m.loot.length + (pull ? 1 : 0);
+    m.loot.forEach((it, i) => this.flyDrop(m.pos, i, n, itemIcon(it, 44), RARITY[it.rarity].color, 'btn-bag', it));
     m.loot = [];
     if (m.def.bonus) this.grantBonus(m);
-    if (!m.owner && Math.random() < GACHA.token[mobRank(m.def)]) this.grantPull(m);
+    if (pull) this.grantPull(m, n - 1, n);
     if (m.def.boss) this.persist();
   }
 
   /** A kill dropped a gacha pull. */
-  private grantPull(m: Mob) {
+  private grantPull(m: Mob, slot: number, count: number) {
     this.save.pulls = (this.save.pulls ?? 0) + 1;
     this.fx.spawn(v1.copy(m.pos).setY(2.6), '+1 крутка', 'loot', 1.6, { color: '#ffb347' });
-    this.flyDrop(m.pos, art('anvil', 44), '#ffb347', 'btn-gacha');
+    this.flyDrop(m.pos, slot, count, art('anvil', 44), '#ffb347', 'btn-gacha');
     sfx.levelUp();
     this.persist();
   }
 
-  /** A drop's icon flies from the unit to its HUD button; the item reaches the bag on arrival (flyEnd). */
-  private flyDrop(at: THREE.Vector3, html: string, color: string, to: FlyEl['to'], item?: Item) {
+  /**
+   * A drop's icon flies from the unit to its HUD button; the item reaches the bag on arrival (flyEnd).
+   * The `count` drops of one kill start side by side under the unit, `slot` is this one's place in the row.
+   */
+  private flyDrop(at: THREE.Vector3, slot: number, count: number, html: string, color: string, to: FlyEl['to'], item?: Item) {
     const { w, h } = this.ui.size();
-    v1.copy(at).setY(1.2).project(this.camera);
-    this.ui.fly(html, color, (v1.x * 0.5 + 0.5) * w, (-v1.y * 0.5 + 0.5) * h, to, item);
+    v1.copy(at).project(this.camera);
+    const x = (v1.x * 0.5 + 0.5) * w + (slot - (count - 1) / 2) * DROP_GAP * this.ui.scale;
+    this.ui.fly(html, color, x, (-v1.y * 0.5 + 0.5) * h, to, item);
   }
 
   private flyEnd = (el: FlyEl) => {
@@ -1342,6 +1370,7 @@ export class Game {
     m.respawnAt = this.time + d.respawn;
     m.respawnTotal = d.respawn;
     this.telegraphs.clear();
+    this.kitOf(m)?.died?.();
     this.despawnMinions(m);
     this.shake = 0.6;
     sfx.levelUp();
@@ -1486,12 +1515,14 @@ export class Game {
             m.state = 'return';
             this.endFight(m, 'reset');
             if (def.boss) { m.adds = 0; m.soulT = 0; m.ritual = 0; m.pos.y = 0; releaseHold(m, def.boss.souls?.anim ?? 'MeleeHigh', 0.3); m.burstDue = false; m.animDelay = -1; this.despawnMinions(m, true); }
+            else if (this.kitOf(m)) this.despawnMinions(m);
+            this.kitOf(m)?.reset?.();
           } else {
             const reach = def.range + m.radius * 0.5 + HERO.radius;
             if (def.boss) {
               // A boss on your tail keeps you in combat: no out-of-combat regen while kiting.
               this.bossLogic(m, dt, dHero);
-            }
+            } else this.kitOf(m)?.fight?.(dt, dHero);
             if (m.casting <= 0 && m.ritual <= 0) {
               const back = m.ch instanceof Creature ? m.ch.backstep() : 0;
               if (back > 0) {
@@ -1553,8 +1584,15 @@ export class Game {
         }
       }
       this.world.collide(m.pos, m.radius);
+      this.collideBlockers(m.pos, m.radius);
       // mobs never enter the camp
-      if (m.pos.z > -20) m.pos.z = -20;
+      if (inCamp(m.pos.x, m.pos.z, m.radius)) {
+        const dx = m.pos.x - ISLAND.campX;
+        const dz = m.pos.z - ISLAND.campZ;
+        const k = (ISLAND.campR + m.radius) / (Math.hypot(dx, dz) || 1);
+        m.pos.x = ISLAND.campX + dx * k;
+        m.pos.z = ISLAND.campZ + dz * k;
+      }
       m.ch.update(dt, moving, dHero < 34 && this.time - m.hurtAt >= HIT_FREEZE);
     }
     if (removed) {
@@ -1624,16 +1662,21 @@ export class Game {
     }
     if (b.reinforce && m.adds < b.reinforce.at.length && m.hp < m.maxHp * b.reinforce.at[m.adds]) {
       while (m.adds < b.reinforce.at.length && m.hp < m.maxHp * b.reinforce.at[m.adds]) m.adds++;
-      this.callReinforcements(m, b.reinforce.pool);
+      this.callReinforcements(m, b.reinforce);
     }
+    const kit = this.kitOf(m);
+    kit?.fight?.(dt, dHero);
+    if (kit?.ownSpecials) return;
     m.special -= dt;
     if (m.special > 0 || m.impact >= 0 || m.ritual > 0) return;
     // Specials wait until the hero is in reach: no slams into thin air while the hero runs off.
     const chase = m.phase2 && dHero < b.chaseRange && Math.random() < b.chance;
-    // cycle step 0 = the slam around the boss (unless noSlam), then the cones in order
-    const slam0 = b.noSlam && b.cones ? 0 : 1;
-    const step = b.cones ? m.cycle % (b.cones.length + slam0) : 0;
-    const cone = step >= slam0 ? b.cones![step - slam0] : null;
+    // cycle step 0 = the slam around the boss (unless noSlam), then the cones in order, then the reap
+    const cones = b.cones?.length ?? 0;
+    const attacks = cones + (b.reap ? 1 : 0);
+    const slam0 = b.noSlam && attacks ? 0 : 1;
+    const step = m.cycle % (attacks + slam0) - slam0;
+    const cone = step < 0 ? null : step < cones ? b.cones![step] : b.reap!;
     if (!chase && dHero > (cone ? cone.len * 0.75 : b.slamRadius) + HERO.radius) return;
     m.special = m.phase2 ? b.cdPhase2 : b.cd;
     if (!chase) m.cycle++;
@@ -1671,8 +1714,8 @@ export class Game {
       else m.ch.attack('AxeAttack', 1.35, 1.25);
       const yaw = Math.atan2(this.hero.position.x - m.pos.x, this.hero.position.z - m.pos.z);
       m.ch.facing = yaw;
-      for (const off of cone.yaws) {
-        const tag: ConeTag = { boss: m, at: m.pos.clone(), yaw: yaw + off, half: cone.half, len: cone.len, mul: cone.mul, reap: cone.reap };
+      for (const off of 'yaws' in cone ? cone.yaws : [0]) {
+        const tag: ConeTag = { boss: m, at: m.pos.clone(), yaw: yaw + off, half: cone.half, len: cone.len, mul: cone.mul, reap: 'heal' in cone ? cone.heal : undefined };
         this.telegraphs.addCone(tag.at, tag.yaw, cone.half, cone.len, delay, this.coneHit, tag);
       }
     } else {
@@ -1699,7 +1742,7 @@ export class Game {
     this.hurtHero(c.boss.dmg * c.mul, c.at, c.boss);
   };
 
-  /** Scythe sweep: every soul of the boss inside the cone dies, each heals the boss by `reap` of its max HP. */
+  /** Scythe sweep (BossDef.reap): every soul of the boss inside the cone dies, each heals the boss by `reap` of its max HP. */
   private reapSouls(c: ConeTag) {
     let n = 0;
     for (const m of this.mobs) {
@@ -1800,11 +1843,18 @@ export class Game {
     this.puffs.cloud(at, 1, SOUL_FOG, 4);
   }
 
-  /** 3–4 mobs of different kinds run in from the fort entrance and go for the hero. */
-  private callReinforcements(boss: Mob, pool: string[]) {
-    const e = this.world.fortExit;
-    const kinds = pool.slice().sort(rndSort).slice(0, 3 + Math.floor(Math.random() * 2));
-    this.fx.spawn(v1.copy(boss.pos).setY(5.6), 'Ко мне, ребята!', 'bark', 2);
+  /** Up to 3–4 mobs from the pool (a fort pack: different kinds) run in and go for the hero. */
+  private callReinforcements(boss: Mob, r: NonNullable<BossDef['reinforce']>) {
+    let e = this.world.fortExit;
+    if (!r.fort) {
+      // the far side of the arena from the hero, the pack's front across the line to the boss
+      v1.set(boss.pos.x - this.hero.position.x, 0, boss.pos.z - this.hero.position.z).normalize();
+      v2.set(boss.pos.x + v1.x * 9, 0, boss.pos.z + v1.z * 9);
+      this.world.collide(v2, 1);
+      e = { x: v2.x, z: v2.z, tx: v1.x, tz: v1.z };
+    }
+    const kinds = r.pool.slice().sort(rndSort).slice(0, 3 + Math.floor(Math.random() * 2));
+    this.fx.spawn(v1.copy(boss.pos).setY(5.6), r.bark, 'bark', 2);
     sfx.telegraph();
     for (let i = 0; i < kinds.length; i++) {
       const side = (i - (kinds.length - 1) / 2) * 1.5;
@@ -1813,6 +1863,66 @@ export class Game {
       m.owner = boss;
       m.state = 'chase';
       m.atkCd = 0.6;
+    }
+  }
+
+  /** The kit (src/bosses) of a boss or a mini-boss, made on first use; null for units without one. */
+  private kitOf(boss: Mob | null) {
+    if (!boss || !BOSS_KITS[boss.def.id]) return null;
+    let kit = this.kits.get(boss);
+    if (kit === undefined) this.kits.set(boss, kit = BOSS_KITS[boss.def.id]?.(this.bossHost, boss) ?? null);
+    return kit;
+  }
+
+  private bossHost = this.makeBossHost();
+
+  private makeBossHost(): BossHost {
+    // getters: this runs before the constructor makes the effects
+    const game = this;
+    return {
+      get scene() { return game.scene; },
+      get fx() { return game.fx; },
+      get particles() { return game.particles; },
+      get telegraphs() { return game.telegraphs; },
+      get waves() { return game.waves; },
+      get puffs() { return game.puffs; },
+      time: () => this.time,
+      heroPos: () => this.hero.position,
+      heroDead: () => this.dead,
+      heroHp: () => this.hp,
+      mobs: () => this.mobs,
+      hurtHero: (raw, from, src, dot) => this.hurtHero(raw, from, src, dot),
+      slowHero: (k) => { this.heroSlow = Math.min(this.heroSlow, k); },
+      addBlocker: (x, z, r, life) => {
+        const b = { x, z, r, until: this.time + life };
+        this.blockers.push(b);
+        return { remove: () => { b.until = 0; } };
+      },
+      spawnMinion: (boss, def, at) => {
+        const m = this.addMob(def, at, this.labels);
+        m.temp = true;
+        m.owner = boss;
+        m.state = 'chase';
+        return m;
+      },
+      kill: (m) => this.killMob(m),
+      bark: (m, text) => this.fx.spawn(v1.copy(m.pos).setY(m.barY + 1), text, 'bark', 2),
+    };
+  }
+
+  /** Pushes `p` out of the boss kits' blockers. */
+  private collideBlockers(p: THREE.Vector3, radius: number) {
+    for (const b of this.blockers) {
+      if (b.until <= this.time) continue;
+      const dx = p.x - b.x;
+      const dz = p.z - b.z;
+      const rr = b.r + radius;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < rr * rr && d2 > 1e-6) {
+        const d = Math.sqrt(d2);
+        p.x = b.x + (dx / d) * rr;
+        p.z = b.z + (dz / d) * rr;
+      }
     }
   }
 
@@ -1829,6 +1939,7 @@ export class Game {
     m.burstDue = false;
     m.animDelay = -1;
     this.despawnMinions(m);
+    this.kitOf(m)?.reset?.();
   }
 
   /** `keepSouls`: the boss only lost the hero, its souls stay and keep chasing. */
@@ -1867,20 +1978,21 @@ export class Game {
     if (!this.dead && this.hero.position.distanceTo(t.at) < t.r + HERO.radius) this.hurtHero(t.dmg, t.at);
   };
 
-  private hurtHero(raw: number, from: THREE.Vector3, src?: Mob) {
+  /** `dot`: a tick of damage over time — no dodge, no crit, no counter; defense still cuts it. */
+  private hurtHero(raw: number, from: THREE.Vector3, src?: Mob, dot = false) {
     if (this.dead) return;
     const s = this.stats;
     const barY = 2.45 * this.heroScale;
     const lift = this.heroBar.el.offsetHeight + 14;
     // dodge: any blow, boss specials too
-    if (Math.random() < s.dodge) {
+    if (!dot && Math.random() < s.dodge) {
       this.fx.spawn(v1.copy(this.hero.position).setY(barY), 'Уклон', 'hurt', 0.6, { color: '#9fe8ff', lift });
       return;
     }
-    const crit = !!src && Math.random() < critChance(src.def.crit);
+    const crit = !dot && !!src && Math.random() < critChance(src.def.crit);
     // GDD 10.5: reduction = defense / (defense + 100).
     const dmg = Math.max(1, Math.round(raw * (crit ? critMul(src!.def.critDmg) : 1) * armorMul(s.defense) * this.guardMul() * (0.9 + Math.random() * 0.2)));
-    if (src) this.tryCounter(src);
+    if (src && !dot) this.tryCounter(src);
     if (src) this.fightOf(src).taken += Math.min(dmg, this.hp);
     this.hp -= dmg;
     this.hero.hit();
@@ -1894,6 +2006,7 @@ export class Game {
       for (const m of this.mobs) {
         this.endFight(m, 'death');
         if (m.def.boss && m.alive) this.resetBoss(m);
+        else if (m.alive && this.kitOf(m)) { this.despawnMinions(m); this.kitOf(m)!.reset?.(); }
       }
       this.dead = true;
       this.deadT = 0;

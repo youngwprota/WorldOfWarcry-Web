@@ -312,19 +312,23 @@ export interface BossDef {
   chaseDelay: number;
   chaseGap: number; // s between blasts
   chaseRange: number; // blasts only when the hero is this close, m
-  /** Cone attacks aimed at the hero; the boss cycles slam → cones[0] → cones[1] … (phase 2 may swap any step for the chasing blasts). */
+  /** Cone attacks aimed at the hero; the boss cycles slam → cones[0] → cones[1] … → reap (phase 2 may swap any step for the chasing blasts). */
   cones?: ConeDef[];
-  /** No slam around the boss: the cycle is the cones only (the phase 2 chasing blasts stay). */
+  /** Soul reap, the last step of the cycle. */
+  reap?: ReapDef;
+  /** No slam around the boss: the cycle is the cones and the reap only (the phase 2 chasing blasts stay). */
   noSlam?: boolean;
-  /** Packs of small mobs run in from the fort entrance when the boss HP first falls below each fraction in `at`. */
-  reinforce?: { at: number[]; pool: string[] };
+  /**
+   * Packs of small mobs run in when the boss HP first falls below each fraction in `at`: from the fort entrance
+   * (`fort`), else from the far side of the arena. `bark`: the boss's call.
+   */
+  reinforce?: { at: number[]; pool: string[]; bark: string; fort?: boolean };
   souls?: SoulsDef;
 }
-/**
- * One cone attack: `yaws` are offsets (rad) from the line to the hero, one cone each; damage = boss dmg × mul.
- * `reap`: a slow scythe sweep (`delay` s telegraph) — each of the boss's souls caught in it dies and heals the boss by reap × max HP.
- */
-export interface ConeDef { half: number; len: number; mul: number; yaws: number[]; reap?: number; delay?: number; anim?: BossAnim }
+/** One cone attack: `yaws` are offsets (rad) from the line to the hero, one cone each; damage = boss dmg × mul. */
+export interface ConeDef { half: number; len: number; mul: number; yaws: number[]; delay?: number; anim?: BossAnim }
+/** A slow scythe sweep at the hero (`delay` s telegraph): each of the boss's souls caught in it dies and heals the boss by heal × max HP. */
+export interface ReapDef { half: number; len: number; mul: number; heal: number; delay: number; anim: BossAnim }
 /**
  * Death's souls: one `mob` rises every `every` s of the fight, `burst` more at each HP fraction in `burstAt`
  * (the boss flies up `fly.height` m in `fly.up` s, hangs untargetable for `fly.hover` s in the bind pose (arms out), the burst rises, then it comes down in
@@ -474,7 +478,7 @@ export const MOBS: Record<string, MobDef> = {
         { half: 0.95, len: 6.5, mul: 2.4, yaws: [0] }, // wide and short
         { half: 0.2, len: 11, mul: 1.8, yaws: [-0.65, 0, 0.65] }, // three-cone fan
       ],
-      reinforce: { at: [0.5, 0.3, 0.2], pool: ['bandit_runner', 'bandit_hammerer', 'bandit_cutter', 'boar'] },
+      reinforce: { at: [0.5, 0.3, 0.2], pool: ['bandit_runner', 'bandit_hammerer', 'bandit_cutter', 'boar'], bark: 'Ко мне, ребята!', fort: true },
     },
   },
   // ---------- Old Cemetery: the undead hit with blades (slash), weak to hammers, resist blades and axes ----------
@@ -565,14 +569,14 @@ export const MOBS: Record<string, MobDef> = {
   },
   death: {
     id: 'death', name: 'Смерть',
-    model: { human: ['undead_king', 'reaper'], orc: ['undead_king', 'reaper'] },
+    model: { human: ['undead_king', 'death_scythe'], orc: ['undead_king', 'death_scythe'] },
     anim: 'MeleeHigh', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
     ...foes('cemetery'), reward: { power: 18 }, respawn: 1200,
     drop: { kind: 'armor', def: 'ring_power', rarity: 3 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['cemetery-peaks'],
       slamRadius: 5, slamMul: 4.7, noSlam: true, chaseMul: 2.6, phase2Dmg: 1.3,
-      cones: [{ half: Math.PI / 3, len: 6, mul: 3.2, yaws: [0], reap: 0.05, delay: 1.8, anim: 'MeleeHorizontal' }],
+      reap: { half: Math.PI / 3, len: 6, mul: 3.2, heal: 0.05, delay: 1.8, anim: 'MeleeHorizontal' },
       souls: { mob: 'skeleton_soul', every: 3, burstAt: [0.5, 0.1], burst: 6, anim: 'MeleeHigh', fly: { up: 0.6, hover: 1.5, down: 0.5, height: 3.5 }, hits: 3, ring: [2.5, 6], backHalf: Math.PI / 6 },
     },
   },
@@ -606,11 +610,13 @@ export const MOBS: Record<string, MobDef> = {
   elf_queen: {
     id: 'elf_queen', name: 'Королева перевала',
     model: { human: ['elf_queen', 'glaive_elf_queen'], orc: ['elf_queen', 'glaive_elf_queen'] },
-    anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.0,
+    anim: 'SwordAttack', hp: 16000, dmg: 100, aps: 0.25, range: 2.6, speed: 2.6, aggro: 6.5, regen: 0.03, scale: 2.0,
     ...foes('peaks'), reward: { power: 20 }, respawn: 1200,
     boss: {
       ...BOSS_BASE, titles: { human: 'Королева льдов', orc: 'Королева льдов' }, zone: 'peaks', unlocks: ['forest-peaks', 'forest-hills'],
-      slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
+      slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.15,
+      // a small guard: the fight stays about her blows
+      reinforce: { at: [0.4], pool: ['elf_sentinel', 'elf_sentinel'], bark: 'Стража, ко мне!' },
     },
   },
   elf_priestess: {
@@ -650,6 +656,7 @@ export const MOBS: Record<string, MobDef> = {
     boss: {
       ...BOSS_BASE, titles: { human: 'Шаман Чёрной Скалы', orc: 'Шаман Чёрной Скалы' }, zone: 'hills', unlocks: ['hills-grove'],
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
+      reinforce: { at: [0.6, 0.3], pool: ['orc_laborer', 'orc_axeman', 'orc_blademaster'], bark: 'Сыны Чёрной Скалы, к бою!' },
     },
   },
   // Rotten Swamp and Sand Dunes: only their bosses for now
@@ -674,7 +681,20 @@ export const MOBS: Record<string, MobDef> = {
     },
   },
 };
-/** «Свирепый вожак» of the Rocky Hills: a tauren chieftain for both factions. */
+// Local mini-bosses of the outer lands: each carries a small version of its location boss's mechanic (src/bosses).
+MOBS.frost_warden = {
+  ...MOBS.bandit_warlord, ...foes('peaks'), id: 'frost_warden', name: 'Ледяной страж', drop: undefined,
+  model: { human: ['elf_warrior', 'sword_elf_warrior'], orc: ['elf_warrior', 'sword_elf_warrior'] },
+};
+MOBS.grove_dryad = {
+  ...MOBS.bandit_warlord, ...foes('grove'), id: 'grove_dryad', name: 'Дриада', drop: undefined, scale: 1.4,
+  model: { human: ['elf_priestess', 'magic_ball'], orc: ['elf_priestess', 'magic_ball'] },
+};
+MOBS.murloc_tidehunter = {
+  ...MOBS.bandit_warlord, ...foes('swamp'), id: 'murloc_tidehunter', name: 'Мурлок-приливник', drop: undefined, creature: true, scale: 1.6,
+  model: { human: ['human_murloc', null], orc: ['human_murloc', null] },
+};
+/** «Свирепый вожак» of the Rocky Hills: a tauren chieftain for both factions (a storm-shaman mini, src/bosses). */
 MOBS.tauren_warlord = {
   ...MOBS.bandit_warlord, ...foes('hills'), id: 'tauren_warlord', name: 'Вожак тауренов', skin: 'tauren', drop: undefined,
   model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['orc_chieftain', 'axe_orc_chieftain'] }, anim: 'AxeAttack',
@@ -874,7 +894,9 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
 /** «Свирепый вожак» mini-bosses of the cemetery and the outer lands. */
 export const MINI_SPAWNER = spawner('bandit_warlord');
 /** Zones whose mini-bosses are a local variant instead of «Свирепый вожак». */
-export const MINI_SPAWNER_OF: Partial<Record<ZoneId, SpawnerDef>> = { hills: spawner('tauren_warlord') };
+export const MINI_SPAWNER_OF: Partial<Record<ZoneId, SpawnerDef>> = {
+  hills: spawner('tauren_warlord'), peaks: spawner('frost_warden'), grove: spawner('grove_dryad'), swamp: spawner('murloc_tidehunter'),
+};
 /** Round the gloves elite (world.glovesGuards): two bandit pairs in the trees. */
 export const GLOVES_BANDITS = ['bandit_thug', 'bandit_fighter', 'bandit_fighter', 'bandit_thug'].map((id) => spawner(id, FOREST_CHARGES));
 /** Static trees of the forest (world.buildForest turns some of its trees into them), charges like the forest mobs. */

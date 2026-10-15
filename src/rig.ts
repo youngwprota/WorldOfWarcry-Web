@@ -23,6 +23,8 @@ export const WEAPON_GRIPS: Record<string, {
   hammer_human_paladin: { scale: 0.75, grip: 0.16 },
   dagger: { scale: 1.15, grip: 0.15 },
   reaper: { scale: 1.05, grip: 0.3, tilt: 0.1, out: 0.2, left: ['SlashAdvance'] },
+  // Death's own copy of reaper.fbx: keeps its look whatever happens to the hero's reaper
+  death_scythe: { scale: 1.05, grip: 0.3, tilt: 0.1, out: 0.2, left: ['SlashAdvance'] },
   nagamaki: { scale: 1.0, grip: 0.22, tilt: 0.15, out: 0.3 },
   scythe: { scale: 1.0, grip: 0.42 },
   // `face`: lay the disc across the fist axis (its face looks forward), grip at its back
