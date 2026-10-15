@@ -844,7 +844,7 @@ export class Game {
     m.hp = 0;
     m.deadT = 0;
     m.ch.die();
-    m.deathKnock.copy(m.knock).multiplyScalar(KILL_FX.knockMul);
+    m.deathKnock.copy(m.knock).multiplyScalar(KILL_FX.knockMul).clampLength(0, KILL_FX.maxKnock);
     m.knock.set(0, 0, 0);
     this.shake = Math.max(this.shake, KILL_FX.shake);
     this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), bloodColor(m), KILL_FX.blood, 0.12, 6, 0.7);
