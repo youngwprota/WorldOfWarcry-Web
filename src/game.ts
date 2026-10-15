@@ -7,18 +7,18 @@ import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from '.
 import { Creature } from './creature';
 import { StaticBody } from './staticbody';
 import {
-  COMBOS, DUAL, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
-  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StatId, type WeaponDef, type ZoneDef, isPctStat,
+  COMBOS, DUAL, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS, weaponModel,
+  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type StatId, type WeaponDef, type ZoneDef, isPctStat,
 } from './config';
-import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
+import { FloatingText, Particles, Pickups, Shockwaves, Spells, Telegraphs, type PickupKind } from './fx';
 import {
   ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
 import { sfx } from './audio';
-import { writeSave, type SaveData } from './save';
-import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, type HeroClass } from './party';
+import { classKit, writeSave, type SaveData } from './save';
+import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, canWield, type HeroClass } from './party';
 import { GATE, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
 import { UI, type MapMark } from './ui';
@@ -179,6 +179,14 @@ class Mob extends Unit {
   stackEl: HTMLDivElement;
   /** Depth-scaled stats (DEPTH in config): use these instead of def.dmg / def.reward. */
   dmg: number;
+  /** Fire staff: seconds of burning left, its damage per second, seconds to the next tick. */
+  burn = 0;
+  burnDps = 0;
+  burnTick = 0;
+  /** Ice staff: seconds of the slow and of the freeze left; the tint shown (0 none, 1 slowed, 2 frozen). */
+  slow = 0;
+  frozen = 0;
+  chill = 0;
   constructor(public def: MobDef, spawn: THREE.Vector3, faction: 'human' | 'orc', layer: HTMLElement,
     mul = { hp: 1, dmg: 1, reward: 1, scale: 1 }) {
     // Bosses, micro-bosses and elites get a bigger HP bar with their name: a boss's is coloured by difficulty,
@@ -228,8 +236,16 @@ class Mob extends Unit {
     this.stackEl.textContent = n ? `×${n}` : '';
     this.stackEl.classList.toggle('on', n > 0);
   }
+  /** Ice staff tint (static bodies keep their colours). */
+  setChill(k: 0 | 1 | 2) {
+    if (k === this.chill || this.ch instanceof StaticBody) return;
+    this.chill = k;
+    this.ch.setTint(k ? STAVES.ice.tint[k - 1] : 0xffffff);
+  }
   respawn() {
     this.setStacks(0, -99);
+    this.burn = this.slow = this.frozen = 0;
+    this.setChill(0);
     this.fight = null;
     this.dying = false;
     this.loot = [];
@@ -314,6 +330,13 @@ export class Game {
   private telegraphs: Telegraphs;
   private pickups: Pickups;
   private waves: Shockwaves;
+  private spells: Spells;
+  /** Ice staff: the mob hit in a row and the hits on it toward the freeze; wind staff: landed swings toward the orb. */
+  private iceMob: Mob | null = null;
+  private iceN = 0;
+  private windN = 0;
+  /** Wind orbs in flight (pooled: `it` null = free): where they land, seconds left, the staff that threw them. */
+  private gusts: { at: THREE.Vector3; t: number; it: Item | null }[] = [];
   /** Attack state per hand (save.weapons[0] right, [1] left). */
   private hands: [Hand, Hand] = [newHand(0), newHand(1)];
   private comboShown = -1;
@@ -432,6 +455,7 @@ export class Game {
     this.pickups = new Pickups(this.scene);
     this.pickups.onCollect = (k, it) => this.collect(k, it);
     this.waves = new Shockwaves(this.scene);
+    this.spells = new Spells(this.scene);
     this.orbits = new Orbits(this.scene);
     this.falls = new Falls(this.scene);
     this.helpers = new Helpers(this.scene);
@@ -471,13 +495,17 @@ export class Game {
   switchClass(c: HeroClass) {
     if (c === this.heroClass || this.dead || this.time - this.classT < SWITCH_COOLDOWN) return false;
     this.classT = this.time;
-    this.save.cls = c;
-    sfx.click();
+    const s = this.save;
+    const bag = s.bag.length;
+    s.kits[this.heroClass] = s.weapons;
+    s.weapons = s.kits[c] ?? classKit(s, c);
+    delete s.kits[c];
+    this.newItems += s.bag.length - bag;
+    s.cls = c;
     this.particles.burst(this.hero.position.clone().setY(1), new THREE.Color(CLASSES[c].color[0]).getHex(), 18, 0.14, 4, 0.6);
-    this.ui.party(c);
     this.ui.toast(CLASSES[c].name, 1200);
+    this.afterGearChange();
     this.onClassChange(c);
-    this.persist();
     return true;
   }
   /** Totals from equipped armour and jewellery. */
@@ -496,7 +524,7 @@ export class Game {
   get weaponItem(): Item { return this.save.weapons[0] ?? this.save.weapons[1]!; }
   get weapon() { return WEAPONS[this.weaponItem.def]; }
   /** Both hands armed: each hand hits for DUAL.mul. */
-  get dual() { return !!this.save.weapons[0] && !!this.save.weapons[1]; }
+  get dual() { const w = this.save.weapons; return !!w[0] && !!w[1] && !WEAPONS[w[1].def].orb; }
   handMul() { return this.dual ? DUAL.mul : 1; }
   /** Hand multiplier of one weapon: the hidden blade carries the folded-in sword at full damage. */
   handMulOf(it: Item) { return handMulOf(this.save.weapons, this.pair, it); }
@@ -513,13 +541,23 @@ export class Game {
     const pair = swordPair(this.save.weapons[0]?.def, this.save.weapons[1]?.def);
     // the sword turns into a sickle beside the hammer, into a kitchen knife beside the pan
     const stand = pair?.kind === 'hammer' ? 'sickle' : pair?.kind === 'pan' ? 'kitchen_knife' : null;
-    const m = (it: Item | null, i: number) => (!it ? null : stand && pair!.sword === i ? stand : WEAPONS[it.def].model[this.faction]);
-    return [m(this.save.weapons[0], 0), m(this.save.weapons[1], 1)];
+    const m = (it: Item | null, i: number) => (!it ? null : stand && pair!.sword === i ? stand : weaponModel(it.def, it.rarity, this.faction));
+    const left = this.save.weapons[1];
+    return [m(this.save.weapons[0], 0), left && WEAPONS[left.def].orb ? null : m(left, 1)];
   }
 
   private equipVisual() {
     this.pair = swordPair(this.save.weapons[0]?.def, this.save.weapons[1]?.def);
-    this.hero.setWeapon(...this.handModels());
+    const [right, left] = this.save.weapons;
+    // the mage holds the staff in the left hand (MagicAttack casts with it)
+    this.hero.setWeapon(...this.handModels(), !!right && !!WEAPONS[right.def].staff);
+    this.hero.setOrb(left && WEAPONS[left.def].orb ? WEAPONS[left.def].model[this.faction] : null);
+  }
+
+    /** Mage spells leave the free right hand (the staff is in the left one), or the chest without a hand bone. */
+  private castPoint(out: THREE.Vector3) {
+    const h = this.hero.handR;
+    return h ? h.getWorldPosition(out) : out.copy(this.hero.position).setY(1.4);
   }
 
   /** Body parts borrowed from other characters for the equipped armour. */
@@ -559,6 +597,8 @@ export class Game {
     this.particles.update(dt);
     this.pickups.update(dt, this.hero.position);
     this.waves.update(dt);
+    this.updateGusts(dt);
+    this.spells.update(dt);
     this.world.update(dt, this.time, this.hero.position);
     this.render(dt);
     this.saveT += dt;
@@ -717,7 +757,7 @@ export class Game {
       const it = this.save.weapons[h.i];
       const since = this.time - h.lastSwing;
       const on = !!it && since > h.impactAt * 0.45 && since < h.impactAt * 1.5;
-      this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, it ? COMBOS[it.def].color : 0xffffff);
+      this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, on ? COMBOS[it!.def].color : 0xffffff);
     }
   }
 
@@ -753,7 +793,7 @@ export class Game {
     const w = WEAPONS[it.def];
     // beside a weapon the shield only answers blows (counterStrike); alone (or two shields) it bashes too
     const other = this.save.weapons[1 - h.i];
-    if (w.guard && other && !WEAPONS[other.def].guard) { h.combo = 0; return; }
+    if (w.orb || (w.guard && other && !WEAPONS[other.def].guard)) { h.combo = 0; return; }
     const pair = this.pair;
     // blade pair: the sword only stabs along with the blade
     if (pair?.kind === 'hidden_blade' && h.i === pair.sword) { h.combo = 0; return; }
@@ -776,8 +816,15 @@ export class Game {
       h.combo = chained ? h.combo + 1 : 1;
       h.finisher = h.combo >= combo.hits;
       h.lastSwing = this.time;
-      const impactAt = Math.min(0.42, period * 0.4);
+      // the cast clip's release is late (1.13 s), so staves aren't capped: a cap would play it 3-5x too fast
+      const impactAt = w.staff ? period * 0.4 : Math.min(0.42, period * 0.4);
       h.impactAt = impactAt;
+      h.launch = -1;
+      if (w.staff) {
+        h.launch = impactAt;
+        // capped so the hit lands before the next swing resets h.impact
+        h.flight = Math.min(t!.pos.distanceTo(this.hero.position) / STAFF_BOLT_SPEED, period * 0.5);
+      }
       const kinds = w.swing ?? (h.i === 1 ? LEFT_SWING[w.anim] : null);
       if (h.special) this.hero.swing(h.special === 'launch' ? 'uppercut' : h.special === 'fall' ? 'overhead' : 'thrust', h.i, period, impactAt);
       else if (kinds) this.hero.swing(kinds[(h.combo - 1) % kinds.length], h.i, period, impactAt);
@@ -785,8 +832,12 @@ export class Game {
       if (pair?.kind === 'hidden_blade' && w.assassin) this.hero.swing('thrust', pair.sword, period, impactAt);
       if (h.special === 'fall') this.dropBlade(impactAt);
       if (w.pull) this.reapPull(w.pull, h.finisher);
-      h.impact = impactAt;
+      h.impact = h.launch >= 0 ? impactAt + h.flight : impactAt;
       h.atkCd = period;
+    }
+    if (h.launch >= 0) {
+      h.launch -= dt;
+      if (h.launch < 0 && w.staff && t) this.spells.bolt(this.castPoint(v1), t.pos, h.flight, STAVES[w.staff].bolt);
     }
     if (h.impact >= 0) {
       h.impact -= dt;
@@ -906,7 +957,8 @@ export class Game {
       f.hits++;
       if (fin) f.combos++;
       // the reaper keeps the pulled crowd together, the pan and the blade knock heads, not bodies
-      this.damageMob(m, dmg, tier, hammerPair ? 0 : fin ? fin.knock : w.pull ? 0.5 : w.ahead || w.assassin ? 1 : 3.5, fx);
+      this.damageMob(m, dmg, tier, hammerPair ? 0 : fin ? fin.knock : w.pull ? 0.5 : w.ahead || w.assassin ? 1 : w.staff ? STAVES[w.staff].knock : 3.5, fx);
+      if (w.staff && fx !== 'miss') this.staffHit(m, w.staff, dmg, m === focus);
       if (swordHit && pair!.kind === 'hammer' && Math.random() < SWORD_PAIRS.hammer.chance) this.spawnHelper(m.pos);
       if (w.assassin) this.assassinate(m, w.assassin);
       else if (m.alive && !m.def.boss) {
@@ -922,6 +974,12 @@ export class Game {
         this.haste = Math.min(d.max, (this.time - this.hasteAt < d.decay ? this.haste : 0) + d.aps);
         this.hasteAt = this.time;
       } else if (pair!.kind === 'reaper') this.reapExcess();
+    }
+    if (w.staff === 'fire' && hits && focus) this.fireSplash(it, focus, shape, arc, range, yaw);
+    if (w.staff === 'wind' && hits) {
+      this.windN = (this.windN + 1) % STAVES.wind.orb.every;
+      if (this.windN === 0) this.throwGust(it, focus?.alive ? focus.pos : v1.copy(this.hero.position).addScaledVector(v2.set(Math.sin(yaw), 0, Math.cos(yaw)), range));
+      this.showCharge();
     }
     if (fin && pair?.kind === 'nagamaki' && w.cycle) h.special = NAGA_SPECIALS[Math.floor(Math.random() * NAGA_SPECIALS.length)];
     if (w.ahead && hits) {
@@ -966,6 +1024,115 @@ export class Game {
     this.fx.spawn(v1.copy(this.hero.position).setY(3), `Жатва ×${doomed.length}`, 'dmg weak', 1.1, { color: '#b49bff' });
     this.waves.add(this.hero.position, r.radius, COMBOS.reaper.color, 0.4);
     this.slowMo(0.08, 0.1);
+  }
+
+  /** A staff blow landed on `m` (`primary`: the target): the element's burst and effects. */
+  private staffHit(m: Mob, el: StaffElement, dmg: number, primary: boolean) {
+    this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), STAVES[el].color, 5, 0.08, 4, 0.4);
+    if (!m.alive) return;
+    if (el === 'fire') {
+      const b = STAVES.fire.burn;
+      if (m.burn <= 0) m.burnTick = b.tick;
+      m.burn = b.time;
+      m.burnDps = dmg * b.dps;
+    } else if (el === 'ice') {
+      m.slow = STAVES.ice.slow.time;
+      if (primary) this.iceHit(m);
+    }
+  }
+
+  /** Ice staff: every `freeze.every`-th hit in a row on the same mob freezes it (micro-bosses and bosses only slow). */
+  private iceHit(m: Mob) {
+    const f = STAVES.ice.freeze;
+    if (this.iceMob !== m) { this.iceMob = m; this.iceN = 0; }
+    this.iceN = (this.iceN + 1) % f.every;
+    const rank = mobRank(m.def);
+    if (this.iceN === 0 && rank !== 'mini' && rank !== 'boss') {
+      m.frozen = f.time;
+      m.stun = Math.max(m.stun, f.time);
+      m.setChill(2);
+      this.particles.burst(v2.copy(m.pos).setY(0.8 * m.def.scale), 0xe8fbff, 12, 0.12, 4, 0.7);
+      this.fx.spawn(this.unitTextAt(m, v1).setY(m.barY + 0.4), 'Заморожен!', 'dmg small', 0.9, { color: '#9fe6ff' });
+    }
+    this.showCharge();
+  }
+
+  /** Fire staff: mobs around the target outside the blow's own shape take the splash (and burn). */
+  private fireSplash(it: Item, focus: Unit, shape: 'arc' | 'circle', arc: number, range: number, yaw: number) {
+    const sp = STAVES.fire.splash;
+    this.waves.add(focus.pos, sp.radius, STAVES.fire.color, 0.3);
+    for (const m of this.mobs) {
+      if (m === focus || !m.hittable || m.pos.distanceTo(focus.pos) - m.radius > sp.radius) continue;
+      if (this.inShape(m.pos, m.radius, shape, arc, range, 0, yaw)) continue;
+      const { dmg, tier, fx } = this.damageFor(it, m.def, sp.mul);
+      this.damageMob(m, dmg, tier, STAVES.fire.knock, fx);
+      if (fx !== 'miss') this.staffHit(m, 'fire', dmg, false);
+    }
+  }
+
+  /** Wind staff: an orb flies at `at` and bursts there when it lands (updateGusts). */
+  private throwGust(it: Item, at: THREE.Vector3) {
+    const o = STAVES.wind.orb;
+    let g = this.gusts.find((x) => !x.it);
+    if (!g) { g = { at: new THREE.Vector3(), t: 0, it: null }; this.gusts.push(g); }
+    g.it = it;
+    g.t = o.flight;
+    g.at.set(at.x, 0, at.z);
+    this.spells.bolt(this.castPoint(v2), g.at, o.flight, STAVES.wind.bolt, 0.32);
+  }
+
+  private updateGusts(dt: number) {
+    const o = STAVES.wind.orb;
+    for (const g of this.gusts) {
+      if (!g.it) continue;
+      g.t -= dt;
+      if (g.t > 0) continue;
+      const it = g.it;
+      g.it = null;
+      this.spells.swirl(g.at, o.radius, 0.7, STAVES.wind.color);
+      this.waves.add(g.at, o.radius, STAVES.wind.color, 0.4);
+      for (const m of this.mobs) {
+        if (!m.hittable || m.passive || m.pos.distanceTo(g.at) - m.radius > o.radius) continue;
+        const { dmg, tier, fx } = this.damageFor(it, m.def, o.dmg);
+        this.damageMob(m, dmg, tier, 0, fx);
+        if (!m.alive) continue;
+        // knockback slides 1/9 of its speed (see reapPull): pulls `force` of the way to the centre, bosses too
+        m.knock.set(g.at.x - m.pos.x, 0, g.at.z - m.pos.z).multiplyScalar(9 * o.force);
+      }
+    }
+  }
+
+  /** Burning, slowed, frozen: timers, burn ticks, flames and the ice tint. */
+  private updateStatus(m: Mob, dt: number) {
+    if (m.burn > 0) {
+      const b = STAVES.fire.burn;
+      m.burn -= dt;
+      m.burnTick -= dt;
+      if (m.ch.root.visible && Math.random() < dt * 10) this.spells.flame(v2.copy(m.pos).setY(0.5 * m.def.scale), STAVES.fire.color);
+      if (m.burnTick <= 0) {
+        m.burnTick += b.tick;
+        this.burnMob(m, Math.max(1, Math.round(m.burnDps * b.tick * (1 + b.vuln))));
+      }
+    }
+    m.slow = Math.max(0, m.slow - dt);
+    m.frozen = Math.max(0, m.frozen - dt);
+    m.setChill(m.frozen > 0 ? 2 : m.slow > 0 ? 1 : 0);
+  }
+
+  /** A burn tick: no flash, no knockback, a small orange number. */
+  private burnMob(m: Mob, dmg: number) {
+    this.fightOf(m).dealt += Math.min(dmg, m.hp);
+    m.hp -= dmg;
+    m.hurtAt = this.time;
+    this.fx.spawn(this.unitTextAt(m), `-${fmtK(dmg)}`, 'dmg small', 0.6, { lift: m.uiEl.offsetHeight, color: '#ff9a4a' });
+    if (m.hp <= 0) this.killMob(m);
+  }
+
+  /** Staff counter on the party button: ice hits toward the freeze, wind swings toward the orb. */
+  private showCharge() {
+    const el = this.weapon.staff;
+    const n = el === 'ice' ? this.iceN : el === 'wind' ? this.windN : -1;
+    this.ui.party(this.heroClass, n < 0 ? '' : String(n), el ? '#' + STAVES[el].color.toString(16).padStart(6, '0') : '');
   }
 
   /** Where the nagamaki pair's falling sword comes down: the target, or 2 m ahead. */
@@ -1205,6 +1372,7 @@ export class Game {
       this.fx.spawn(this.unitTextAt(m), 'Промах', 'dmg resist', 0.7, { lift: m.uiEl.offsetHeight });
       return;
     }
+    if (m.burn > 0) dmg = Math.round(dmg * (1 + STAVES.fire.burn.vuln));
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
     m.hp -= dmg;
     m.hurtAt = this.time;
@@ -1412,6 +1580,10 @@ export class Game {
       const def = m.def;
       let moving = false;
       if (m.hp < m.maxHp && this.time - m.hurtAt > MOB_REGEN_DELAY) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * def.regen * dt);
+      if (m.burn > 0 || m.slow > 0 || m.frozen > 0) {
+        this.updateStatus(m, dt);
+        if (!m.alive) continue;
+      }
       // a static unit only stands: no chasing, no blows, no wandering
       if (m.passive) { m.ch.update(dt, false); continue; }
       if (m.air > 0) {
@@ -1527,7 +1699,7 @@ export class Game {
       this.world.collide(m.pos, m.radius);
       // mobs never enter the camp
       if (m.pos.z > -20) m.pos.z = -20;
-      m.ch.update(dt, moving, dHero < 34 && this.time - m.hurtAt >= HIT_FREEZE);
+      m.ch.update(dt, moving, dHero < 34 && this.time - m.hurtAt >= HIT_FREEZE && m.frozen <= 0);
     }
     if (removed) {
       this.mobs = this.mobs.filter((m) => !m.removed);
@@ -1571,6 +1743,7 @@ export class Game {
   }
 
   private stepTo(m: Mob, to: THREE.Vector3, speed: number, dt: number) {
+    if (m.slow > 0) speed *= STAVES.ice.slow.mul;
     v1.set(to.x - m.pos.x, 0, to.z - m.pos.z);
     const d = v1.length();
     if (d < 0.05) return false;
@@ -1884,7 +2057,8 @@ export class Game {
     sfx.levelUp();
     let where = '';
     // A copy of an item the hero already has levels that item up instead.
-    const own = [...this.save.weapons, ...Object.values(this.save.equip), ...this.save.bag].find((x) => x && sameItem(x, item));
+    const own = [...this.save.weapons, ...Object.values(this.save.kits).flat(), ...Object.values(this.save.equip), ...this.save.bag]
+      .find((x) => x && sameItem(x, item));
     if (own) {
       own.lvl += item.lvl;
       const gain = copyGain(item) * item.lvl;
@@ -1897,7 +2071,7 @@ export class Game {
     }
     // A weapon goes straight into a free weapon slot.
     const free = this.save.weapons.findIndex((x) => !x);
-    if (item.kind === 'weapon' && free >= 0) {
+    if (item.kind === 'weapon' && free >= 0 && canWield(this.heroClass, item.def) && !WEAPONS[item.def].staff) {
       this.save.weapons[free] = item;
       this.fx.spawn(head, `${name} → слот ${free + 1}`, 'loot', 1.4, { color });
       this.ui.toast(`${name}: второй слот оружия. Переключай кнопкой ⇄`);
@@ -1920,11 +2094,12 @@ export class Game {
   /** Equip an item from the bag; whatever was in that slot goes back into the bag. */
   equipFromBag(index: number, weaponSlot?: 0 | 1) {
     const it = this.save.bag[index];
-    if (!it) return;
+    if (!it || (it.kind === 'weapon' && !canWield(this.heroClass, it.def))) return;
     this.save.bag.splice(index, 1);
     if (it.kind === 'weapon') {
       const free = this.save.weapons.findIndex((x) => !x);
-      const slot = weaponSlot ?? (free >= 0 ? (free as 0 | 1) : 0);
+      // a staff is two-handed: always the right hand; the mage's left slot holds only an orb
+      const slot = WEAPONS[it.def].staff ? 0 : WEAPONS[it.def].orb ? 1 : weaponSlot ?? (free >= 0 ? (free as 0 | 1) : 0);
       const old = this.save.weapons[slot];
       this.save.weapons[slot] = it;
       if (old) this.save.bag.splice(index, 0, old);
@@ -1949,7 +2124,7 @@ export class Game {
   unequipWeapon(slot: 0 | 1) {
     const it = this.save.weapons[slot];
     const other = this.save.weapons[1 - slot];
-    if (!it || !other || this.save.bag.length >= BAG_SIZE) return false;
+    if (!it || !other || WEAPONS[other.def].orb || this.save.bag.length >= BAG_SIZE) return false;
     this.save.weapons[slot] = null;
     this.save.bag.push(it);
     this.afterGearChange();
@@ -2047,7 +2222,7 @@ export class Game {
       this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it) * this.handMul(), this.save.equip);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
       this.ui.gachaBadge(this.save.pulls ?? 0);
-      this.ui.party(this.heroClass);
+      this.showCharge();
     }
     this.ui.minimap(this.hero.position, this.hero.facing, this.mapDots(45), this.world, this.mapMarks(45));
   }
@@ -2306,11 +2481,13 @@ function turn(cur: number, want: number, k: number) {
 /** Swing timer and combo chain of one hand. */
 interface Hand {
   i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean;
+  /** Staff: seconds until the bolt leaves the staff (< 0 = none pending), and its flight time. */
+  launch: number; flight: number;
   /** Nagamaki pair: the next swing is this 4th blow. */
   special: NagaSpecial | null;
 }
 function newHand(i: 0 | 1): Hand {
-  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false, special: null };
+  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false, special: null, launch: -1, flight: 0 };
 }
 
 /** What a thrown scythe carries (Orbit.tag). */

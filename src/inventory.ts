@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Character } from './character';
 import {
-  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, RARITY, STAT_CURVE, STAT_SOURCE_NAME, WEAPONS, isPctStat, type StatId,
+  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, RARITY, STAT_CURVE, STAT_SOURCE_NAME, STAVES, WEAPONS, isPctStat, type StatId,
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
@@ -14,6 +14,7 @@ import { art } from './art';
 import type { Game } from './game';
 import type { UI } from './ui';
 import { pairText } from './offhand';
+import { CLASSES, canWield } from './party';
 
 /** 0.237 → "24%". */
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -394,7 +395,11 @@ export class Inventory {
     const mainIcon = it.kind === 'weapon' ? art('dps', 30) : art('defense', 30);
     const sub = rest.map(([k, v]) => `<div><span>${k}</span>${cmp(k, v)}</div>`).join('');
     let ability: string;
-    if (it.kind === 'weapon') {
+    const orb = it.kind === 'weapon' ? WEAPONS[it.def].orb : undefined;
+    if (orb) {
+      const what = orb.regen ? `<b>+${Math.round(orb.regen * 100)}%</b> к регену здоровья` : `<b>+${Math.round((orb.power ?? 0) * 100)}%</b> к урону`;
+      ability = `<div class="ab-title">Сфера</div><p>Второй слот мага, парит над правым плечом. Пока надета: ${what}.</p>`;
+    } else if (it.kind === 'weapon') {
       const c = COMBOS[it.def];
       ability = `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
       const w = WEAPONS[it.def];
@@ -404,6 +409,18 @@ export class Inventory {
       if (w.orbit) ability = `<div class="ab-title">Бросок</div><p>Коса летит вокруг героя <b>${w.orbit.time} с</b> и режет всех на пути, потом возвращается в руку.</p>` + ability;
       if (w.ring) ability = `<div class="ab-title">Бонк</div><p>Бьёт по головам в круге перед героем. Оглушает с шансом <b>${Math.round((w.stun ?? 0) * 100)}%</b>, в <b>${Math.round(w.ring.chance * 100)}%</b> случаев — звонкий удар <b>×${w.ring.mult}</b>.</p>` + ability;
       if (w.assassin) ability = `<div class="ab-title">Убийца</div><p>Рывок к ближайшему врагу и удар только по нему. Всегда оглушает на <b>${w.assassin.stun} с</b>, обычных врагов ниже <b>${Math.round(w.assassin.execute * 100)}%</b> хп казнит.</p>` + ability;
+      if (w.staff === 'fire') {
+        const f = STAVES.fire;
+        ability = `<div class="ab-title">Поджог</div><p>Бьёт на <b>${w.range} м</b>. Враги в <b>${f.splash.radius} м</b> от цели получают <b>×${f.splash.mul}</b> урона. Задетые горят <b>${f.burn.time} с</b> и получают <b>+${Math.round(f.burn.vuln * 100)}%</b> урона от всего.</p>` + ability;
+      }
+      if (w.staff === 'ice') {
+        const f = STAVES.ice;
+        ability = `<div class="ab-title">Стужа</div><p>Бьёт на <b>${w.range} м</b>, одну цель. Замедляет врага на <b>${Math.round((1 - f.slow.mul) * 100)}%</b> на <b>${f.slow.time} с</b>. Каждый <b>${f.freeze.every}-й</b> удар подряд по одному врагу замораживает его на <b>${f.freeze.time} с</b> (кроме мини-боссов и боссов).</p>` + ability;
+      }
+      if (w.staff === 'wind') {
+        const o = STAVES.wind.orb;
+        ability = `<div class="ab-title">Вихрь</div><p>Бьёт на <b>${w.range} м</b> и отбрасывает врагов. Каждый <b>${o.every}-й</b> удар бросает вихрь: <b>×${o.dmg}</b> урона в радиусе <b>${o.radius} м</b>, враги (и боссы) стягиваются к центру.</p>` + ability;
+      }
       if (w.guard) ability = `<div class="ab-title">Защита</div><p>−${Math.round(w.guard.reduce * 100)}% входящего урона. Удар по герою с шансом <b>${Math.round(w.guard.counter.normal * 100)}–${Math.round(w.guard.counter.boss * 100)}%</b> (чем сильнее враг, тем выше) вызывает контратаку оружием в другой руке. Рядом с оружием сам не бьёт.</p>` + ability;
       const pt = pairText(it.def);
       if (pt) ability += `<div class="ab-title">С мечом в другой руке</div><p>${pt}</p>`;
@@ -415,7 +432,10 @@ export class Inventory {
     if (src.at === 'bag') {
       actions = btn('discard', 'Выбросить');
       if (it.kind === 'weapon') {
-        actions += btn('eq0', 'В правую', 'primary') + btn('eq1', 'В левую', 'primary');
+        const staff = !!(WEAPONS[it.def].staff || WEAPONS[it.def].orb);
+        if (!canWield(g.heroClass, it.def)) actions += `<button class="btn" disabled>${staff ? `Только: ${CLASSES.mage.name}` : 'Маг носит только посохи'}</button>`;
+        else if (staff) actions += btn('eq0', 'Экипировать', 'primary');
+        else actions += btn('eq0', 'В правую', 'primary') + btn('eq1', 'В левую', 'primary');
       } else actions += btn('equip', 'Экипировать', 'primary');
     } else if (src.at === 'armor') {
       actions = btn('unequip', 'Снять', 'red');

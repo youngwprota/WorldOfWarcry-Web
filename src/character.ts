@@ -35,6 +35,8 @@ const outlineMat = (() => {
 
 const shadowGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const shadowMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false });
+/** Mage orb rest point in the character's root space (right shoulder, a bit above it: the staff is in the left hand). */
+const ORB_AT = new THREE.Vector3(-0.45, 1.9, -0.1);
 
 export function blobShadow(size: number): THREE.Mesh {
   const m = new THREE.Mesh(shadowGeo, shadowMat);
@@ -51,10 +53,16 @@ export function blobShadow(size: number): THREE.Mesh {
 export class Character {
   readonly root = new THREE.Group();
   readonly model: THREE.Group;
+  /** Right hand bone (mage spells start there). */
+  readonly handR: THREE.Object3D | null;
   readonly mixer: THREE.AnimationMixer;
   weapon: THREE.Object3D | null = null;
   /** Second weapon in the left hand. */
   weaponL: THREE.Object3D | null = null;
+  /** Mage orb floating above the left shoulder, and its inner core (spins). */
+  private orb: THREE.Object3D | null = null;
+  private orbCore: THREE.Object3D | null = null;
+  private orbT = 0;
   private materials: THREE.MeshLambertMaterial[] = [];
   private flashT = 0;
   private baseColor = new THREE.Color(1, 1, 1);
@@ -87,6 +95,7 @@ export class Character {
 
   constructor(modelName: string, weaponName: string | null, scale = 1, skin?: string) {
     this.model = assets.clone(modelName);
+    this.handR = this.model.getObjectByName('hand_r') ?? null;
     this.model.scale.multiplyScalar(scale);
     this.root.add(this.model);
     this.root.add(blobShadow(1.3 * scale));
@@ -135,7 +144,7 @@ export class Character {
       a.setEffectiveWeight(0);
       return a;
     };
-    this.attackU = { SwordAttack: once(upper.SwordAttack), AxeAttack: once(upper.AxeAttack) };
+    this.attackU = { SwordAttack: once(upper.SwordAttack), AxeAttack: once(upper.AxeAttack), MagicAttack: once(upper.MagicAttack) };
     this.hitU = once(upper.Hit);
     this.death = once(full.Death);
     // Desync idle cycles between characters.
@@ -144,13 +153,26 @@ export class Character {
     this.walkL.time = this.walkU.time = off;
   }
 
-  setWeapon(name: string | null, left: string | null = null) {
+  /** `mainLeft`: the main weapon goes into the left hand (the mage's staff). */
+  setWeapon(name: string | null, left: string | null = null, mainLeft = false) {
     this.weapon?.removeFromParent();
     this.weaponL?.removeFromParent();
-    this.weapon = name ? attachWeapon(this.model, name) : null;
+    this.weapon = name ? attachWeapon(this.model, name, mainLeft) : null;
     this.weaponL = left ? attachWeapon(this.model, left, true) : null;
     for (const w of [this.weapon, this.weaponL]) w?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
     if (this.highlighted) this.rebuildOutline();
+  }
+
+  setOrb(name: string | null) {
+    this.orb?.removeFromParent();
+    this.orb = this.orbCore = null;
+    if (!name) return;
+    this.orb = assets.cloneCreature(name).model;
+    this.orb.position.copy(ORB_AT);
+    this.orbCore = this.orb.getObjectByName(`${name}_core`) ?? null;
+    // the glass must not hide the core behind it
+    this.orb.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material | undefined; if (m?.transparent) m.depthWrite = false; });
+    this.root.add(this.orb);
   }
 
   /** Player hero: a bit bigger and with a dark outline (no extra brightness: it washed the textures out). */
@@ -318,6 +340,11 @@ export class Character {
     if (this.flashT > 0) {
       this.flashT -= dt;
       applyHitFlash(this.materials, this.flashT);
+    }
+    if (this.orb) {
+      this.orbT += dt;
+      this.orb.position.y = ORB_AT.y + Math.sin(this.orbT * 2.2) * 0.06;
+      if (this.orbCore) this.orbCore.rotation.y += dt * 1.5;
     }
     if (!animate) return;
     if (!this.dead) {

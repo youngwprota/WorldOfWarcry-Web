@@ -1,6 +1,6 @@
 import { FACTIONS, HERO, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
 import { BASE_STATS, type PctPoints, type StatPoints } from './balance';
-import { ARMOR, makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
+import { ARMOR, BAG_SIZE, makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
 import { CLASSES, type HeroClass } from './party';
 
 /**
@@ -18,7 +18,10 @@ export interface SaveData {
   src: Partial<Record<SavedSource, StatPoints>>;
   /** Percent bonuses by source (+1 = +1%) to hp, regen and power. */
   pct: Partial<Record<SavedSource, PctPoints>>;
+  /** Weapons of the party member on the field (right, left hand). */
   weapons: [Item | null, Item | null];
+  /** Weapons of the party members off the field; a class missing here has not taken the field yet (classKit). */
+  kits: Partial<Record<HeroClass, [Item | null, Item | null]>>;
   active: 0 | 1;
   equip: Partial<Record<ArmorSlot, Item>>;
   bag: Item[];
@@ -58,6 +61,7 @@ export function newSave(faction: FactionId): SaveData {
     src: {},
     pct: {},
     weapons: [makeItem('weapon', FACTIONS[faction].startWeapon, 0, 1), null],
+    kits: {},
     active: 0,
     equip: {},
     bag: [],
@@ -101,10 +105,41 @@ export function loadSave(): SaveData | null {
     d.src ??= {};
     d.pct ??= {};
     if (!d.cls || !CLASSES[d.cls]) d.cls = 'warrior';
+    if (!d.kits) {
+      // saves from before the per-class weapons: what is in hand was the warrior's
+      d.kits = {};
+      if (d.cls !== 'warrior') { d.kits.warrior = d.weapons; d.weapons = classKit(d, d.cls); }
+    }
+    for (const c of Object.keys(d.kits) as HeroClass[]) {
+      const k = d.kits[c]!.map((w) => (w ? known(normalizeItem(w)) : null)) as SaveData['weapons'];
+      if (k[0] || k[1]) d.kits[c] = k; else delete d.kits[c];
+    }
+    giveOrbs(d);
     return d;
   } catch {
     return null;
   }
+}
+
+/** Mages from before the orbs: the kit's orbs once (left slot if free, the rest into the bag). */
+function giveOrbs(d: SaveData) {
+  const kit = CLASSES.mage.kit!;
+  const hands = d.cls === 'mage' ? d.weapons : d.kits.mage;
+  if (!hands) return;
+  const owned = [...hands, ...d.bag].some((it) => it && WEAPONS[it.def].orb);
+  if (owned) return;
+  for (const def of [kit.left!, ...kit.bag.filter((x) => WEAPONS[x].orb)]) {
+    if (!hands[1]) hands[1] = makeItem('weapon', def, 0, 1);
+    else if (d.bag.length < BAG_SIZE) d.bag.push(makeItem('weapon', def, 0, 1));
+  }
+}
+
+/** Weapons of a class taking the field for the first time; its extra start weapons go into the bag. */
+export function classKit(d: SaveData, c: HeroClass): SaveData['weapons'] {
+  const kit = CLASSES[c].kit;
+  if (!kit) return [makeItem('weapon', FACTIONS[d.faction].startWeapon, 0, 1), null];
+  for (const def of kit.bag) if (d.bag.length < BAG_SIZE) d.bag.push(makeItem('weapon', def, 0, 1));
+  return [makeItem('weapon', kit.hand, 0, 1), kit.left ? makeItem('weapon', kit.left, 0, 1) : null];
 }
 
 /** The item if its def still exists, else null. */

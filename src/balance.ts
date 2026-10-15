@@ -96,13 +96,14 @@ export function heroStats(b: HeroBuild) {
   const p = (k: StatId) => statBreakdown(b, k, g).sum;
   const power = statBreakdown(b, 'power', g);
   const speedStat = p('speed');
+  const orb = orbMul(b.weapons);
   return {
     power: power.sum,
-    powerMul: power.mult,
+    powerMul: power.mult * orb.power,
     defense: p('defense'),
     maxHp: Math.round(statBreakdown(b, 'hp', g).value),
     /** HP per second (percents may make it fractional). */
-    regen: statBreakdown(b, 'regen', g).value,
+    regen: statBreakdown(b, 'regen', g).value * orb.regen,
     speedStat,
     /** Running speed, m/s. */
     speed: runSpeed(speedStat),
@@ -115,7 +116,13 @@ export function heroStats(b: HeroBuild) {
   };
 }
 
-const isDual = (w: HeroBuild['weapons']) => !!w[0] && !!w[1];
+const isDual = (w: HeroBuild['weapons']) => !!w[0] && !!w[1] && !WEAPONS[w[1].def].orb;
+
+/** Passive multipliers of the equipped mage orb (1 without one). */
+export function orbMul(weapons: HeroBuild['weapons']) {
+  const o = weapons[1] && WEAPONS[weapons[1].def].orb;
+  return { regen: 1 + (o?.regen ?? 0), power: 1 + (o?.power ?? 0) };
+}
 
 /** Hand multiplier of one weapon: the hidden blade carries the folded-in sword at full damage. */
 export function handMulOf(weapons: HeroBuild['weapons'], pair: Pair | null, it: Item) {
@@ -132,7 +139,7 @@ export function heroDps(weapons: HeroBuild['weapons'], pair: Pair | null, power:
   for (const it of weapons) {
     if (!it) continue;
     const w = WEAPONS[it.def];
-    if (w.guard && isDual(weapons)) continue;
+    if (w.orb || (w.guard && isDual(weapons))) continue;
     if (blade && it.def === 'sword') continue;
     const r = resist ? RESIST_MULT[resist[w.type] ?? 'normal'] : 1;
     const k = blade ? SWORD_PAIRS.hidden_blade.dmg * SWORD_PAIRS.hidden_blade.aps : 1;

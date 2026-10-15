@@ -42,7 +42,7 @@ function textureFor(name: string): string {
   return 'proto_human_RTS_color';
 }
 
-export const ANIMS = ['Idle', 'Walk', 'SwordAttack', 'AxeAttack', 'Hit', 'Death'] as const;
+export const ANIMS = ['Idle', 'Walk', 'SwordAttack', 'AxeAttack', 'MagicAttack', 'Hit', 'Death'] as const;
 export type AnimName = (typeof ANIMS)[number];
 
 /** Bones that belong to the upper-body layer (spine_01 and its descendants). */
@@ -90,6 +90,17 @@ class Assets {
       names.map(async (n) => {
         const g = await this.gltf.loadAsync(`${BASE}models/${n}.glb`);
         this.creatures.set(n, { scene: g.scene, clips: g.animations });
+      }),
+    );
+  }
+
+  /** Static GLB props (weapon rarity tiers) that keep their own materials; cloned like FBX models. */
+  async loadProps(names: string[]) {
+    await Promise.all(
+      names.map(async (n) => {
+        const g = (await this.gltf.loadAsync(`${BASE}models/${n}.glb`)).scene;
+        g.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = false; });
+        this.sources.set(n, g);
       }),
     );
   }

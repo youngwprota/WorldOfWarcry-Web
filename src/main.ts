@@ -65,10 +65,13 @@ for (const f of Object.values(FACTIONS)) {
   f.campProps.forEach((p) => models.add(p));
   models.add(f.campfire);
 }
-for (const w of Object.values(WEAPONS)) Object.values(w.model).forEach((m) => models.add(m));
+for (const w of Object.values(WEAPONS)) if (!w.orb) Object.values(w.model).forEach((m) => models.add(m));
 models.add('sickle').add('kitchen_knife'); // sword stand-ins in sword pairs (src/offhand.ts)
 models.add('sword_undead_king'); // the Lich King's sword: prologue and the faction choice scene
+const props = new Set<string>();
+for (const w of Object.values(WEAPONS)) w.tiers?.forEach((m) => props.add(m));
 const creatures = new Set<string>();
+for (const w of Object.values(WEAPONS)) if (w.orb) Object.values(w.model).forEach((m) => creatures.add(m));
 for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { (m.creature ? creatures : models).add(c); if (w) models.add(w); }
 for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
 // gacha forge scene (src/forge3d.ts): anvil and decor are cloned from here
@@ -94,6 +97,7 @@ for (const [m] of FORGE3D.decor) models.add(m);
 await Promise.all([
   assets.loadAll([...models], (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`)),
   assets.loadCreatures([...creatures]),
+  assets.loadProps([...props]),
 ]);
 ui.loading(1, 'Готово');
 

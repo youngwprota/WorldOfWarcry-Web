@@ -157,6 +157,7 @@ export function scrapValue(it: Item) {
 export function itemLines(it: Item): [string, string][] {
   if (it.kind === 'weapon') {
     const w = WEAPONS[it.def];
+    if (w.orb) return [w.orb.regen ? ['Реген здоровья', `+${Math.round(w.orb.regen * 100)}%`] : ['Урон', `+${Math.round((w.orb.power ?? 0) * 100)}%`]];
     return [
       ['Урон', String(Math.round(weaponDamage(it)))],
       ['Тип', DAMAGE_TYPE_NAME[w.type]],

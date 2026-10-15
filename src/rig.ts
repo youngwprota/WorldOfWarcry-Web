@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { assets } from './assets';
+import { WEAPONS } from './config';
 
 /**
  * Per-weapon grip tweaks. The grip is derived from geometry (bottom of the weapon's long axis),
@@ -29,6 +30,10 @@ export const WEAPON_GRIPS: Record<string, { tilt?: number; out?: number; grip?: 
   kitchen_knife: { scale: 1.6, grip: 0.12 },
   spear_undead_warrior: { scale: 0.7, grip: 0.4, tilt: 0.1, out: 0.15 },
 };
+
+/** Mage staves: shortened and held at the bottom of the shaft wrap (45-55% of the height), whatever staff model a staff def uses. */
+const STAFF_GRIP = { grip: 0.46, scale: 0.75 };
+const staffModels = new Set(Object.values(WEAPONS).filter((w) => w.staff).flatMap((w) => [...Object.values(w.model), ...(w.tiers ?? [])]));
 
 /** Palm centre in hand_r space (cm). */
 const PALM = new THREE.Vector3(-9, -4, 0);
@@ -66,7 +71,7 @@ function gripPoint(name: string, w: THREE.Object3D, frac: number): THREE.Vector3
  */
 export function attachWeapon(character: THREE.Object3D, weapon: string, left = false): THREE.Object3D {
   const hand = character.getObjectByName(left ? 'hand_l' : 'hand_r')!;
-  const cfg = WEAPON_GRIPS[weapon] ?? {};
+  const cfg = WEAPON_GRIPS[weapon] ?? (staffModels.has(weapon) ? STAFF_GRIP : {});
   const inner = assets.clone(weapon);
   inner.scale.setScalar(1); // hand bone already lives in the 0.01-scaled character space (cm)
   inner.position.set(0, 0, 0);

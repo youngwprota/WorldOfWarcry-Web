@@ -29,7 +29,7 @@ export function pull(pity: number, lvl: number): PullResult {
   const rarity = GACHA.tiers[tier];
   const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
   const item = Math.random() < 0.4
-    ? makeItem('weapon', pick(Object.keys(WEAPONS)), rarity, lvl)
+    ? makeItem('weapon', pick(Object.keys(WEAPONS).filter((k) => !WEAPONS[k].staff && !WEAPONS[k].orb)), rarity, lvl)
     : makeItem('armor', pick(Object.keys(ARMOR)), rarity, lvl);
   return { item, pity: pity + 1 };
 }

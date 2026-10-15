@@ -237,9 +237,14 @@ export class UI {
     $('btn-gacha').dataset.badge = n > 0 ? String(n) : '';
   }
 
-  /** Party buttons bottom-right: the class on the field is lit. */
-  party(active: HeroClass) {
-    $('party').querySelectorAll<HTMLElement>('[data-cls]').forEach((b) => b.classList.toggle('on', b.dataset.cls === active));
+  /** Party buttons bottom-right: the class on the field is lit; `charge` is its staff counter badge ('' = none). */
+  party(active: HeroClass, charge = '', color = '') {
+    $('party').querySelectorAll<HTMLElement>('[data-cls]').forEach((b) => {
+      const on = b.dataset.cls === active;
+      b.classList.toggle('on', on);
+      b.dataset.charge = on ? charge : '';
+      if (on && color) b.style.setProperty('--cc', color);
+    });
   }
 
   bagBadge(n: number, full: boolean) {
