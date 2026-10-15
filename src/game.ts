@@ -4,7 +4,7 @@ import { Trail } from './swing';
 import { Creature } from './creature';
 import { StaticBody } from './staticbody';
 import {
-  COMBOS, FACTIONS, GACHA, PETS, START_PET, type PetDef, ZONE_TIER, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
+  COMBOS, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
   mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type StatId, type WeaponDef, type ZoneDef, isPctStat,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Spells, Telegraphs, type PickupKind } from './fx';
@@ -1198,7 +1198,7 @@ export class Game {
     for (const it of m.loot) this.pickups.spawnItem(m.pos, it);
     m.loot = [];
     if (m.def.bonus) this.grantBonus(m);
-    if (!m.owner && Math.random() < GACHA.token[mobRank(m.def)]) this.grantPull(m);
+    if (!m.owner && Math.random() < tokenChance(mobRank(m.def), this.world.zoneAt(m.spawn.x, m.spawn.z).id)) this.grantPull(m);
     if (m.def.boss) this.persist();
   }
 

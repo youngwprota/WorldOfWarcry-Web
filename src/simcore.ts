@@ -3,8 +3,8 @@
 // in a worker) both run it.
 import * as CONFIG from './config';
 import {
-  ATTACK_HIT, BREAKABLES, COMBOS, FACTIONS, FOREST_TREES, GACHA, GLOVES_BANDITS, GUARD_SPAWNERS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
-  PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, START_PET, STAVES, WEAPONS, depthMul, mobImpact, mobRank,
+  ATTACK_HIT, BREAKABLES, COMBOS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
+  PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, START_PET, STAVES, WEAPONS, depthMul, mobImpact, mobRank, tokenChance as zoneTokenChance,
   type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
 import { addStat, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, heroStats, type HeroBuild } from './balance';
@@ -433,8 +433,8 @@ function dummyDps(h: Hero, c: HeroClass, weapons: Kit, zone: ZoneId) {
 }
 
 // ---------- the bot ----------
-/** Gacha pulls a kill gives on average (filled in by the pull drops, GACHA.token). */
-const tokenChance = (u: Unit) => (u.kind === 'mob' ? GACHA.token[mobRank(MOBS[u.def])] : 0);
+/** Gacha pulls a kill gives on average (config tokenChance: GACHA.token, none in GACHA.noTokens locations). */
+const tokenChance = (u: Unit) => (u.kind === 'mob' ? zoneTokenChance(mobRank(MOBS[u.def]), u.zone) : 0);
 
 export interface Snap {
   t: number; zone: string; power: number; maxHp: number; regen: number; defense: number; weapons: string; kills: number; deaths: number; pulls: number;

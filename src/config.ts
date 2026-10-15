@@ -421,8 +421,8 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['orc_peon', 'sword_orc_warrior'], orc: ['peasant', 'sword_soldier'] },
     anim: 'SwordAttack', hp: 2000, dmg: 17, aps: 0.6, range: 1.8, speed: 3.0, aggro: 5.2, regen: 0.03, scale: 1.45,
     ...foes('forest'), reward: { regen: 3 }, respawn: 300,
-    // the key to the chief, who shrugs off blades: the deepest elite of the forest hands every hero an axe
-    drop: { kind: 'weapon', def: 'axe', rarity: 0 },
+    // a copy of the hero's starting sword: it levels the sword up
+    drop: { kind: 'weapon', def: 'sword', rarity: 0 },
   },
   // Reinforcements of the bandit chief: weak, no drops (they leave only a few orbs).
   bandit_runner: {
@@ -466,10 +466,10 @@ export const MOBS: Record<string, MobDef> = {
   bandit_chief: {
     id: 'bandit_chief', name: 'Атаман',
     model: { human: ['orc_chieftain', 'sword_orc_warrior'], orc: ['paladin', 'sword_human_knight'] },
-    // tuned to the hero after one forest cycle (every spawner through its charges): a coin flip at ~90% of it
-    anim: 'SwordAttack', hp: 15000, dmg: 38, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
+    // tuned to the hero after one forest cycle on the forest's own drops (no gacha there): a coin flip at ~90% of it
+    anim: 'SwordAttack', hp: 10500, dmg: 34, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
     ...foes('forest'), reward: { power: 12 }, respawn: 900,
-    // the forest's swords barely scratch him (−50%): the lumberjack's axe cuts through; his hammer is the key to the undead behind the gate
+    // the forest's swords barely scratch him (−50%); his hammer is the key to the undead behind the gate
     resist: { slash: 'resist' },
     drop: { kind: 'weapon', def: 'hammer', rarity: 0 },
     boss: {
@@ -919,6 +919,8 @@ export const GACHA = {
   pity: 60,
   /** Chance a kill gives one pull, by mob rank (tuned with `npm run sim` to ~1 pull per 5 min of play). */
   token: { normal: 0.015, elite: 0.15, mini: 0.3, boss: 1 } as Record<MobRank, number>,
+  /** Locations whose kills never give a pull (bosses there too): the first one is beaten on the forest's own drops alone. */
+  noTokens: ['forest'] as ZoneId[],
   banner: { def: 'hammer', name: 'Молот Короля-лича', subtitle: 'Выкован из костей павших королей. Шанс повышен!' },
   /** Hammer blows per pull; the rarity colour can climb after each, legendary only on the last one. */
   strikes: 5,
@@ -926,6 +928,8 @@ export const GACHA = {
   strikeGap: 0.6,
   revealHold: 0.9,
 };
+/** Chance a kill of a `rank` mob from location `zone` gives a gacha pull (GACHA.token, none in GACHA.noTokens). */
+export const tokenChance = (rank: MobRank, zone: ZoneId) => (GACHA.noTokens.includes(zone) ? 0 : GACHA.token[rank]);
 
 /** 3D forge scene of the gacha (src/forge3d.ts). Positions in metres; `top` = anvil top, y offsets are added to it. */
 export const FORGE3D = {
