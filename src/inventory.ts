@@ -13,7 +13,6 @@ import { DAMAGE_TYPE_ICON, fmtK, icon } from './icons';
 import { art } from './art';
 import type { Game } from './game';
 import type { UI } from './ui';
-import { pairText } from './offhand';
 
 /** 0.237 → "24%". */
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -157,7 +156,7 @@ export class Inventory {
     const g = this.game;
     const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
     const s = g.stats;
-    const hit = g.itemDamage(g.weaponItem) * g.handMul();
+    const hit = g.itemDamage(g.weaponItem);
     const big = (ic: string, v: string, label: string) => `<div>${art(ic, 46)}<b>${v}</b><span>${label}</span></div>`;
     q('#i-big').innerHTML = big('dps', fmtK(g.heroDps()), 'урон/с') + big('heart', fmtK(g.maxHp), 'хп') +
       big('regen', fmtK(g.regen), 'хп/с');
@@ -405,8 +404,6 @@ export class Inventory {
       if (w.ring) ability = `<div class="ab-title">Бонк</div><p>Бьёт по головам в круге перед героем. Оглушает с шансом <b>${Math.round((w.stun ?? 0) * 100)}%</b>, в <b>${Math.round(w.ring.chance * 100)}%</b> случаев — звонкий удар <b>×${w.ring.mult}</b>.</p>` + ability;
       if (w.assassin) ability = `<div class="ab-title">Убийца</div><p>Рывок к ближайшему врагу и удар только по нему. Всегда оглушает на <b>${w.assassin.stun} с</b>, обычных врагов ниже <b>${Math.round(w.assassin.execute * 100)}%</b> хп казнит.</p>` + ability;
       if (w.guard) ability = `<div class="ab-title">Защита</div><p>−${Math.round(w.guard.reduce * 100)}% входящего урона. Удар по герою с шансом <b>${Math.round(w.guard.counter.normal * 100)}–${Math.round(w.guard.counter.boss * 100)}%</b> (чем сильнее враг, тем выше) вызывает контратаку оружием в другой руке. Рядом с оружием сам не бьёт.</p>` + ability;
-      const pt = pairText(it.def);
-      if (pt) ability += `<div class="ab-title">С мечом в другой руке</div><p>${pt}</p>`;
     } else {
       ability = `<div class="ab-title">Комплект</div><p>${it.rarity > 0 || rest.length ? 'Бонус к стату действует, пока предмет надет.' : 'У обычных предметов нет бонуса. Ищи <b>необычные</b> и выше.'}</p>`;
     }

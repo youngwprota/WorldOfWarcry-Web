@@ -1,10 +1,9 @@
 // Combat and hero-stat formulas without three/DOM: the game and the balance simulator (tools/sim.ts) share them.
 import {
-  DEFENSE_CAP, DUAL, HERO, RESIST_MULT, STAT_CURVE, STAT_SOURCES, SWORD_PAIRS, WEAPONS,
+  DEFENSE_CAP, HERO, RESIST_MULT, STAT_CURVE, STAT_SOURCES, WEAPONS,
   type DamageType, type FactionId, type PctStat, type ResistTier, type SavedSource, type StatId, type StatSource,
 } from './config';
 import { armorStats, weaponDamage, type ArmorSlot, type Item } from './items';
-import type { Pair } from './offhand';
 
 export type StatPoints = Partial<Record<StatId, number>>;
 export type PctPoints = Partial<Record<PctStat, number>>;
@@ -115,28 +114,15 @@ export function heroStats(b: HeroBuild) {
   };
 }
 
-const isDual = (w: HeroBuild['weapons']) => !!w[0] && !!w[1];
-
-/** Hand multiplier of one weapon: the hidden blade carries the folded-in sword at full damage. */
-export function handMulOf(weapons: HeroBuild['weapons'], pair: Pair | null, it: Item) {
-  if (pair?.kind === 'hidden_blade' && it.def !== 'sword') return 1;
-  // beside a shield the weapon is the only one that swings
-  const other = weapons[weapons[0] === it ? 1 : 0];
-  return other && WEAPONS[other.def].guard && !WEAPONS[it.def].guard ? 1 : isDual(weapons) ? DUAL.mul : 1;
-}
-
-/** Plain-swing DPS of both hands together; `resist` applies each hand's own damage type. */
-export function heroDps(weapons: HeroBuild['weapons'], pair: Pair | null, power: number, powerMul: number, crit: number, resist?: Partial<Record<DamageType, ResistTier>>) {
+/** Plain-swing DPS of the swinging weapons (a shield never swings beside a weapon); `resist` applies each one's damage type. */
+export function heroDps(weapons: HeroBuild['weapons'], power: number, powerMul: number, crit: number, resist?: Partial<Record<DamageType, ResistTier>>) {
   let dps = 0;
-  const blade = pair?.kind === 'hidden_blade';
   for (const it of weapons) {
     if (!it) continue;
     const w = WEAPONS[it.def];
-    if (w.guard && isDual(weapons)) continue;
-    if (blade && it.def === 'sword') continue;
+    if (w.guard && weapons.some((x) => x && !WEAPONS[x.def].guard)) continue;
     const r = resist ? RESIST_MULT[resist[w.type] ?? 'normal'] : 1;
-    const k = blade ? SWORD_PAIRS.hidden_blade.dmg * SWORD_PAIRS.hidden_blade.aps : 1;
-    dps += weaponDamage(it, power, powerMul) * w.aps * r * k * handMulOf(weapons, pair, it);
+    dps += weaponDamage(it, power, powerMul) * w.aps * r;
   }
   return dps * crit;
 }

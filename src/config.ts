@@ -154,38 +154,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
 };
 
-/** Two weapons at once: each hand hits for `mul` of its damage (both hands ≈ ×1.2 of one). */
-export const DUAL = { mul: 0.6 };
-
-/**
- * A sword in one hand and weapon X in the other: the pair bonus (src/offhand.ts). The sword itself swings plainly
- * unless noted. Numbers are tuned by the balance bench (docs/features/new-weapons/handoff.md).
- */
-export const SWORD_PAIRS = {
-  /** Every sword hit: +`aps` attack speed for the daggers, up to +`max`, gone `decay` s after the last sword hit. */
-  dagger: { aps: 0.08, max: 0.4, decay: 2.5 },
-  /** Sword hit with more than `limit` plain mobs within `radius` m: the extra ones (weakest first) die; every `cd` s. */
-  reaper: { limit: 7, radius: 5, cd: 4 },
-  /** Sword hits also cut `pct` of the mob's current HP (`boss` for elites, minis and bosses); hands swing together. */
-  axe: { pct: 0.04, boss: 0.01 },
-  /** Sword hit: `chance` the mob attacks right away (feeds the shield's counters). */
-  shield: { chance: 0.15 },
-  /** The sword stabs along with the blade: blade damage × `dmg`, attack speed × `aps`; no swings of its own. */
-  hidden_blade: { dmg: 1.45, aps: 0.85 },
-  /** After the thrust a 4th blow, one of: falling sword, launch, dash — × `mult`. */
-  nagamaki: { mult: 1.8, fall: 2.4, dash: 3.5 },
-  /** Scythe cut: `chance` a sword starts circling that mob for `time` s, cutting it (×`mult`) every `rehit` s; it may
-   *  jump to a mob within `jumpR` m with `jump` chance per cut; at most `max` at once. */
-  scythe: { chance: 0.2, time: 4, rehit: 0.5, mult: 0.35, jump: 0.15, jumpR: 4, max: 6 },
-  /** Hammer: no knockback, damage × (1 + `center` × closeness to the centre); the sword becomes a sickle: hit
-   *  `chance` → a helper with a sickle or a hammer for `time` s (sickle helpers spawn more with `chain`), ≤ `max`. */
-  hammer: { center: 0.6, chance: 0.1, chain: 0.05, time: 8, max: 4, dmg: 0.5 },
-  /** The sword becomes a kitchen knife: mobs within `radius` m run away for `time` s; all damage × `dmg`; props
-   *  are left alone. */
-  pan: { radius: 6, time: 3, dmg: 0.5 },
-};
-export type SwordPair = keyof typeof SWORD_PAIRS;
-
 export const SHARPEN = { max: 10, perLevel: 0.08, cost: (lvl: number) => 40 + lvl * lvl * 25 };
 
 /** Combo finisher: the 3rd uninterrupted hit in a row (each swing must connect, no pause between). */
