@@ -64,32 +64,10 @@ export interface WeaponDef {
   stun?: number; // chance
   /** Plain swings hit only the current target (the combo finisher still hits an area). */
   single?: boolean;
-  /**
-   * Daggers: every hit on a mob adds `add` to the damage on that mob, up to `max` stacks; the stacks drop off
-   * `decay` seconds after the last hit.
-   */
-  stack?: { add: number; max: number; decay: number };
-  /**
-   * Reaper: each swing drags mobs within `radius` m (×2 on the finisher) towards a point `ahead` m in front of
-   * the hero (bosses stay); `force` = share of the way they slide. Then the blow deals
-   * × (1 + perEnemy × (mobs hit − 1)), up to × `max`.
-   */
-  pull?: { radius: number; ahead: number; force: number; perEnemy: number; max: number };
   /** Procedural swings (src/swing.ts) cycled along the combo chain, instead of the `anim` clip. */
   swing?: SwingKind[];
   /** Nagamaki: the chain never breaks (a pause or a whiff does not reset it), the finisher is a narrow thrust. */
   cycle?: boolean;
-  /** Pan: the 'circle' is centred `ahead` m in front of the hero (radius = range). */
-  ahead?: number;
-  /** Pan: `chance` of a ringing blow for × `mult`. */
-  ring?: { chance: number; mult: number };
-  /** Hidden blade: always stuns for `stun` s; plain mobs left under `execute` of their HP die; lunge `dash` m. */
-  assassin?: { stun: number; execute: number; dash: number };
-  /**
-   * Throwing scythe: the blow throws it to circle the hero for `time` s at `radius` m (`turns` laps), cutting every
-   * mob it passes (once per `rehit` s each); the hand waits for it to come back.
-   */
-  orbit?: { time: number; radius: number; turns: number; rehit: number };
   /**
    * Shield: never swings by itself; incoming damage × (1 − `reduce`); a hit taken may trigger a counter-strike of
    * the other hand at the attacker (`counter` chance by its rank), not more often than every `cd` s. Two shields
@@ -114,37 +92,10 @@ export const WEAPONS: Record<string, WeaponDef> = {
     id: 'hammer', name: 'Молот', type: 'crush', dmgMul: 1.7, aps: 0.7, shape: 'circle', arc: 360, range: 2.1,
     anim: 'AxeAttack', model: { human: 'hammer_human_paladin', orc: 'hammer_human_paladin' }, icon: '🔨', stun: 0.25,
   },
-  dagger: {
-    id: 'dagger', name: 'Кинжалы', type: 'slash', dmgMul: 0.38, aps: 2.4, shape: 'arc', arc: 90, range: 1.9,
-    anim: 'SwordAttack', model: { human: 'dagger', orc: 'dagger' }, icon: '🔪', single: true,
-    stack: { add: 0.06, max: 10, decay: 2.5 },
-  },
-  reaper: {
-    id: 'reaper', name: 'Жнец', type: 'slash', dmgMul: 1.1, aps: 0.8, shape: 'arc', arc: 200, range: 2.6,
-    anim: 'AxeAttack', model: { human: 'reaper', orc: 'reaper' }, icon: '🌙',
-    pull: { radius: 5, ahead: 1.5, force: 0.85, perEnemy: 0.15, max: 2 },
-  },
   nagamaki: {
     id: 'nagamaki', name: 'Нагамаки', type: 'slash', dmgMul: 0.95, aps: 1.3, shape: 'arc', arc: 200, range: 2.6,
     anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️', cycle: true,
     swing: ['slashRL', 'slashLR', 'thrust'],
-  },
-  scythe: {
-    id: 'scythe', name: 'Коса', type: 'slash', dmgMul: 1.0, aps: 0.4, shape: 'circle', arc: 360, range: 3,
-    anim: 'AxeAttack', model: { human: 'scythe', orc: 'scythe' }, icon: '🌀',
-    orbit: { time: 2.4, radius: 2.2, turns: 2, rehit: 0.45 },
-    swing: ['throw'],
-  },
-  pan: {
-    id: 'pan', name: 'Сковорода', type: 'crush', dmgMul: 1.1, aps: 0.9, shape: 'circle', arc: 360, range: 1.6, ahead: 1.3,
-    anim: 'AxeAttack', model: { human: 'pan', orc: 'pan' }, icon: '🍳', stun: 0.6, ring: { chance: 0.3, mult: 2 },
-    swing: ['overhead'],
-  },
-  hidden_blade: {
-    id: 'hidden_blade', name: 'Скрытый клинок', type: 'slash', dmgMul: 2.4, aps: 0.45, shape: 'arc', arc: 120, range: 2.0,
-    anim: 'SwordAttack', model: { human: 'hidden_blade', orc: 'hidden_blade' }, icon: '🗡', single: true,
-    assassin: { stun: 1.2, execute: 0.25, dash: 1.2 },
-    swing: ['assassin'],
   },
   shield: {
     id: 'shield', name: 'Щит', type: 'crush', dmgMul: 0.5, aps: 0.8, shape: 'arc', arc: 120, range: 1.8,
@@ -174,14 +125,8 @@ export const COMBOS: Record<string, ComboDef> = {
   sword: { name: 'Вихрь', hits: 3, window: 0.35, mult: 1.3, rangeAdd: 0.5, shape: 'circle', arc: 360, knock: 7, stun: 0, spin: true, color: 0x9fe3ff },
   axe: { name: 'Раскол', hits: 3, window: 0.35, mult: 1.6, rangeAdd: 0.8, shape: 'arc', arc: 220, knock: 11, stun: 0.4, spin: false, color: 0xff8a5a },
   hammer: { name: 'Землетрясение', hits: 3, window: 0.4, mult: 1.3, rangeAdd: 0.8, shape: 'circle', arc: 360, knock: 5, stun: 1.6, spin: false, color: 0xffc95a },
-  dagger: { name: 'Шквал', hits: 3, window: 0.25, mult: 1.2, rangeAdd: 0.4, shape: 'circle', arc: 360, knock: 2, stun: 0, spin: true, color: 0xff6b8a },
-  // reaper: the finisher pulls from twice as far
   nagamaki: { name: 'Укол', hits: 3, window: 0.4, mult: 2.6, rangeAdd: 0.8, shape: 'arc', arc: 50, knock: 6, stun: 0.3, spin: false, color: 0xffe0a0 },
-  scythe: { name: 'Смерч', hits: 3, window: 0.6, mult: 1.4, rangeAdd: 1, shape: 'circle', arc: 360, knock: 3, stun: 0, spin: true, color: 0xb0ff9a },
-  pan: { name: 'БОНК', hits: 3, window: 0.4, mult: 1.6, rangeAdd: 0.4, shape: 'circle', arc: 360, knock: 2, stun: 1.5, spin: false, color: 0xffd28a },
-  hidden_blade: { name: 'Казнь', hits: 2, window: 0.8, mult: 1.5, rangeAdd: 0, shape: 'arc', arc: 120, knock: 1, stun: 1, spin: false, color: 0xff4040 },
   shield: { name: 'Таран', hits: 3, window: 0.5, mult: 1.5, rangeAdd: 0.5, shape: 'arc', arc: 140, knock: 9, stun: 0.8, spin: false, color: 0xa0c8ff },
-  reaper: { name: 'Жатва', hits: 3, window: 0.45, mult: 1.5, rangeAdd: 0.6, shape: 'circle', arc: 360, knock: 2, stun: 0.5, spin: true, color: 0x9a7bff },
 };
 
 export interface FactionDef {

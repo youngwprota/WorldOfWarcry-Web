@@ -1,12 +1,11 @@
 import * as THREE from 'three';
 import { Character } from './character';
 import { Trail } from './swing';
-import { Orbits } from './orbits';
 import { Creature } from './creature';
 import { StaticBody } from './staticbody';
 import {
   COMBOS, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
-  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StatId, type WeaponDef, type ZoneDef, isPctStat,
+  mobRank, type DamageType, type ResistTier, type MobDef, type OrbKind, type StatId, type ZoneDef, isPctStat,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
@@ -162,11 +161,6 @@ class Mob extends Unit {
   /** Reinforcement of this boss: removed when the fight resets, pays no gacha pull. */
   owner: Mob | null = null;
   awake = true;
-  /** Dagger stacks (WeaponDef.stack): each adds to the hero's damage on this mob; game time of the last one. */
-  stacks = 0;
-  stackAt = -99;
-  /** "×N" badge under the HP bar while the mob has stacks. */
-  stackEl: HTMLDivElement;
   /** Depth-scaled stats (DEPTH in config): use these instead of def.dmg / def.reward. */
   dmg: number;
   constructor(public def: MobDef, spawn: THREE.Vector3, faction: 'human' | 'orc', layer: HTMLElement,
@@ -184,9 +178,8 @@ class Mob extends Unit {
     // an item drop shows only the item; a micro-boss its permanent bonus (+500 HP) instead of its orbs
     const item = def.drop ? { icon: dropIconId(def.drop), color: RARITY[def.drop.rarity].color } : null;
     const loot = def.bonus ? lootHtml(def.bonus, null, true) : lootHtml(reward, item);
-    super(spawn, layer, named ? 'mobui boss' : 'mobui', title + unitBar(loot, resistIcons(def, named ? 27 : 24)) + '<div class="stk"></div>',
+    super(spawn, layer, named ? 'mobui boss' : 'mobui', title + unitBar(loot, resistIcons(def, named ? 27 : 24)),
       'respawn' + (named ? ' boss' : ''));
-    this.stackEl = this.uiEl.querySelector('.stk')!;
     this.reward = reward;
     const [model, weapon] = def.model[faction];
     const scale = def.scale * mul.scale;
@@ -210,16 +203,7 @@ class Mob extends Unit {
   get barY() { return (this.ch instanceof StaticBody ? this.ch.height + 0.3 : 2.15 * this.def.scale) * this.ch.root.scale.x; }
   get barRange() { return this.def.boss || this.def.rank ? 24 : 16; }
   get loaderReady() { return !this.temp && ((!this.dying && this.deadT - this.paidAt > 2.2) || this.boss); }
-  /** Sets the dagger stacks and their badge (text only changes here, never per frame). */
-  setStacks(n: number, at: number) {
-    this.stackAt = at;
-    if (n === this.stacks) return;
-    this.stacks = n;
-    this.stackEl.textContent = n ? `×${n}` : '';
-    this.stackEl.classList.toggle('on', n > 0);
-  }
   respawn() {
-    this.setStacks(0, -99);
     this.fight = null;
     this.dying = false;
     this.loot = [];
@@ -308,7 +292,6 @@ export class Game {
   private hands: [Hand, Hand] = [newHand(0), newHand(1)];
   private comboShown = -1;
   private trails: [Trail, Trail] = [new Trail(), new Trail()];
-  private orbits: Orbits;
   /** Hit-stop / slow motion: game time runs at `slowK` for `slowT` more real seconds. */
   private slowT = 0;
   private slowK = 1;
@@ -412,7 +395,6 @@ export class Game {
     this.pickups = new Pickups(this.scene);
     this.pickups.onCollect = (k, it) => this.collect(k, it);
     this.waves = new Shockwaves(this.scene);
-    this.orbits = new Orbits(this.scene);
     // (no camp NPC by the gate for now: src/npc.ts CampNpc is kept for later)
     this.camPos.copy(this.hero.position);
     this.refreshHud(true);
@@ -518,7 +500,6 @@ export class Game {
     for (const c of CLASS_IDS) if (this.input.pressed(CLASSES[c].key)) this.switchClass(c);
     this.updateHero(dt);
     this.updateMobs(dt);
-    this.updateOrbits(dt);
     this.updateProps(dt);
     this.updateRespawns();
     this.telegraphs.update(dt);
@@ -697,19 +678,8 @@ export class Game {
   /** Longest reach of the two hands. */
   private reach() {
     let r = 0;
-    for (const it of this.save.weapons) if (it) r = Math.max(r, WEAPONS[it.def].range + (WEAPONS[it.def].ahead ?? 0));
+    for (const it of this.save.weapons) if (it) r = Math.max(r, WEAPONS[it.def].range);
     return r;
-  }
-
-  /** Hidden blade: a short dash at the victim before the stab (stops short of its body, respects the world). */
-  private lunge(t: Unit, dash: number) {
-    const p = this.hero.position;
-    const d = t.pos.distanceTo(p) - t.radius - 0.7;
-    if (d <= 0) return;
-    v1.subVectors(t.pos, p).setY(0).normalize().multiplyScalar(Math.min(dash, d));
-    p.add(v1);
-    this.world.collide(p, HERO.radius);
-    this.particles.burst(v2.copy(p).setY(0.3), 0x9a8a70, 6, 0.1, 4, 0.4);
   }
 
   /** One hand's swing timer and combo chain; the blow lands `impact` s after the swing starts. */
@@ -728,10 +698,9 @@ export class Game {
     // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
     // up to 1 m further for facing, and swinging there was a whiff into thin air.
     const t = this.target;
-    const inReach = !!t && this.inStrike(t, w.range + (w.ahead ?? 0));
+    const inReach = !!t && this.inStrike(t, w.range);
     if (inReach && h.atkCd <= 0) {
       const chained = w.cycle || (h.lastSwingHit && this.time - h.lastSwing <= period + combo.window);
-      if (w.assassin) this.lunge(t!, w.assassin.dash);
       h.combo = chained ? h.combo + 1 : 1;
       h.finisher = h.combo >= combo.hits;
       h.lastSwing = this.time;
@@ -740,7 +709,6 @@ export class Game {
       const kinds = w.swing ?? (h.i === 1 ? LEFT_SWING[w.anim] : null);
       if (kinds) this.hero.swing(kinds[(h.combo - 1) % kinds.length], h.i, period, impactAt);
       else this.hero.attack(w.anim, period, impactAt);
-      if (w.pull) this.reapPull(w.pull, h.finisher);
       h.impact = impactAt;
       h.atkCd = period;
     }
@@ -779,25 +747,6 @@ export class Game {
     return Math.abs(a) <= THREE.MathUtils.degToRad(arc / 2) + Math.atan2(radius, d);
   }
 
-  /** Reaper swing start: slide the mobs around towards a point in front of the hero, they land by the impact. */
-  private reapPull(pull: NonNullable<WeaponDef['pull']>, finisher: boolean) {
-    const p = this.hero.position;
-    const at = v2.set(p.x + Math.sin(this.hero.facing) * pull.ahead, 0, p.z + Math.cos(this.hero.facing) * pull.ahead);
-    const radius = pull.radius * (finisher ? 2 : 1);
-    let n = 0;
-    for (const m of this.mobs) {
-      if (!m.hittable || m.def.boss || m.passive || m.pos.distanceTo(p) - m.radius > radius) continue;
-      // knockback slides 1/9 of its speed (it decays ×(1 − 9·dt)), so speed = 9 × the distance to cover
-      m.knock.set(at.x - m.pos.x, 0, at.z - m.pos.z).multiplyScalar(9 * pull.force);
-      if (m.state === 'idle') m.state = 'chase';
-      n++;
-    }
-    if (n) {
-      this.waves.add(at, 1.2, COMBOS.reaper.color, 0.3);
-      this.particles.burst(at.setY(0.3), COMBOS.reaper.color, 6 + 2 * Math.min(n, 6), 0.1, 4, 0.5);
-    }
-  }
-
   /**
    * The blow of one hand lands. `yaw`: strike direction (shield counters strike back at the attacker, see
    * counterStrike); returns the number of units hit.
@@ -807,28 +756,15 @@ export class Game {
     if (!it) return 0;
     const w = WEAPONS[it.def];
     const fin = h.finisher ? COMBOS[it.def] : null;
-    if (w.orbit) return this.throwScythe(h, it, fin);
     const shape = fin ? fin.shape : w.shape;
     const arc = fin ? fin.arc : w.arc;
     const range = w.range + (fin ? fin.rangeAdd : 0);
-    const ahead = w.ahead ?? 0;
     let hits = 0;
-    // reaper: the more mobs the blow catches, the harder it hits each of them
-    let crowd = 1;
-    if (w.pull) {
-      let n = 0;
-      for (const m of this.mobs) if (m.hittable && this.inShape(m.pos, m.radius, shape, arc, range, ahead, yaw)) n++;
-      crowd = Math.min(w.pull.max, 1 + w.pull.perEnemy * (n - 1));
-      if (crowd > 1) this.fx.spawn(v1.copy(this.hero.position).setY(2.6), `×${crowd.toFixed(2).replace(/\.?0+$/, '')}`, 'dmg weak', 0.8);
-    }
-    // pan: one roll per swing, every head under it rings
-    const ring = w.ring && Math.random() < w.ring.chance ? w.ring.mult : 1;
-    // the hidden blade stays on its one target even in the finisher
-    const only = (!fin || w.assassin) && w.single ? focus : null;
+    const only = !fin && w.single ? focus : null;
     sfx.swing();
     for (const u of this.units) {
       if (only && u !== only) continue;
-      if (!u.hittable || !this.inShape(u.pos, u.radius, shape, arc, range, ahead, yaw)) continue;
+      if (!u.hittable || !this.inShape(u.pos, u.radius, shape, arc, range, 0, yaw)) continue;
       hits++;
       if (u instanceof Prop) {
         const tier = u.def.resist[w.type] ?? 'normal';
@@ -836,31 +772,17 @@ export class Game {
         continue;
       }
       const m = u as Mob;
-      // daggers: +stack.add per stack on this mob, then one more stack
-      const stackMul = w.stack ? 1 + w.stack.add * m.stacks : 1;
-      const { dmg, tier, fx } = this.damageFor(it, m.def, (fin ? fin.mult : 1) * stackMul * crowd * ring);
-      if (w.stack) m.setStacks(Math.min(w.stack.max, m.stacks + 1), this.time);
+      const { dmg, tier, fx } = this.damageFor(it, m.def, fin ? fin.mult : 1);
       const f = this.fightOf(m);
       f.hits++;
       if (fin) f.combos++;
-      // the reaper keeps the pulled crowd together, the pan and the blade knock heads, not bodies
-      this.damageMob(m, dmg, tier, fin ? fin.knock : w.pull ? 0.5 : w.ahead || w.assassin ? 1 : 3.5, fx);
-      if (w.assassin) this.assassinate(m, w.assassin);
-      else if (m.alive && !m.def.boss) {
+      this.damageMob(m, dmg, tier, fin ? fin.knock : 3.5, fx);
+      if (m.alive && !m.def.boss) {
         if (fin?.stun) m.stun = Math.max(m.stun, fin.stun);
         else if (w.stun && Math.random() < w.stun) m.stun = 0.9;
       }
     }
-    if (w.ahead && hits) {
-      // the pan comes down on the heads in front
-      const at = v1.copy(this.hero.position).addScaledVector(v2.set(Math.sin(yaw), 0, Math.cos(yaw)), ahead).setY(0.2);
-      this.waves.add(at, range, ring > 1 ? 0xffe27a : 0xd8d0c0, 0.25);
-      this.shake = Math.max(this.shake, ring > 1 ? 0.3 : 0.15);
-      if (ring > 1) {
-        this.fx.spawn(at.setY(2.4), 'БОНК!', 'dmg weak', 0.9);
-        this.slowMo(0.05, 0.1);
-      }
-    } else if (w.shape === 'circle' && hits) {
+    if (w.shape === 'circle' && hits) {
       this.shake = Math.max(this.shake, 0.18);
       this.particles.burst(v1.copy(this.hero.position).setY(0.2), 0x9a8a70, 8, 0.12, 5, 0.5);
     }
@@ -876,73 +798,6 @@ export class Game {
     h.lastSwingHit = hits > 0;
     if (!hits && !w.cycle) h.combo = 0;
     return hits;
-  }
-
-  /** Hidden blade on its victim: a sure stun, an execution under the threshold, a freeze-frame and a push-in. */
-  private assassinate(m: Mob, a: NonNullable<WeaponDef['assassin']>) {
-    const plain = mobRank(m.def) === 'normal';
-    if (m.alive && plain && m.hp < m.maxHp * a.execute) {
-      this.fx.spawn(this.unitTextAt(m, v1).setY(m.barY + 0.6), 'КАЗНЬ', 'dmg weak', 1);
-      this.damageMob(m, Math.ceil(m.hp), 'weak', 1);
-    }
-    if (m.alive && !m.def.boss) m.stun = Math.max(m.stun, a.stun);
-    this.slowMo(0.2, 0.12, 1);
-    this.shake = Math.max(this.shake, 0.4);
-    this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), bloodColor(m), 18, 0.12, 7, 0.6);
-  }
-
-  /** Throwing scythe: leaves the hand and circles the hero, cutting what it passes (updateOrbits). */
-  private throwScythe(h: Hand, it: Item, fin: ComboDef | null) {
-    const o = WEAPONS[it.def].orbit!;
-    const radius = o.radius + (fin ? fin.rangeAdd : 0);
-    const turns = o.turns * (fin ? 1.5 : 1);
-    const tag: ScytheTag = { kind: 'scythe', hand: h.i, item: it, mult: fin ? fin.mult : 1, fin: !!fin };
-    this.orbits.add(WEAPONS[it.def].model[this.faction], 1.3, {
-      center: this.hero.position, radius, time: o.time, speed: (turns * Math.PI * 2) / o.time,
-      angle: this.hero.facing, y: 1, rehit: o.rehit, tag,
-    });
-    const held = h.i ? this.hero.weaponL : this.hero.weapon;
-    if (held) held.visible = false;
-    sfx.swing();
-    if (fin) {
-      h.finisher = false;
-      h.combo = 0;
-      this.waves.add(this.hero.position, radius + 0.5, fin.color);
-      sfx.combo();
-    }
-    // the chain goes on while the scythe is in the air: each throw counts as a hit
-    h.lastSwingHit = true;
-    return 1;
-  }
-
-  private updateOrbits(dt: number) {
-    this.orbits.update(dt, (o, pos) => {
-      const tag = o.tag as ScytheTag;
-      for (const u of this.units) {
-        if (!u.hittable) continue;
-        const dx = u.pos.x - pos.x, dz = u.pos.z - pos.z;
-        const r = u.radius + 1.1;
-        if (dx * dx + dz * dz > r * r) continue;
-        const last = o.last.get(u) ?? -99;
-        if (this.time - last < o.rehit) continue;
-        o.last.set(u, this.time);
-        if (u instanceof Prop) {
-          const tier = u.def.resist[WEAPONS[tag.item.def].type] ?? 'normal';
-          this.hitProp(u, RESIST_MULT[tier], tier);
-          continue;
-        }
-        const m = u as Mob;
-        const { dmg, tier, fx } = this.damageFor(tag.item, m.def, tag.mult);
-        const f = this.fightOf(m);
-        f.hits++;
-        if (tag.fin) f.combos++;
-        this.damageMob(m, dmg, tier, 2, fx);
-      }
-    }, (o) => {
-      const tag = o.tag as ScytheTag;
-      const held = tag.hand ? this.hero.weaponL : this.hero.weapon;
-      if (held) held.visible = true;
-    });
   }
 
   /** `fx`: 'crit' shows a bigger number, 'miss' (or no damage at all) — the mob dodged. */
@@ -975,7 +830,6 @@ export class Game {
   /** Lethal hit: death clip, blood, shake, the knockback and the loot (grantKillRewards) at once. */
 
   private killMob(m: Mob) {
-    m.setStacks(0, -99);
     m.state = 'dead';
     m.hp = 0;
     m.deadT = 0;
@@ -1504,8 +1358,7 @@ export class Game {
     if (striker !== shieldHand) this.hero.swing(w.swing?.[0] ?? (striker ? LEFT_SWING[w.anim][0] : 'slashRL'), striker, 0.6, 0.15);
     // a throwaway hand state: a counter neither spends nor builds the combo chain
     const h = Object.assign(this.counterHand, newHand(striker));
-    const hits = w.orbit ? 0 : this.heroStrike(h, yaw, m);
-    if (w.orbit && !this.orbits.list.some((o) => (o.tag as ScytheTag).hand === striker)) this.heroStrike(h, yaw, m);
+    const hits = this.heroStrike(h, yaw, m);
     const at = v1.copy(this.hero.position).setY(1.2);
     this.particles.burst(at, 0x9fd0ff, 10, 0.1, 6, 0.4);
     this.fx.spawn(at.setY(2.9), hits ? 'Контратака!' : 'Блок', 'dmg weak', 0.7, { color: '#9fd0ff' });
@@ -1567,11 +1420,7 @@ export class Game {
   private updateMobBars(w: number, h: number) {
     const hp = this.hero.position;
     const explored = (p: THREE.Vector3) => this.world.fog.isExplored(p.x, p.z);
-    let decay = 0;
-    for (const it of this.save.weapons) if (it) decay = Math.max(decay, WEAPONS[it.def].stack?.decay ?? 0);
     for (const u of this.units) {
-      // dagger stacks drop off a while after the last hit (at once with another weapon in hand)
-      if (u instanceof Mob && u.stacks && this.time - u.stackAt > decay) u.setStacks(0, -99);
       // HP bar + weakness icons + reward over living units near the hero.
       const show = u.alive && u.visible && u.pos.distanceTo(hp) < u.barRange && explored(u.pos);
       if (!show) { if (u.uiEl.classList.contains('show')) u.uiEl.classList.remove('show'); }
@@ -2038,7 +1887,5 @@ function newHand(i: 0 | 1): Hand {
   return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false };
 }
 
-/** What a thrown scythe carries (Orbit.tag). */
-interface ScytheTag { kind: 'scythe'; hand: 0 | 1; item: Item; mult: number; fin: boolean }
 /** How a blow landed: a crit, dodged, or plain (''). */
 type HitFx = '' | 'crit' | 'miss';

@@ -32,7 +32,7 @@
 ## Шаги
 - [x] 1. Убрать пары с мечом и DUAL: offhand.ts, SWORD_PAIRS, `pair`/`haste`/помощники/страх/мечи-спутники в game.ts,
   handMulOf/heroDps в balance.ts, pairText в inventory, пары в tools/sim.ts (`--left`, bench пар).
-- [ ] 2. Удалить экзотическое оружие и его механику (stack/pull/orbit/ring/assassin, свинги throw/assassin, COMBOS),
+- [x] 2. Удалить экзотическое оружие и его механику (stack/pull/orbit/ring/assassin, свинги throw/assassin, COMBOS),
   кнопки в debug.ts, пары в viewer.ts; гача берёт оружие из списков воина.
 - [ ] 3. Древковое: nagamaki → polearm (числа и COMBOS.polearm с прокрутом), `cycle` без 4-го удара.
 - [ ] 4. Три щита + `guard.reflect` (отражение в обработке удара по герою), щит никогда не бьёт, иконки/тинт в art.ts.

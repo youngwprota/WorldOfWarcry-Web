@@ -123,7 +123,7 @@ function foeOf(u: Unit): Foe {
 
 /**
  * One duel. `mean`: no dice (rolls at their expected value, slams hit for their expected share) — the bot's
- * quick estimate. Weapon mechanics are modelled for a single target: crowd effects (reaper pull) are left out.
+ * quick estimate. Weapon mechanics are modelled for a single target: crowd effects are left out.
  */
 function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const st = stats(h);
@@ -136,7 +136,6 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   let mhp = foe.hp;
   const mmax = foe.hp;
   let stun = 0;
-  let stacks = 0;
   let lastCounter = -99;
   const period = 1 / d.aps;
   let matk = mobImpact(ATTACK_HIT[d.creature ? `${d.model.human[0]}:attack` : d.anim] ?? 0.6, period);
@@ -147,7 +146,6 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const pending: [number, number][] = []; // [time, damage] of telegraphed blasts
   // hands
   const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1, combo: 0 }));
-  const orbits: { until: number; next: number; dmg: number }[] = [];
   // crits and dodges: dice, or their expected value with `mean`
   const heroCrit = () => (mean ? critAvg(st.critPts, st.critDmgPts) : chance(st.crit) ? st.critMul : 1);
   const foeHits = () => (mean ? 1 - dodgeChance(d.dodge) : chance(dodgeChance(d.dodge)) ? 0 : 1);
@@ -163,8 +161,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const hit = (it: Item, mult: number) => {
     const w = WEAPONS[it.def];
     const r = RESIST_MULT[d.resist[w.type] ?? 'normal'];
-    let dmg = weaponDamage(it, st.power, st.powerMul) * heroCrit() * foeHits() * r * mult * roll();
-    if (w.stack) { dmg *= 1 + w.stack.add * stacks; stacks = Math.min(w.stack.max, stacks + 1); }
+    const dmg = weaponDamage(it, st.power, st.powerMul) * heroCrit() * foeHits() * r * mult * roll();
     mhp -= dmg;
     return dmg;
   };
@@ -173,19 +170,9 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     const it = hd.it!;
     const w = WEAPONS[it.def];
     const fin = !counter && hd.combo >= COMBOS[it.def].hits ? COMBOS[it.def] : null;
-    let mult = fin ? fin.mult : 1;
-    if (w.ring && chance(w.ring.chance)) mult *= w.ring.mult;
-    else if (w.ring && mean) mult *= 1 + w.ring.chance * (w.ring.mult - 1);
-    if (w.orbit) {
-      // the thrown scythe circles the hero: one cut per lap on a target in melee
-      orbits.push({ until: t + w.orbit.time, next: t + w.orbit.time / w.orbit.turns / 2, dmg: mult });
-      return;
-    }
+    const mult = fin ? fin.mult : 1;
     hit(it, mult);
-    if (w.assassin) {
-      if (!boss) stun = Math.max(stun, w.assassin.stun);
-      if (rank === 'normal' && mhp < mmax * w.assassin.execute) mhp = 0;
-    } else if (!boss) {
+    if (!boss) {
       if (fin?.stun) stun = Math.max(stun, fin.stun);
       else if (w.stun && (mean ? false : chance(w.stun))) stun = Math.max(stun, 0.9);
     }
@@ -203,20 +190,12 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       hd.cd -= DT;
       if (hd.cd > 0 || busy > 0) continue;
       const per = 1 / w.aps;
-      if (w.orbit && orbits.some((o) => o.dmg > 0 && o.until > t)) continue;
       // uptime: the hero spends part of the fight repositioning — swings come later and the chain may break
       hd.cd = per / OPT.uptime;
       hd.combo = w.cycle || mean || rand() < OPT.combo ? hd.combo + 1 : 1;
       swings++;
       strike(hd);
     }
-    for (const o of orbits) {
-      if (o.until <= t || t < o.next) continue;
-      const it = h.weapons.find((x) => x && WEAPONS[x.def].orbit);
-      if (!it) { o.until = 0; continue; }
-      hit(it, o.dmg); o.next += WEAPONS[it.def].orbit!.time / WEAPONS[it.def].orbit!.turns;
-    }
-    if (orbits.length > 8) orbits.splice(0, orbits.length - 8);
     if (mhp <= 0) break;
     // the foe
     if (stun > 0) stun -= DT;
