@@ -247,13 +247,13 @@ export class UI {
     b.dataset.badge = full ? '!' : n > 0 ? String(n) : '';
   }
 
-  /** Bottom "equipped" bar: armour left, the right / left hand weapons in the centre, gloves and jewellery right. */
+  /** Bottom "equipped" bar: armour left, the weapon and the class item (shield) in the centre, gloves and jewellery right. */
   weapons(items: (Item | null)[], dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>) {
     const box = $('weapons');
     box.innerHTML = [0, 1].map((i) => {
       const it = items[i];
-      const title = it ? `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"` : '';
-      return cellHtml(it, `data-w="${i}" ${title}`, 'sword', '', it ? 'wslot active' : 'wslot');
+      const title = !it ? '' : WEAPONS[it.def].guard ? `title="${WEAPONS[it.def].name}"` : `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"`;
+      return cellHtml(it, `data-w="${i}" ${title}`, i ? 'shield' : 'sword', '', it ? 'wslot active' : 'wslot');
     }).join('');
     const side = (ids: ArmorSlot[]) => ids.map((id) => {
       const x = ARMOR_SLOTS.find((s) => s.id === id)!;

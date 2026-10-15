@@ -1,7 +1,7 @@
 import { FACTIONS, HERO, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
 import { BASE_STATS, type PctPoints, type StatPoints } from './balance';
 import { ARMOR, makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
-import { CLASSES, type HeroClass } from './party';
+import { CLASSES, classSlot, type HeroClass } from './party';
 
 /**
  * Number scale of the save: 2 = hero HP ×10, regen in HP/s, 6 item qualities, item level = copies; 5 = flat power;
@@ -80,14 +80,23 @@ export function loadSave(): SaveData | null {
     if (d.v !== 1 || !FACTIONS[d.faction]) return null;
     // Fields added after the first prototype build.
     // items whose weapon / armour piece is gone from the game (renamed or removed in another branch) are dropped
-    d.weapons = d.weapons.map((w) => (w ? known(normalizeItem(w)) : null)) as SaveData['weapons'];
-    if (!d.weapons[0] && !d.weapons[1]) d.weapons[0] = makeItem('weapon', FACTIONS[d.faction].startWeapon, 0, 1);
+    const held = d.weapons.map((w) => (w ? known(normalizeItem(w)) : null));
     d.equip ??= {};
     for (const k of Object.keys(d.equip) as ArmorSlot[]) {
       const it = d.equip[k] && known(normalizeItem(d.equip[k]!));
       if (it) d.equip[k] = it; else delete d.equip[k];
     }
     d.bag = (d.bag ?? []).map(normalizeItem).filter((it) => known(it));
+    // two hands → weapon + class slot: whatever does not fit its slot (a second weapon, a shield in the right
+    // hand that has a pair) goes to the bag; the weapon slot is never empty
+    d.weapons = [null, null];
+    for (const it of held) {
+      if (!it) continue;
+      const s = classSlot('warrior', it.def);
+      if (s !== null && !d.weapons[s]) d.weapons[s] = it;
+      else d.bag.push(it);
+    }
+    d.weapons[0] ??= makeItem('weapon', FACTIONS[d.faction].startWeapon, 0, 1);
     d.gachaPity ??= 0;
     d.pulls ??= 0;
     // gold, hero level, XP and talents are gone from the game

@@ -4,7 +4,7 @@ import { Trail } from './swing';
 import { Creature } from './creature';
 import { StaticBody } from './staticbody';
 import {
-  COMBOS, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
+  COMBOS, FACTIONS, GACHA, ZONE_TIER, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
   mobRank, type DamageType, type ResistTier, type MobDef, type OrbKind, type StatId, type ZoneDef, isPctStat,
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
@@ -15,7 +15,7 @@ import {
 import { Input } from './input';
 import { sfx } from './audio';
 import { writeSave, type SaveData } from './save';
-import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, type HeroClass } from './party';
+import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, kitOf, classSlot, type HeroClass } from './party';
 import { GATE, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
 import { UI, type MapMark } from './ui';
@@ -705,8 +705,7 @@ export class Game {
       h.lastSwing = this.time;
       const impactAt = Math.min(0.42, period * 0.4);
       h.impactAt = impactAt;
-      const kinds = w.swing ?? (h.i === 1 ? LEFT_SWING[w.anim] : null);
-      if (kinds) this.hero.swing(kinds[(h.combo - 1) % kinds.length], h.i, period, impactAt);
+      if (w.swing) this.hero.swing(w.swing[(h.combo - 1) % w.swing.length], h.i, period, impactAt);
       else this.hero.attack(w.anim, period, impactAt);
       h.impact = impactAt;
       h.atkCd = period;
@@ -1467,13 +1466,13 @@ export class Game {
       this.persist();
       return `Копия: ${text}`;
     }
-    // A weapon goes straight into a free weapon slot.
-    const free = this.save.weapons.findIndex((x) => !x);
-    if (item.kind === 'weapon' && free >= 0) {
-      this.save.weapons[free] = item;
-      this.fx.spawn(head, `${name} → слот ${free + 1}`, 'loot', 1.4, { color });
-      this.ui.toast(`${name}: второй слот оружия. Переключай кнопкой ⇄`);
-      where = 'Во второй слот оружия';
+    // A class item goes straight into its empty slot.
+    const slot = item.kind === 'weapon' ? classSlot(this.heroClass, item.def) : null;
+    if (slot !== null && !this.save.weapons[slot]) {
+      this.save.weapons[slot] = item;
+      this.afterGearChange();
+      this.fx.spawn(head, `${name} → ${this.slotName(slot)}`, 'loot', 1.4, { color });
+      where = `Надето: ${this.slotName(slot)}`;
     } else if (this.save.bag.length < BAG_SIZE) {
       this.save.bag.push(item);
       this.newItems++;
@@ -1489,24 +1488,31 @@ export class Game {
     return where;
   }
 
-  /** Equip an item from the bag; whatever was in that slot goes back into the bag. */
-  equipFromBag(index: number, weaponSlot?: 0 | 1) {
+  /** Slot caption: "Оружие" or the class item's name. */
+  slotName(slot: 0 | 1) { return slot ? kitOf(this.heroClass).offName : 'Оружие'; }
+
+  /** Equip an item from the bag; whatever was in that slot goes back into the bag. False: not for this class. */
+  equipFromBag(index: number) {
     const it = this.save.bag[index];
-    if (!it) return;
+    if (!it) return false;
+    const slot = it.kind === 'weapon' ? classSlot(this.heroClass, it.def) : null;
+    if (it.kind === 'weapon' && slot === null) {
+      this.ui.toast(`${itemName(it, this.faction)} — не для класса «${CLASSES[this.heroClass].name}»`);
+      return false;
+    }
     this.save.bag.splice(index, 1);
-    if (it.kind === 'weapon') {
-      const free = this.save.weapons.findIndex((x) => !x);
-      const slot = weaponSlot ?? (free >= 0 ? (free as 0 | 1) : 0);
+    if (slot !== null) {
       const old = this.save.weapons[slot];
       this.save.weapons[slot] = it;
       if (old) this.save.bag.splice(index, 0, old);
     } else {
-      const slot = ARMOR[it.def].slot;
-      const old = this.save.equip[slot];
-      this.save.equip[slot] = it;
+      const aslot = ARMOR[it.def].slot;
+      const old = this.save.equip[aslot];
+      this.save.equip[aslot] = it;
       if (old) this.save.bag.splice(index, 0, old);
     }
     this.afterGearChange();
+    return true;
   }
 
   unequipArmor(slot: ArmorSlot) {
@@ -1518,10 +1524,10 @@ export class Game {
     return true;
   }
 
+  /** Only the class item comes off: the weapon slot is never empty, it is only swapped. */
   unequipWeapon(slot: 0 | 1) {
     const it = this.save.weapons[slot];
-    const other = this.save.weapons[1 - slot];
-    if (!it || !other || this.save.bag.length >= BAG_SIZE) return false;
+    if (slot === 0 || !it || this.save.bag.length >= BAG_SIZE) return false;
     this.save.weapons[slot] = null;
     this.save.bag.push(it);
     this.afterGearChange();
@@ -1538,13 +1544,9 @@ export class Game {
     this.refreshHud(true);
   }
 
-  /** Fresh chains; the left hand starts half its period behind so the hands alternate. */
+  /** Fresh chains. */
   private resetHands() {
-    for (const h of this.hands) {
-      const it = this.save.weapons[h.i];
-      Object.assign(h, newHand(h.i));
-      if (h.i === 1 && it && this.save.weapons[0]) h.atkCd = 0.5 / WEAPONS[it.def].aps;
-    }
+    for (const h of this.hands) Object.assign(h, newHand(h.i));
   }
 
   private afterGearChange() {
@@ -1667,7 +1669,7 @@ export class Game {
     this.afterGearChange();
   }
 
-  /** Debug: the left hand to the bag (or just gone if the bag is full). */
+  /** Debug: the class item to the bag (or just gone if the bag is full). */
   debugClearLeft() {
     const it = this.save.weapons[1];
     if (!it || !this.save.weapons[0]) return;

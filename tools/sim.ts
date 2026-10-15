@@ -1,6 +1,6 @@
 // Balance simulator: a bot plays the forest and the cemetery on a 1-D model of the trail, using the game's own
 // config and formulas (src/balance.ts). Prints a per-minute curve and when each boss falls.
-// Run: npm run sim -- [--faction human|orc] [--weapon sword] [--left dagger] [--runs 20] [--until 45]
+// Run: npm run sim -- [--faction human|orc] [--weapon sword] [--off shield_tower] [--runs 20] [--until 45]
 //                     [--dodge 0.6] [--uptime 0.8] [--combo 0.85] [--seed 1] [--keep] [--log] [--mobs] [--bench]
 //                     [--set MOBS.bandit_chief.hp=6000 --set GACHA.token.normal=0.05 ...] (what-if: config edits for this run)
 import * as CONFIG from '../src/config';
@@ -21,7 +21,7 @@ const flag = (k: string) => argv.includes(`--${k}`);
 const OPT = {
   faction: arg('faction', 'human') as FactionId,
   weapon: arg('weapon', ''),
-  left: arg('left', ''),
+  off: arg('off', ''), // the class slot (a shield)
   runs: +arg('runs', '20'),
   until: +arg('until', '45') * 60,
   dodge: +arg('dodge', '0.6'), // share of boss slams / blasts dodged
@@ -265,14 +265,15 @@ function lootItem(h: Hero, it: Item) {
   if (!OPT.keep) regear(h);
 }
 const dpsCache = new Map<string, number>();
-/** The best pair of hands for each open location (by DPS against its resists); armour by defense + bonus. */
+/** The best weapon + shield for each open location (by DPS against its resists); armour by defense + bonus. */
 function regear(h: Hero) {
   const all = [...h.weapons, ...h.bag].filter((x): x is Item => !!x && x.kind === 'weapon');
   h.bag = h.bag.filter((x) => x.kind !== 'weapon');
   for (const zone of Object.keys(h.kit) as ZoneId[]) {
     let bestDps = -1;
-    for (const a of all) for (const b of [null, ...all]) {
-      if (b === a) continue;
+    const shields = all.filter((x) => WEAPONS[x.def].guard);
+    for (const a of all) for (const b of [null, ...shields]) {
+      if (WEAPONS[a.def].guard) continue;
       const key = `${zone}|${wname(a)}|${wname(b)}`;
       let dps = dpsCache.get(key);
       if (dps === undefined) dpsCache.set(key, (dps = dummyDps(h, [a, b], zone)));
@@ -316,7 +317,7 @@ function run(seed: number): RunOut {
   const f = FACTIONS[OPT.faction];
   const h: Hero = {
     faction: OPT.faction, src: {}, pct: {}, equip: {},
-    weapons: [makeItem('weapon', OPT.weapon || f.startWeapon, 0, 1), OPT.left ? makeItem('weapon', OPT.left, 0, 1) : null],
+    weapons: [makeItem('weapon', OPT.weapon || f.startWeapon, 0, 1), OPT.off ? makeItem('weapon', OPT.off, 0, 1) : null],
     hp: 0, bag: [], pulls: 0, pity: 0, spot: { s: sCamp, off: 0 }, kit: { forest: [null, null], cemetery: [null, null] } as Hero['kit'],
   };
   h.kit.forest = h.kit.cemetery = h.weapons;
@@ -504,7 +505,7 @@ const t0 = Date.now();
 const runs: RunOut[] = Array.from({ length: OPT.runs }, (_, i) => run(OPT.seed + i));
 const lines: string[] = [];
 const say = (s = '') => lines.push(s);
-say(`== Сим: ${OPT.faction}, ${OPT.weapon || FACTIONS[OPT.faction].startWeapon}${OPT.left ? '+' + OPT.left : ''}, прогонов ${OPT.runs}, до ${OPT.until / 60} мин; увороты ${OPT.dodge}, uptime ${OPT.uptime}, комбо ${OPT.combo}`);
+say(`== Сим: ${OPT.faction}, ${OPT.weapon || FACTIONS[OPT.faction].startWeapon}${OPT.off ? '+' + OPT.off : ''}, прогонов ${OPT.runs}, до ${OPT.until / 60} мин; увороты ${OPT.dodge}, uptime ${OPT.uptime}, комбо ${OPT.combo}`);
 say(`   тропа: лагерь s=${sCamp.toFixed(0)}, форт s=${sFort.toFixed(0)}, ворота s=${GATE.s.toFixed(0)}, арена s=${sArena.toFixed(0)} м`);
 if (OPT.log) {
   say('\n== Минуты (прогон 1): время зона | сила HP реген защ | убийств смертей круток | оружие | шанс победы над боссами');

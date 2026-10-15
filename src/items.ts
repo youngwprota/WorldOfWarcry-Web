@@ -144,7 +144,7 @@ export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = 
     const ph = !placeholder ? '' : hasPng(placeholder) ? art(placeholder, 30, 'ic ph') : icon(placeholder, '#ffffff55', 30, 'ic');
     return `<button class="cell empty ${cls}" ${attrs}>${ph}${extra}</button>`;
   }
-  const badge = it.kind === 'weapon' ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#4a2a12', 12)}</span>` : '';
+  const badge = it.kind === 'weapon' && !WEAPONS[it.def].guard ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#4a2a12', 12)}</span>` : '';
   return `<button class="cell r${it.rarity} ${cls}" ${attrs}>${art(itemIconId(it), 34, 'ic')}${badge}` +
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }
@@ -157,6 +157,13 @@ export function scrapValue(it: Item) {
 export function itemLines(it: Item): [string, string][] {
   if (it.kind === 'weapon') {
     const w = WEAPONS[it.def];
+    const g = w.guard;
+    if (g) {
+      const pc = (x: number) => `${Math.round(x * 100)}%`;
+      const out: [string, string][] = [['Блок', `−${pc(g.reduce)}`], ['Контратака', `${pc(g.counter.normal)}–${pc(g.counter.boss)}`]];
+      if (g.reflect) out.push(['Отражение', pc(g.reflect)]);
+      return out;
+    }
     return [
       ['Урон', String(Math.round(weaponDamage(it)))],
       ['Тип', DAMAGE_TYPE_NAME[w.type]],
@@ -183,8 +190,11 @@ export const dropItem = (d: ItemDrop) => makeItem(d.kind, d.def, d.rarity, 1);
 export const dropIconId = (d: ItemDrop) => (d.kind === 'weapon' ? d.def : ARMOR[d.def].slot);
 
 /** Old saves stored bare {def, rarity, sharpen} weapons. */
+const RENAMED: Record<string, string> = { nagamaki: 'polearm', shield: 'shield_tower' };
+
 export function normalizeItem(it: Partial<Item> & { def: string }): Item {
   // the old peasant set is gone (the hero looks like a peasant already): its pieces become guard pieces
-  const def = it.def.startsWith('peasant_') ? it.def.replace('peasant_', 'guard_') : it.def;
+  // the nagamaki became the polearm, the one shield the tower shield
+  const def = it.def.startsWith('peasant_') ? it.def.replace('peasant_', 'guard_') : RENAMED[it.def] ?? it.def;
   return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
 }
