@@ -1682,6 +1682,29 @@ export class Game {
     this.afterGearChange();
   }
 
+  /**
+   * Debug: every weapon, shield and armour piece at every quality into the bag (ones already owned are skipped).
+   * Ignores the bag limit, so the bag may end up over 128 until something is thrown away.
+   */
+  debugGiveAll() {
+    const own = [...this.save.weapons, ...Object.values(this.save.equip), ...this.save.bag].filter((x): x is Item => !!x);
+    let n = 0;
+    for (const [kind, defs] of [['weapon', Object.keys(WEAPONS)], ['armor', Object.keys(ARMOR)]] as const) {
+      for (const def of defs) {
+        for (let rarity = 0; rarity < 6; rarity++) {
+          const it = dropItem({ kind, def, rarity });
+          if (own.some((x) => sameItem(x, it))) continue;
+          this.save.bag.push(it);
+          n++;
+        }
+      }
+    }
+    this.newItems += n;
+    this.ui.toast(`Выдано предметов: ${n}`);
+    this.refreshHud(true);
+    this.persist();
+  }
+
   /** Debug: a whole armour set with a ring and an amulet; the same set again is one quality higher. */
   debugGiveArmor(set: string) {
     const head = this.save.equip.head;

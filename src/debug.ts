@@ -80,6 +80,9 @@ const SECTIONS: [string, Action[]][] = [
     ['Рыцарь', (g) => g.debugGiveArmor('knight')],
     ['Паладин', (g) => g.debugGiveArmor('lord')],
   ]],
+  ['Предметы', [
+    ['Выдать все', (g) => g.debugGiveAll(), 'wide'],
+  ]],
   ['Статы (+очки)', [
     ['+10 урон', (g) => g.debugAddStat('power', 10)],
     ['+50 хп', (g) => g.debugAddStat('hp', 50)],
