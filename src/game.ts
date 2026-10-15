@@ -135,8 +135,6 @@ class Mob extends Unit {
   wanderT = Math.random() * 3;
   wander = new THREE.Vector3();
   knock = new THREE.Vector3();
-  /** Knockback applied once the death freeze (KILL_FX) is over. */
-  deathKnock = new THREE.Vector3();
   /** The death clip is still playing (the corpse sinks once it is over). */
   dying = false;
   loot: Item[] = [];
@@ -208,7 +206,6 @@ class Mob extends Unit {
     this.dying = false;
     this.loot = [];
     this.knock.set(0, 0, 0);
-    this.deathKnock.set(0, 0, 0);
     this.state = 'idle';
     this.hp = this.maxHp;
     this.phase2 = false;
@@ -844,8 +841,7 @@ export class Game {
     m.hp = 0;
     m.deadT = 0;
     m.ch.die();
-    m.deathKnock.copy(m.knock).multiplyScalar(KILL_FX.knockMul).clampLength(0, KILL_FX.maxKnock);
-    m.knock.set(0, 0, 0);
+    m.knock.multiplyScalar(KILL_FX.knockMul).clampLength(0, KILL_FX.maxKnock);
     this.shake = Math.max(this.shake, KILL_FX.shake);
     this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), bloodColor(m), KILL_FX.blood, 0.12, 6, 0.7);
     this.save.kills++;
@@ -1001,18 +997,14 @@ export class Game {
       m.awake = dHero < 40;
       m.ch.root.visible = m.state !== 'dead' ? dHero < 34 : m.ch.root.visible && dHero < 34;
       if (m.state === 'dead') {
-        const holdEnd = KILL_FX.holdAt + KILL_FX.freeze;
-        const held = m.deadT < holdEnd;
         m.deadT += dt;
-        if (held && m.deadT >= holdEnd) m.knock.copy(m.deathKnock);
-        const holding = m.deadT > KILL_FX.holdAt && m.deadT < holdEnd;
-        m.ch.update(dt, false, !holding && m.dying && dHero < 34);
+        m.ch.update(dt, false, m.dying && dHero < 34);
         if (m.knock.lengthSq() > 0.001) {
           m.pos.addScaledVector(m.knock, dt);
           m.knock.multiplyScalar(Math.max(0, 1 - dt * 9));
         }
         // Off-screen corpses do not animate, so their clip never finishes: end it right after the freeze.
-        if (m.dying && m.deadT >= holdEnd && (m.ch.deathDone || dHero >= 34)) { m.dying = false; m.paidAt = m.deadT; }
+        if (m.dying && (m.ch.deathDone || dHero >= 34)) { m.dying = false; m.paidAt = m.deadT; }
         const gone = m.dying ? 0 : m.deadT - m.paidAt;
         if (gone > 0.4) m.ch.position.y = -(gone - 0.4) * 0.8;
         if (gone > 2.2) m.ch.root.visible = false;

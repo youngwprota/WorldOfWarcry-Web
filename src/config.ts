@@ -855,7 +855,8 @@ export const FORGE3D = {
 /** Every non-lethal hit holds the mob's pose (animation only) for this many seconds. */
 export const HIT_FREEZE = 0.15;
 /**
- * Kill feedback. `maxKnock` (m/s) caps the corpse's shove: ×knockMul of a finisher (axe 11 → 22 m/s) sent the body
- * sliding ~2.4 m after the freeze before it fell; 5 m/s is ~0.5 m, a stagger back while falling.
+ * Kill feedback: the death clip and the shove start at once (no freeze frame — it read as the body hanging, then
+ * flying off, then falling). `maxKnock` (m/s) caps the shove: ×knockMul of a finisher (axe 11 → 22 m/s) slid the body
+ * ~2.4 m; 5 m/s is ~0.5 m, a stagger back while falling.
  */
-export const KILL_FX = { holdAt: 0.1, freeze: 0.3, knockMul: 2, maxKnock: 5, shake: 0.31, blood: 14 };
+export const KILL_FX = { knockMul: 2, maxKnock: 5, shake: 0.31, blood: 14 };
