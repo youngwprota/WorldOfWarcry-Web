@@ -1,8 +1,7 @@
 /**
  * The party: three heroes of different classes, one of them on the field at a time.
  * Each class has two gear slots: a weapon (save.weapons[0]) and its own class item (save.weapons[1]: the warrior's
- * shield, the hunter's pet); each keeps its own pair (SaveData.kits). A class without its own lists yet uses the
- * warrior's.
+ * shield, the hunter's pet, the mage's orb); each keeps its own pair (SaveData.kits).
  */
 import type { FactionId } from './config';
 import type { VisualPart } from './items';
@@ -19,7 +18,7 @@ export interface ClassDef {
   key: string;
   /** Hero model by faction; none = the faction's hero (FactionDef.hero). */
   model?: Record<FactionId, string>;
-  /** Weapon defs (src/config.ts WEAPONS) for slot 1; empty = the warrior's for now. */
+  /** Weapon defs (src/config.ts WEAPONS) for slot 1; empty = the warrior's. */
   weapons: string[];
   /** Class item defs for slot 2. */
   off: string[];
@@ -27,8 +26,11 @@ export interface ClassDef {
   offName: string;
   /** Slot 2 holds a pet (config PETS) instead of an item. */
   pet?: boolean;
-  /** What the class holds when it first takes the field (missing = the faction's start weapon). */
-  kit?: { hand: string; left?: string };
+  /**
+   * What the class holds when it first takes the field, and extra items put into the bag then (src/save.ts classKit);
+   * missing = the faction's start weapon.
+   */
+  kit?: { hand: string; left?: string; bag?: string[] };
 }
 
 /** Order = order of the buttons, bottom-right of the HUD. */
@@ -42,7 +44,11 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
     model: { human: 'human_archer', orc: 'orc_archer' },
     weapons: ['bow'], off: [], offName: 'Питомец', pet: true, kit: { hand: 'bow' },
   },
-  mage: { name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3', weapons: [], off: [], offName: '' },
+  mage: {
+    name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
+    weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_vigor', 'orb_fury'], offName: 'Сфера',
+    kit: { hand: 'staff_fire', left: 'orb_vigor', bag: ['staff_ice', 'staff_wind', 'orb_fury'] },
+  },
 };
 
 export const CLASS_IDS = Object.keys(CLASSES) as HeroClass[];

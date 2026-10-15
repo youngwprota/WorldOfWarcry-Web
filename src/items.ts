@@ -11,11 +11,12 @@ const RARITY_IDS = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic']
 const GEAR_DEFS = [...CLASSES.warrior.weapons, ...CLASSES.warrior.off];
 
 /**
- * 3D model of a weapon or shield. Above common every warrior weapon has its own GLB per quality; shields have all
- * six; a common weapon (and any other class's) is the faction's FBX (WeaponDef.model).
+ * 3D model of a weapon, shield or staff: a staff's model per quality (WeaponDef.tiers); above common every warrior
+ * weapon has its own GLB per quality, shields have all six; otherwise the faction's FBX (WeaponDef.model).
  */
 export function itemModel(it: Item, faction: FactionId) {
   const w = WEAPONS[it.def];
+  if (w.tiers) return w.tiers[it.rarity] ?? w.model[faction];
   return GEAR_DEFS.includes(it.def) && (w.guard || it.rarity > 0) ? `${it.def}_${RARITY_IDS[it.rarity]}` : w.model[faction];
 }
 
@@ -198,6 +199,7 @@ export function itemLines(it: Item): [string, string][] {
       if (g.reflect) out.push(['Отражение', pc(g.reflect)]);
       return out;
     }
+    if (w.orb) return [w.orb.regen ? ['Реген здоровья', `+${Math.round(w.orb.regen * 100)}%`] : ['Урон', `+${Math.round((w.orb.power ?? 0) * 100)}%`]];
     return [
       ['Урон', String(Math.round(weaponDamage(it)))],
       ['Тип', DAMAGE_TYPE_NAME[w.type]],

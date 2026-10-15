@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Character } from './character';
 import { Creature } from './creature';
 import {
-  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, RARITY, STAT_CURVE, STAT_SOURCE_NAME, WEAPONS, isPctStat, type PetDef, type StatId,
+  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, RARITY, STAT_CURVE, STAT_SOURCE_NAME, STAVES, WEAPONS, isPctStat, type PetDef, type StatId,
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
@@ -14,7 +14,7 @@ import { DAMAGE_TYPE_ICON, fmtK, icon } from './icons';
 import { art } from './art';
 import type { Game } from './game';
 import type { UI } from './ui';
-import { CLASSES, classSlot } from './party';
+import { CLASSES, classSlot, weaponClass } from './party';
 
 /** 0.237 → "24%". */
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -101,8 +101,10 @@ class HeroPreview {
     this.loop();
   }
 
-  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>) {
-    this.ch.setWeapon(weapon, left);
+  /** `mainLeft`: the main weapon in the left hand (the mage's staff); `orb`: the mage's orb model over the shoulder. */
+  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>, mainLeft = false, orb: string | null = null) {
+    this.ch.setWeapon(weapon, left, mainLeft);
+    this.ch.setOrb(orb);
     this.ch.setOutfit(outfit);
   }
 
@@ -326,7 +328,7 @@ export class Inventory {
     q('#i-eq-l').innerHTML = armor(EQUIP_BAR.left);
     q('#i-eq-w').innerHTML = weapons;
     q('#i-eq-r').innerHTML = armor(EQUIP_BAR.right);
-    this.preview?.setGear(...g.heldModels(), g.outfit());
+    this.preview?.setGear(...g.heldModels(), g.outfit(), g.staffInHand(), g.orbModel());
     g.newItems = 0;
   }
 
@@ -422,11 +424,27 @@ export class Inventory {
     const mainIcon = it.kind === 'weapon' && !WEAPONS[it.def].guard ? art('dps', 30) : art('defense', 30);
     const sub = rest.map(([k, v]) => `<div><span>${k}</span>${cmp(k, v)}</div>`).join('');
     let ability: string;
-    if (it.kind === 'weapon') {
+    const orb = it.kind === 'weapon' ? WEAPONS[it.def].orb : undefined;
+    if (orb) {
+      const what = orb.regen ? `<b>+${Math.round(orb.regen * 100)}%</b> к регену здоровья` : `<b>+${Math.round((orb.power ?? 0) * 100)}%</b> к урону`;
+      ability = `<div class="ab-title">Сфера</div><p>Второй слот мага, парит над правым плечом. Пока надета: ${what}.</p>`;
+    } else if (it.kind === 'weapon') {
       const c = COMBOS[it.def];
       ability = !c ? '' : `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
       const w = WEAPONS[it.def];
       if (w.cycle) ability = `<div class="ab-title">Серия</div><p>Укол, укол — только по цели, на большой дистанции — и <b>прокрут</b> вокруг себя. Серия не сбрасывается.</p>` + ability;
+      if (w.staff === 'fire') {
+        const f = STAVES.fire;
+        ability = `<div class="ab-title">Поджог</div><p>Бьёт на <b>${w.range} м</b>. Враги в <b>${f.splash.radius} м</b> от цели получают <b>×${f.splash.mul}</b> урона. Задетые горят <b>${f.burn.time} с</b> и получают <b>+${Math.round(f.burn.vuln * 100)}%</b> урона от всего.</p>` + ability;
+      }
+      if (w.staff === 'ice') {
+        const f = STAVES.ice;
+        ability = `<div class="ab-title">Стужа</div><p>Бьёт на <b>${w.range} м</b>, одну цель. Замедляет врага на <b>${Math.round((1 - f.slow.mul) * 100)}%</b> на <b>${f.slow.time} с</b>. Каждый <b>${f.freeze.every}-й</b> удар подряд по одному врагу замораживает его на <b>${f.freeze.time} с</b> (кроме мини-боссов и боссов).</p>` + ability;
+      }
+      if (w.staff === 'wind') {
+        const o = STAVES.wind.orb;
+        ability = `<div class="ab-title">Вихрь</div><p>Бьёт на <b>${w.range} м</b> и отбрасывает врагов. Каждый <b>${o.every}-й</b> удар бросает вихрь: <b>×${o.dmg}</b> урона в радиусе <b>${o.radius} м</b>, враги (и боссы) стягиваются к центру.</p>` + ability;
+      }
       if (w.guard) ability = `<div class="ab-title">Защита</div><p>−${Math.round(w.guard.reduce * 100)}% входящего урона. Удар по герою с шансом <b>${Math.round(w.guard.counter.normal * 100)}–${Math.round(w.guard.counter.boss * 100)}%</b> (чем сильнее враг, тем выше) вызывает контратаку оружием.${w.guard.reflect ? ` <b>${Math.round(w.guard.reflect * 100)}%</b> полученного урона возвращается атакующему.` : ''} Сам не бьёт.</p>`;
     } else {
       ability = `<div class="ab-title">Комплект</div><p>${it.rarity > 0 || rest.length ? 'Бонус к стату действует, пока предмет надет.' : 'У обычных предметов нет бонуса. Ищи <b>необычные</b> и выше.'}</p>`;
@@ -442,7 +460,9 @@ export class Inventory {
     } else {
       if (src.slot === 1) actions += btn('unequip', 'Снять', 'red');
     }
-    const type = WEAPONS[it.def]?.guard ? g.slotName(1) : slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
+    // a class item (shield, orb) shows its slot's name instead of a damage type
+    const offOf = it.kind === 'weapon' && (WEAPONS[it.def].guard || WEAPONS[it.def].orb) ? weaponClass(it.def) : null;
+    const type = offOf ? CLASSES[offOf].offName : slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
     tip.innerHTML = `<div class="card-head">${cellHtml(it, 'disabled', '', '', 'big')}
         <div class="card-title"><h3>${itemName(it, g.faction)}${it.sharpen ? ` +${it.sharpen}` : ''}</h3>
           <div class="pills"><span class="rar" style="color:${r.color}">${r.name}</span><span class="typ">${type}</span></div></div>${x}</div>

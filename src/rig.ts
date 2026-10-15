@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { assets } from './assets';
+import { WEAPONS } from './config';
 
 /**
  * Per-weapon grip tweaks. The grip is derived from geometry (bottom of the weapon's long axis),
@@ -51,6 +52,10 @@ export const SHIELD_GRIP = {
 
 const QUALITY = /_(common|uncommon|rare|epic|legendary|mythic)$/;
 
+/** Mage staves: shortened and held at the bottom of the shaft wrap (45-55% of the height), whatever staff model a staff def uses. */
+const STAFF_GRIP = { grip: 0.46, scale: 0.75 };
+const staffModels = new Set(Object.values(WEAPONS).filter((w) => w.staff).flatMap((w) => [...Object.values(w.model), ...(w.tiers ?? [])]));
+
 /** Palm centre in hand_r space (cm). */
 const PALM = new THREE.Vector3(-9, -4, 0);
 const gripCache = new Map<string, THREE.Vector3>();
@@ -89,7 +94,9 @@ export function attachWeapon(character: THREE.Object3D, weapon: string, left = f
   const hand = character.getObjectByName(left ? 'hand_l' : 'hand_r')!;
   const kind = weapon.replace(QUALITY, '');
   if (kind.startsWith('shield_')) return attachShield(hand, weapon, left);
-  const cfg = WEAPON_GRIPS[weapon] ?? WEAPON_GRIPS[kind] ?? (weapon.startsWith('archers/bow') ? WEAPON_GRIPS.bow_human_archer : {});
+  // staves (their quality tiers too) before the kind's grip: `staff_fire_rare` is not a warrior weapon kind
+  const cfg = WEAPON_GRIPS[weapon] ?? (staffModels.has(weapon) ? STAFF_GRIP
+    : WEAPON_GRIPS[kind] ?? (weapon.startsWith('archers/bow') ? WEAPON_GRIPS.bow_human_archer : {}));
   const inner = assets.clone(weapon);
   inner.scale.setScalar(1); // hand bone already lives in the 0.01-scaled character space (cm)
   inner.position.set(0, 0, 0);

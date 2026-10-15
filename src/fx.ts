@@ -332,3 +332,133 @@ export class Shockwaves {
     }
   }
 }
+
+interface Bolt { mesh: THREE.Sprite; from: THREE.Vector3; to: THREE.Vector3 | null; t: number; dur: number }
+interface Glow { mesh: THREE.Mesh; vel: THREE.Vector3; t: number; dur: number; size: number }
+
+/**
+ * Mage staff effects, all pooled: gradient bolts flying from the hand to a target, the wind orb's swirl where it
+ * lands, and flame licks rising from burning mobs. Additive unlit materials, one per colour.
+ */
+export class Spells {
+  private ball = new THREE.SphereGeometry(1, 12, 8);
+  private shell = new THREE.IcosahedronGeometry(1, 1);
+  private flameGeo = new THREE.OctahedronGeometry(1, 0);
+  private mats = new Map<string, THREE.MeshBasicMaterial>();
+  private boltMats = new Map<string, THREE.SpriteMaterial>();
+  private bolts: Bolt[] = [];
+  private swirls: Glow[] = [];
+  private flames: Glow[] = [];
+
+  constructor(private scene: THREE.Scene) {}
+
+  private mat(color: number, opacity = 0.9, wireframe = false) {
+    const key = `${color}/${opacity}/${wireframe}`;
+    let m = this.mats.get(key);
+    if (!m) {
+      m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, wireframe, blending: THREE.AdditiveBlending, depthWrite: false });
+      this.mats.set(key, m);
+    }
+    return m;
+  }
+
+  /** Bolt sprite: radial gradient from `inner` at the centre to `outer`, fading out at the rim. */
+  private boltMat(inner: number, outer: number) {
+    const key = `${inner}/${outer}`;
+    let m = this.boltMats.get(key);
+    if (!m) {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 64;
+      const g = cv.getContext('2d')!;
+      const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      const css = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
+      grad.addColorStop(0, css(inner));
+      grad.addColorStop(0.35, css(inner));
+      grad.addColorStop(0.75, css(outer));
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 64, 64);
+      const tex = new THREE.CanvasTexture(cv);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      m = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+      this.boltMats.set(key, m);
+    }
+    return m;
+  }
+
+  /** A hidden pool entry, or `fresh` added to the pool and the scene. */
+  private take<T extends { mesh: THREE.Object3D; t: number }>(pool: T[], fresh: T | null) {
+    let it = fresh;
+    if (it) { pool.push(it); this.scene.add(it.mesh); } else it = pool.find((x) => !x.mesh.visible)!;
+    it.mesh.visible = true;
+    it.t = 0;
+    return it;
+  }
+
+  private static idle(pool: { mesh: THREE.Object3D }[]) { return pool.some((x) => !x.mesh.visible); }
+
+  /** A sphere from `from` to `to` in `dur` s; `to` is followed live (a mob's position), aimed 1 m above it. */
+  bolt(from: THREE.Vector3, to: THREE.Vector3, dur: number, colors: readonly [number, number], size = 0.16) {
+    const b = this.take(this.bolts, Spells.idle(this.bolts) ? null
+      : { mesh: new THREE.Sprite(), from: new THREE.Vector3(), to: null, t: 0, dur: 1 });
+    b.mesh.material = this.boltMat(colors[0], colors[1]);
+    b.mesh.scale.setScalar(size * 2.6);
+    b.mesh.position.copy(from);
+    b.from.copy(from);
+    b.to = to;
+    b.dur = Math.max(0.05, dur);
+  }
+
+  /** A spinning see-through sphere of `radius` m at `at` for `dur` s. */
+  swirl(at: THREE.Vector3, radius: number, dur: number, color: number) {
+    const s = this.take(this.swirls, Spells.idle(this.swirls) ? null
+      : { mesh: new THREE.Mesh(this.shell).add(new THREE.Mesh(this.ball)) as THREE.Mesh, vel: new THREE.Vector3(), t: 0, dur: 1, size: 1 });
+    s.mesh.material = this.mat(color, 0.8, true);
+    (s.mesh.children[0] as THREE.Mesh).material = this.mat(color, 0.25);
+    s.mesh.position.set(at.x, 0.6, at.z);
+    s.dur = dur;
+    s.size = radius;
+  }
+
+  /** One flame lick rising from `at`. */
+  flame(at: THREE.Vector3, color: number) {
+    const f = this.take(this.flames, Spells.idle(this.flames) ? null
+      : { mesh: new THREE.Mesh(this.flameGeo), vel: new THREE.Vector3(), t: 0, dur: 1, size: 1 });
+    f.mesh.material = this.mat(color);
+    f.mesh.position.set(at.x + (Math.random() - 0.5) * 0.5, at.y + Math.random() * 0.6, at.z + (Math.random() - 0.5) * 0.5);
+    f.vel.set((Math.random() - 0.5) * 0.3, 1.2 + Math.random() * 0.8, (Math.random() - 0.5) * 0.3);
+    f.dur = 0.4 + Math.random() * 0.25;
+    f.size = 0.07 + Math.random() * 0.06;
+  }
+
+  update(dt: number) {
+    for (const b of this.bolts) {
+      if (!b.mesh.visible) continue;
+      b.t += dt;
+      const k = Math.min(1, b.t / b.dur);
+      tmp.copy(b.to!).setY(b.to!.y + 1);
+      b.mesh.position.lerpVectors(b.from, tmp, k);
+      b.mesh.position.y += Math.sin(Math.PI * k) * 0.4;
+      if (k >= 1) { b.mesh.visible = false; b.to = null; }
+    }
+    for (const s of this.swirls) {
+      if (!s.mesh.visible) continue;
+      s.t += dt;
+      const k = s.t / s.dur;
+      // grows in fast, holds, then collapses into its centre
+      const grow = Math.min(1, k * 5) * (k > 0.7 ? Math.max(0, 1 - (k - 0.7) / 0.3) : 1);
+      s.mesh.scale.setScalar(Math.max(0.001, s.size * 0.45 * grow));
+      s.mesh.rotation.y += dt * 9;
+      s.mesh.rotation.x = Math.sin(s.t * 5) * 0.3;
+      if (k >= 1) s.mesh.visible = false;
+    }
+    for (const f of this.flames) {
+      if (!f.mesh.visible) continue;
+      f.t += dt;
+      const k = f.t / f.dur;
+      f.mesh.position.addScaledVector(f.vel, dt);
+      f.mesh.scale.set(f.size * (1 - k), f.size * 1.8 * (1 - k), f.size * (1 - k));
+      if (k >= 1) f.mesh.visible = false;
+    }
+  }
+}
