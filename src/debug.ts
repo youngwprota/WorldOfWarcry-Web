@@ -35,10 +35,30 @@ function teleport(g: Game, arg: string) {
   g.debugTeleportTo(at[0] + (dx / l) * 5, at[1] + (dz / l) * 5, kind === 'fort' || kind === 'arena' || kind === 'fmini' ? undefined : gate?.id);
 }
 
+/** Gear a player plausibly has by each boss: armour set + rarity, weapon rarity, ring and amulet. */
+const BOSS_GEAR: Partial<Record<ZoneId, { set: string; rarity: number; weapon: number; jewels: boolean }>> = {
+  forest: { set: 'guard', rarity: 0, weapon: 0, jewels: false },
+  cemetery: { set: 'guard', rarity: 1, weapon: 1, jewels: true },
+  peaks: { set: 'knight', rarity: 1, weapon: 2, jewels: true },
+  hills: { set: 'knight', rarity: 2, weapon: 2, jewels: true },
+  grove: { set: 'lord', rarity: 2, weapon: 3, jewels: true },
+  swamp: { set: 'lord', rarity: 3, weapon: 4, jewels: true },
+  dunes: { set: 'lord', rarity: 4, weapon: 4, jewels: true },
+};
+
+/** `arg`: '<zone> <teleport arg>'; equips BOSS_GEAR, teleports to the boss, then balances the hero against it (Game.debugBalanceBoss). */
+function balanceTp(g: Game, arg: string) {
+  const [zone, at] = arg.split(' ');
+  const gear = BOSS_GEAR[zone as ZoneId];
+  if (gear) g.debugEquipFor(zone as ZoneId, gear);
+  teleport(g, at);
+  if (!g.debugBalanceBoss(zone as ZoneId)) g.ui.toast('Баланс: нет босса или оружия');
+}
+
 /** One row per location: [entrance] [mini-boss] [boss]; the forest starts at the settlement instead of a door. */
 function locationRows(): [string, Action[]][] {
   const rows: [string, Action[]][] = [
-    [zoneName('forest'), [['Лагерь', (g) => g.debugTeleport('camp')], ['Мини', teleport, '', 'fmini'], ['Босс', teleport, '', 'fort']]],
+    [zoneName('forest'), [['Лагерь', (g) => g.debugTeleport('camp')], ['Мини', teleport, '', 'fmini'], ['Босс', teleport, '', 'fort'], ['Баланс+ТП', balanceTp, '', 'forest fort']]],
   ];
   const seen = new Set<ZoneId>();
   for (const gt of GATES) {
@@ -47,8 +67,8 @@ function locationRows(): [string, Action[]][] {
     const row: Action[] = [['Вход', teleport, '', `door:${gt.id}`]];
     const lb = LAND_BOSSES.find((b) => b.zone === gt.to);
     if (lb?.minis.length) row.push(['Мини', teleport, '', `mini:${gt.to}:0`]);
-    if (gt.to === 'cemetery') row.push(['Босс', teleport, '', 'arena']);
-    else if (lb?.boss) row.push(['Босс', teleport, '', `boss:${gt.to}`]);
+    const boss = gt.to === 'cemetery' ? 'arena' : lb?.boss ? `boss:${gt.to}` : null;
+    if (boss) row.push(['Босс', teleport, '', boss], ['Баланс+ТП', balanceTp, '', `${gt.to} ${boss}`]);
     rows.push([zoneName(gt.to), row]);
   }
   return rows;

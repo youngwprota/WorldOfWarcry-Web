@@ -622,7 +622,7 @@ export const MOBS: Record<string, MobDef> = {
   elf_priestess: {
     id: 'elf_priestess', name: 'Жрица рощи',
     model: { human: ['elf_priestess', 'magic_ball'], orc: ['elf_priestess', 'magic_ball'] },
-    anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.0,
+    anim: 'SwordAttack', hp: 32000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.0,
     ...foes('grove'), reward: { regen: 3 }, respawn: 1200,
     boss: {
       ...BOSS_BASE, titles: { human: 'Жрица Осенней рощи', orc: 'Жрица Осенней рощи' }, zone: 'grove', unlocks: ['grove-swamp', 'forest-swamp'],

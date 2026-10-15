@@ -33,7 +33,7 @@ const SPARKLE_T = 0.07;
 const { boss: _bossDef, ...ELF } = MOBS.elf_priestess;
 const SPRING: MobDef = {
   ...ELF, id: 'elf_priestess_spring', name: 'Весенняя сестра',
-  hp: 9000, scale: 1.8, reward: { hp: 0 }, respawn: 0,
+  scale: 1.8, reward: { hp: 0 }, respawn: 0,
 };
 
 const { drop: _dropDef, ...DRYAD } = MOBS.grove_dryad;
@@ -426,5 +426,7 @@ class Sisters implements BossKit {
   }
 }
 
+/** The boss's twin, spawned into the fight: same HP and damage. */
+export const SISTER = SPRING;
 export const sisters: BossKitFactory = (host, boss) => new Sisters(host, boss, BOSS_OPTS);
 export const sistersMini: BossKitFactory = (host, boss) => new Sisters(host, boss, MINI_OPTS);

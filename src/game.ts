@@ -6,11 +6,11 @@ import { HELPER_SEEK, Helpers, type Helper } from './helpers';
 import { NAGA_SPECIALS, excess, swordPair, type NagaSpecial, type Pair } from './offhand';
 import { Creature } from './creature';
 import { StaticBody } from './staticbody';
-import { BOSS_KITS } from './bosses';
+import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
   ATTACK_HIT, COMBOS, DUAL, FACTIONS, GACHA, ZONE_TIER, LEFT_SWING, SWORD_PAIRS, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, WEAPONS,
-  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, isPctStat,
+  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
 import { ArenaFog, FloatingText, FogPuffs, Particles, Shockwaves, Telegraphs } from './fx';
 import {
@@ -2359,6 +2359,66 @@ export class Game {
     this.hp = Math.max(1, hpFrac * this.maxHp);
     this.refreshHud(true);
     this.persist();
+  }
+
+  /**
+   * Debug: sets power and max HP so the boss(es) of `zone` die in about `secs` s of real play. `uptime`: share of the
+   * fight spent hitting (the rest goes to dodging); `taken`: share of the bosses' melee DPS that still lands.
+   * Both are linear: DPS in power (weaponDamage), HP need in incoming DPS × time minus regen.
+   */
+  debugBalanceBoss(zone: ZoneId, secs = 60, uptime = 0.43, taken = 0.75) {
+    const main = this.mobs.filter((m) => m.def.boss?.zone === zone && !m.removed);
+    if (!main.length || !this.save.weapons.some(Boolean)) return false;
+    // the partner spawns only once the fight starts: its numbers as addMob would give them (zone tier, no depth);
+    // a circle swing hits both at once, so then its HP costs nothing extra
+    const tier = ZONE_TIER[zone] ?? 1;
+    const splash = this.save.weapons.some((it) => it && WEAPONS[it.def].shape === 'circle');
+    const bosses = main.flatMap((m) => {
+      const p = BOSS_PARTNERS[m.def.id];
+      const own = { hp: m.maxHp, dps: m.dmg * m.def.aps, resist: m.def.resist };
+      return p ? [own, { hp: splash ? 0 : p.hp * tier, dps: p.dmg * tier * p.aps, resist: p.resist }] : [own];
+    });
+    const s = this.stats;
+    const crit = critAvg(s.critPts, s.critDmgPts);
+    const hp = bosses.reduce((a, b) => a + b.hp, 0);
+    const dps = (p: number) => bosses.reduce((a, b) => a + b.hp * heroDps(this.save.weapons, this.pair, p, s.powerMul, crit, b.resist), 0) / hp;
+    const d0 = dps(0);
+    const need = hp / (secs * uptime);
+    this.debugSetStat('power', Math.max(0, Math.round((need - d0) / ((dps(100) - d0) / 100))));
+    const inDps = bosses.reduce((a, b) => a + b.dps, 0) * armorMul(s.defense) * this.guardMul() * (1 - s.dodge);
+    this.debugSetStat('hp', Math.max(HERO.hp, Math.round((inDps * taken - s.regen) * secs)));
+    this.hp = this.maxHp;
+    return true;
+  }
+
+  /**
+   * Debug: one weapon, the best DPS against the boss(es) of `zone`, and a full armour `set` (guard / knight / lord)
+   * of `rarity`; the ring and the amulet only with `jewels`. Replaced items go to the bag while it has room.
+   */
+  debugEquipFor(zone: ZoneId, gear: { set: string; rarity: number; weapon: number; jewels: boolean }) {
+    const bosses = this.mobs.filter((m) => m.def.boss?.zone === zone && !m.removed);
+    const s = this.stats;
+    const crit = critAvg(s.critPts, s.critDmgPts);
+    let best: Item | null = null;
+    let bestDps = -1;
+    for (const w of Object.values(WEAPONS)) {
+      if (w.guard) continue;
+      const it = dropItem({ kind: 'weapon', def: w.id, rarity: gear.weapon });
+      const dps = bosses.reduce((a, m) => a + heroDps([it, null], null, s.power, s.powerMul, crit, m.def.resist), 0);
+      if (dps > bestDps) { best = it; bestDps = dps; }
+    }
+    const stash = (it: Item | null | undefined) => { if (it && this.save.bag.length < BAG_SIZE) this.save.bag.push(it); };
+    stash(this.save.weapons[0]);
+    stash(this.save.weapons[1]);
+    this.save.weapons = [best, null];
+    const pieces = ['head', 'chest', 'arms', 'legs'].map((p) => `${gear.set}_${p}`);
+    if (gear.jewels) pieces.push('ring_power', 'amulet_life');
+    for (const def of pieces) {
+      const slot = ARMOR[def].slot;
+      stash(this.save.equip[slot]);
+      this.save.equip[slot] = dropItem({ kind: 'armor', def, rarity: gear.rarity });
+    }
+    this.afterGearChange();
   }
 
   /** Removes every debug stat point and percent. */
