@@ -12,10 +12,12 @@ export const WEAPON_GRIPS: Record<string, { tilt?: number; out?: number; grip?: 
   sword_soldier: { scale: 0.7, grip: 0.12 },
   sword_orc_warrior: { scale: 0.68, grip: 0.12 },
   sword_undead_king: { scale: 0.75, grip: 0.12 },
-  axe_orc_grunt: { scale: 0.7, grip: 0.16, roll: Math.PI },
-  axe_orc_chieftain: { scale: 0.78, grip: 0.16, roll: Math.PI },
-  axe_orc_peon: { scale: 0.78, grip: 0.18, roll: Math.PI },
-  axe: { scale: 0.78, grip: 0.18, roll: Math.PI },
+  // axes: `roll` turns the blade to face forward-down when the arm hangs (the way the chop lands), measured in
+  // viewer.html; π had every axe edge pointing back over the shoulder
+  axe_orc_grunt: { scale: 0.7, grip: 0.16, roll: -0.92 },
+  axe_orc_chieftain: { scale: 0.78, grip: 0.16, roll: -0.62 },
+  axe_orc_peon: { scale: 0.78, grip: 0.18, roll: -0.86 },
+  axe: { scale: 0.78, grip: 0.18, roll: -0.86 }, // also the per-quality GLB axes (axe_<quality>)
   hammer_human_paladin: { scale: 0.75, grip: 0.16 },
   dagger: { scale: 1.15, grip: 0.15 },
   reaper: { scale: 1.05, grip: 0.3, tilt: 0.1, out: 0.2 },
