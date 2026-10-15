@@ -4,6 +4,7 @@ import './grade';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { assets, ANIMS } from './assets';
 import { attachWeapon, SHIELD_GRIP } from './rig';
+import { KEYS, Swinger, type SwingKind } from './swing';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
@@ -53,6 +54,7 @@ const all = [...new Set([...pairs.flat(), ...props, leftName].filter((n): n is s
 if (!gallery) await Promise.all([assets.loadAll(all.filter((n) => !isGear(n)), () => {}), assets.loadGear(all.filter(isGear))]);
 
 const mixers: THREE.AnimationMixer[] = [];
+const swingers: { s: Swinger; g: THREE.Object3D }[] = [];
 const solo = new URLSearchParams(location.search).get('solo');
 pairs.forEach(([c, w, l], i) => {
   if (gallery || (solo !== null && +solo !== i)) return;
@@ -66,6 +68,7 @@ pairs.forEach(([c, w, l], i) => {
   const m = new THREE.AnimationMixer(g);
   m.clipAction(assets.clips.full.Idle).play();
   mixers.push(m);
+  swingers.push({ s: new Swinger(g), g });
 });
 if (solo === null && !gallery) props.forEach((p, i) => {
   const g = assets.clone(p);
@@ -76,14 +79,40 @@ if (solo === null && !gallery) props.forEach((p, i) => {
 const ui = document.getElementById('ui')!;
 const sel = document.createElement('select');
 ANIMS.forEach((a) => sel.add(new Option(a, a)));
-sel.onchange = () => mixers.forEach((m) => { m.stopAllAction(); m.clipAction(assets.clips.full[sel.value as 'Idle']).play(); });
+// procedural swings (src/swing.ts) on top of Idle, repeated; `sweep` also spins the body like the polearm finisher
+const SWINGS: SwingKind[] = ['thrust', 'sweep', 'slashRL', 'slashLR', 'overhead', 'uppercut', 'bash'];
+SWINGS.forEach((k) => sel.add(new Option('swing: ' + k, 'swing:' + k)));
+let swingKind: SwingKind | null = null;
+let swingT = 0;
+sel.onchange = () => {
+  swingKind = sel.value.startsWith('swing:') ? (sel.value.slice(6) as SwingKind) : null;
+  swingT = 0;
+  mixers.forEach((m) => { m.stopAllAction(); m.clipAction(assets.clips.full[swingKind ? 'Idle' : (sel.value as 'Idle')]).play(); });
+};
+/** Swing timing as in the game for the polearm (1 attack/s): impact 0.4 s, swing 0.96 s, spin 0.35 s from the impact. */
+const slow = +(new URLSearchParams(location.search).get('slow') ?? 1);
+function updateSwings(dt: number) {
+  if (swingKind) {
+    if (swingT <= 0) { swingT = 1.4; swingers.forEach(({ s }) => s.start(swingKind!, 0, 0.96, 0.4)); }
+    swingT -= dt;
+  }
+  const t = 1.4 - swingT; // time since the swing started
+  const k = swingKind === 'sweep' ? Math.min(1, Math.max(0, (t - 0.4) / 0.35)) : 0;
+  swingers.forEach(({ s, g }) => { s.apply(dt); g.rotation.y = (1 - (1 - k) * (1 - k)) * Math.PI * 2; });
+}
+Object.assign(window, { KEYS, pause: (on: boolean) => { paused = on; }, step: (dt: number) => tick(dt) });
+let paused = false;
 ui.append(sel);
 const clock = new THREE.Clock();
-renderer.setAnimationLoop(() => {
-  const dt = clock.getDelta();
+function tick(dt: number) {
   mixers.forEach((m) => m.update(dt));
+  updateSwings(dt);
   controls.update();
   renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta() / slow;
+  if (!paused) tick(dt);
 });
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);

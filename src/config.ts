@@ -94,7 +94,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   polearm: {
     id: 'polearm', name: 'Древковое', type: 'slash', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 3.1,
     anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️', single: true, cycle: true,
-    swing: ['thrust', 'thrust', 'slashRL'],
+    swing: ['thrust', 'thrust', 'sweep'],
   },
   // shields: the warrior's class slot (src/party.ts); they never swing, the swing numbers are unused
   shield_tower: {
