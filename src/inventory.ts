@@ -276,7 +276,7 @@ export class Inventory {
   open() {
     if (this.opened) return;
     this.opened = true;
-    const tab =(bf: BagFilter, ic: string) => `<button class="tab ${this.bagFilter === bf ? 'on' : ''}" data-filter="${bf}">${art(ic, 34)}</button>`;
+    const tab = (bf: BagFilter, ic: string) => `<button class="tab ${this.bagFilter === bf ? 'on' : ''}" data-filter="${bf}">${art(ic, 34)}</button>`;
     this.ui.open(`${this.statsPanel()}
     <div class="inv-equipped"><div class="eq-title">Экипировано</div>
       <div class="eq-doll">

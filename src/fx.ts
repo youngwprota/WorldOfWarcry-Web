@@ -333,7 +333,7 @@ export class Shockwaves {
   }
 }
 
-interface Bolt { mesh: THREE.Sprite; from: THREE.Vector3; to: THREE.Vector3 | null; t: number; dur: number }
+export interface Bolt { mesh: THREE.Sprite; from: THREE.Vector3; to: THREE.Vector3 | null; t: number; dur: number }
 interface Glow { mesh: THREE.Mesh; vel: THREE.Vector3; t: number; dur: number; size: number }
 
 /**
@@ -407,7 +407,11 @@ export class Spells {
     b.from.copy(from);
     b.to = to;
     b.dur = Math.max(0.05, dur);
+    return b;
   }
+
+  /** Removes bolt `b` mid-flight. */
+  drop(b: Bolt) { b.mesh.visible = false; b.to = null; }
 
   /** A spinning see-through sphere of `radius` m at `at` for `dur` s. */
   swirl(at: THREE.Vector3, radius: number, dur: number, color: number) {

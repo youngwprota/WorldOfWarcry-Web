@@ -4,10 +4,10 @@ import { Trail } from './swing';
 import { Creature } from './creature';
 import { StaticBody } from './staticbody';
 import {
-  COMBOS, FACTIONS, GACHA, PETS, START_PET, type PetDef, ZONE_TIER, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
+  COMBOS, FACTIONS, GACHA, PETS, START_PET, type PetDef, ZONE_TIER, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS, casterModel,
   mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type StatId, type WeaponDef, type ZoneDef, isPctStat,
 } from './config';
-import { FloatingText, Particles, Pickups, Shockwaves, Spells, Telegraphs, type PickupKind } from './fx';
+import { FloatingText, Particles, Pickups, Shockwaves, Spells, Telegraphs, type Bolt, type PickupKind } from './fx';
 import {
   ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemClass, itemModel, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
@@ -590,9 +590,10 @@ export class Game {
     // the hunter in a debug set: all four parts of that quality
     if (this.heroClass === 'hunter' && this.archerLook.rarity >= 0) return archerSet(this.faction, this.archerLook.rarity);
     const o: Partial<Record<VisualPart, string>> = {};
+    const caster = this.heroClass === 'mage'; // armour is a class skin: the caster part of the item's rarity
     for (const part of ['head', 'chest', 'arms', 'legs'] as VisualPart[]) {
       const it = this.save.equip[part];
-      const src = it ? ARMOR[it.def].source?.[this.faction] : undefined;
+      const src = !it ? undefined : caster ? casterModel(this.faction, it.rarity) : ARMOR[it.def].source?.[this.faction];
       if (src) o[part] = src;
     }
     return o;
@@ -843,11 +844,17 @@ export class Game {
     }
     if (h.launch >= 0) {
       h.launch -= dt;
-      if (h.launch < 0 && w.staff && t) this.spells.bolt(this.castPoint(v1), t.pos, h.flight, STAVES[w.staff].bolt);
+      if (h.launch < 0 && w.staff && t) { h.bolt = this.spells.bolt(this.castPoint(v1), t.pos, h.flight, STAVES[w.staff].bolt); h.aim = t; }
+    }
+    // the mob left the staff's reach: the bolt fizzles and the hit is lost
+    if (h.bolt && h.impact >= 0 && !this.inStrike(h.aim!, w.range)) {
+      this.spells.drop(h.bolt);
+      h.impact = -1;
     }
     if (h.impact >= 0) {
       h.impact -= dt;
       if (h.impact < 0) this.heroStrike(h);
+      if (h.impact < 0) { h.bolt = null; h.aim = null; }
     }
   }
 
@@ -2249,9 +2256,11 @@ interface Hand {
   i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean;
   /** Staff: seconds until the bolt leaves the staff (< 0 = none pending), and its flight time. */
   launch: number; flight: number;
+  /** Staff: the bolt in flight and the mob it flies at. */
+  bolt: Bolt | null; aim: Unit | null;
 }
 function newHand(i: 0 | 1): Hand {
-  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false, launch: -1, flight: 0 };
+  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false, launch: -1, flight: 0, bolt: null, aim: null };
 }
 
 /** How a blow landed: a crit, dodged, or plain (''). */
