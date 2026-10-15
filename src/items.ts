@@ -36,7 +36,8 @@ export const SLOT_NAME = Object.fromEntries(ARMOR_SLOTS.map((s) => [s.id, s.name
 /** Mesh-name prefixes of each body part (all Bitgem characters share these). */
 export const PART_PREFIXES: Record<VisualPart, string[]> = {
   head: ['head_', 'helmet_', 'face_plate_'],
-  chest: ['chest_', 'torso_', 'cape_'],
+  // (the archer's quiver goes with the chest: the hunter sets' torso brings its own)
+  chest: ['chest_', 'torso_', 'cape_', 'quiver_'],
   arms: ['arms_'],
   legs: ['legs_', 'hip_', 'hips_'],
 };

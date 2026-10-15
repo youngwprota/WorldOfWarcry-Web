@@ -18,7 +18,8 @@ import {
 import { Input } from './input';
 import { sfx } from './audio';
 import { writeSave, type SaveData } from './save';
-import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, kitOf, type HeroClass } from './party';
+import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, archerBow, archerSet, kitOf, type HeroClass } from './party';
+import { assets } from './assets';
 import { Arrows } from './arrows';
 import { Pet } from './pet';
 import { GATE, SPAWN, inCamp, pathAt, progressAt } from './island';
@@ -575,8 +576,11 @@ export class Game {
 
   /** Weapon models as the hero holds them, [right hand, left hand]: the bow goes into the left hand while that one is free. */
   heldModels(): [string | null, string | null] {
-    const [r, l] = this.handModels();
+    let [r, l] = this.handModels();
     const main = this.save.weapons[0];
+    // the hunter in a debug set (archerLook) draws the set's bow
+    const look = this.archerLook;
+    if (main?.def === 'bow' && this.heroClass === 'hunter' && look.rarity >= 0) r = archerBow(look.rarity, look.bowV1);
     return main && WEAPONS[main.def].leftHand && !l ? [null, r] : [r, l];
   }
 
@@ -587,6 +591,8 @@ export class Game {
 
   /** Body parts borrowed from other characters for the equipped armour. */
   outfit(): Partial<Record<VisualPart, string>> {
+    // the hunter in a debug set: all four parts of that quality
+    if (this.heroClass === 'hunter' && this.archerLook.rarity >= 0) return archerSet(this.faction, this.archerLook.rarity);
     const o: Partial<Record<VisualPart, string>> = {};
     for (const part of ['head', 'chest', 'arms', 'legs'] as VisualPart[]) {
       const it = this.save.equip[part];
@@ -2254,6 +2260,23 @@ export class Game {
     this.hp = Math.min(this.hp, this.maxHp);
     this.refreshHud(true);
     this.persist();
+  }
+
+  /** Debug: the hunter's look by quality (RARITY index, −1 = the base archer) and the bow variant (`bowV1`). */
+  archerLook = { rarity: -1, bowV1: false };
+  private archerLoad = 0;
+  /** Loads the set's parts on demand, then dresses the hunter (and his inventory preview) in it. */
+  async debugArcherSet(rarity: number, bowV1 = this.archerLook.bowV1) {
+    const token = ++this.archerLoad;
+    if (rarity >= 0) {
+      this.ui.toast('Загрузка сета…', 1500);
+      await assets.ensure([...Object.values(archerSet(this.faction, rarity)), archerBow(rarity, bowV1)]);
+    }
+    if (token !== this.archerLoad) return; // a later pick won
+    this.archerLook = { rarity, bowV1 };
+    this.equipVisual();
+    this.hero.setOutfit(this.outfit());
+    if (this.heroClass !== 'hunter') this.ui.toast('Сет виден у охотника (2)', 2000);
   }
 
   debugGiveWeapon(def: string, slot: 0 | 1 = 0) {

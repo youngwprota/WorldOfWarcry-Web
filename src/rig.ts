@@ -29,6 +29,7 @@ export const WEAPON_GRIPS: Record<string, { tilt?: number; out?: number; grip?: 
   kitchen_knife: { scale: 1.6, grip: 0.12 },
   spear_undead_warrior: { scale: 0.7, grip: 0.4, tilt: 0.1, out: 0.15 },
   // held by the middle, the limbs along the fist axis: upright when the arm is raised forward
+  // (also the hunter sets' bows, models/archers/bow_*)
   bow_human_archer: { scale: 0.75, grip: 0.5, tilt: 0, out: 0 },
   bow_orc_archer: { scale: 0.6, grip: 0.5, tilt: 0, out: 0 },
 };
@@ -69,7 +70,7 @@ function gripPoint(name: string, w: THREE.Object3D, frac: number): THREE.Vector3
  */
 export function attachWeapon(character: THREE.Object3D, weapon: string, left = false): THREE.Object3D {
   const hand = character.getObjectByName(left ? 'hand_l' : 'hand_r')!;
-  const cfg = WEAPON_GRIPS[weapon] ?? {};
+  const cfg = WEAPON_GRIPS[weapon] ?? (weapon.startsWith('archers/bow') ? WEAPON_GRIPS.bow_human_archer : {});
   const inner = assets.clone(weapon);
   inner.scale.setScalar(1); // hand bone already lives in the 0.01-scaled character space (cm)
   inner.position.set(0, 0, 0);

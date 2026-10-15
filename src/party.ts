@@ -3,6 +3,7 @@
  * Each class keeps its own pair of weapons (SaveData.kits); the hunter is done, the mage still plays as the warrior.
  */
 import type { FactionId } from './config';
+import type { VisualPart } from './items';
 
 export type HeroClass = 'warrior' | 'hunter' | 'mage';
 
@@ -36,6 +37,22 @@ export const CLASS_IDS = Object.keys(CLASSES) as HeroClass[];
 
 /** Whose weapons the class uses: its own once it has a starting weapon, else the warrior's. */
 export const kitOf = (c: HeroClass): HeroClass => (CLASSES[c].weapon ? c : 'warrior');
+
+/** Hunter looks by quality (tools/import-archers.mjs), in config RARITY order. */
+const ARCHER_RARITY = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+/** Body part on the hero → part file of the hunter sets. */
+const ARCHER_PART: Record<VisualPart, string> = { head: 'head', chest: 'torso', arms: 'arms', legs: 'legs' };
+
+/** The four body parts of the hunter set of quality `rarity` (RARITY index), as models for Character.setOutfit. */
+export function archerSet(f: FactionId, rarity: number): Record<VisualPart, string> {
+  const r = ARCHER_RARITY[rarity];
+  return Object.fromEntries(Object.entries(ARCHER_PART).map(([part, file]) => [part, `archers/${f}_archer_${file}_${r}`])) as Record<VisualPart, string>;
+}
+
+/** The set's bow; above common there are two variants (`v1`: the one close to the base bow). */
+export function archerBow(rarity: number, v1: boolean) {
+  return rarity === 0 ? 'archers/bow_common' : `archers/bow_${ARCHER_RARITY[rarity]}${v1 ? '_v1' : ''}`;
+}
 
 /** Seconds between two switches, so a double tap does not flip the hero back and forth. */
 export const SWITCH_COOLDOWN = 0.5;

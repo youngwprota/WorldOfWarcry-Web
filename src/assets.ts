@@ -2,8 +2,12 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { ARCHER_TEXTURES } from './archerTextures';
+import { floatMaterial, markFloaters } from './floaters';
 
 const BASE = import.meta.env.BASE_URL + 'assets/';
+/** 1×1 white: stands in for textures we don't have. */
+const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==';
 
 /** Texture used by each model (models reference Bitgem's absolute TGA paths, so we remap). */
 const TEXTURE_OF: Record<string, string> = {
@@ -70,8 +74,14 @@ class Assets {
   clips!: CharacterClips;
 
   constructor() {
-    // The FBX files point at the artist's local TGA files; we assign textures ourselves.
-    this.manager.setURLModifier((url) => (/\.(tga|png|jpg)$/i.test(url) ? 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' : url));
+    // The FBX files point at the artist's local TGA files; we assign textures ourselves. The hunter sets
+    // (models/archers) point at `<model>.fbm/<name>_baked`: served from textures/archers when the import found
+    // that texture, else a blank (the part keeps its own colour).
+    this.manager.setURLModifier((url) => {
+      const fbm = /\.fbm\/([^/]+?)(\.\w+)?$/.exec(url);
+      if (fbm) return ARCHER_TEXTURES.has(fbm[1]) ? `${BASE}textures/archers/${fbm[1]}.png` : BLANK;
+      return /\.(tga|png|jpg)$/i.test(url) ? BLANK : url;
+    });
   }
 
   async loadAll(names: string[], onProgress: (p: number) => void) {
@@ -87,6 +97,20 @@ class Assets {
     this.prepareClips();
     for (const n of names) this.prepareModel(n);
   }
+
+  /** Loads models on demand (the hunter sets: ~60 files, too many for the start-up load); already loaded ones are skipped. */
+  async ensure(names: string[]) {
+    const todo = names.filter((n) => !this.sources.has(n) && !this.pending.has(n));
+    for (const n of todo) {
+      this.pending.set(n, this.fbx.loadAsync(`${BASE}models/${n}.fbx`).then((g) => {
+        this.sources.set(n, g);
+        this.prepareModel(n);
+        this.pending.delete(n);
+      }));
+    }
+    await Promise.all(names.map((n) => this.pending.get(n)));
+  }
+  private pending = new Map<string, Promise<void>>();
 
   async loadCreatures(names: string[]) {
     await Promise.all(
@@ -168,6 +192,7 @@ class Assets {
     g.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(g);
     if (box.max.y - box.min.y > 20) g.scale.setScalar(0.01);
+    if (name.startsWith('archers/')) { this.prepareOwnMaterials(name, g); return; }
     const mat = this.material(textureFor(name));
     g.traverse((o) => {
       if (o.name === 'Character1_RightHand') o.name = 'hand_r';
@@ -178,6 +203,54 @@ class Assets {
         m.castShadow = false;
         m.receiveShadow = false;
       }
+    });
+  }
+
+  /**
+   * Hunter set parts and bows keep their own materials (a baked texture, plus flat "metal" and "glow" colours by
+   * quality) as Lambert like the rest of the game; the race's base material becomes our shared atlas, glow emits.
+   */
+  private prepareOwnMaterials(name: string, g: THREE.Group) {
+    const atlas = name.includes('orc_') ? 'orc_albedo' : 'human_albedo';
+    const conv = new Map<THREE.Material, THREE.Material>();
+    // `baked`: the mesh's own texture (`<mesh>_baked`) was imported
+    const lambert = (src: THREE.Material, baked: boolean) => {
+      let m = conv.get(src);
+      if (m) return m;
+      const p = src as THREE.MeshPhongMaterial;
+      if (/^(human|orc)_archer_mat$/.test(p.name)) m = this.material(atlas);
+      else {
+        const glow = p.name.endsWith('_glow');
+        const map = p.map && baked ? p.map : null;
+        if (map) map.colorSpace = THREE.SRGBColorSpace;
+        // a texture shows as is (the FBX writes Blender's 0.8 colour factor, 0xcccccc, which only dims it);
+        // without its baked texture a textured part is a light cloth colour
+        m = new THREE.MeshLambertMaterial({
+          name: p.name, map, color: map ? 0xffffff : !p.map ? p.color : new THREE.Color(0xd8d0c4),
+          emissive: glow ? p.color : 0x000000, emissiveIntensity: glow ? 0.9 : 1,
+        });
+      }
+      conv.set(src, m);
+      return m;
+    };
+    g.traverse((o) => {
+      if (o.name === 'Character1_RightHand') o.name = 'hand_r';
+      else if (o.name === 'Character1_LeftHand') o.name = 'hand_l';
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const baked = ARCHER_TEXTURES.has(`${mesh.name}_baked`);
+      if (!Array.isArray(mesh.material)) { mesh.material = lambert(mesh.material, baked); return; }
+      const mats = mesh.material.map((m) => lambert(m, baked));
+      // FBXLoader makes no groups when every face uses one material ("AllSame", the common chests), and an
+      // array without groups draws nothing: take the mesh's own textured material (its baked one), else the first
+      if (!mesh.geometry.groups.length) {
+        const atlasMat = this.material(atlas);
+        mesh.material = mats.find((m) => (m as THREE.MeshLambertMaterial).map && m !== atlasMat) ?? mats[0];
+      } else mesh.material = mats;
+      // floating crystals (the mythic set): their glow material bobs them (src/floaters.ts)
+      if (markFloaters(mesh)) for (const m of [mesh.material].flat()) if (m.name.endsWith('_glow')) floatMaterial(m);
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
     });
   }
 
