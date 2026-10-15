@@ -1,18 +1,23 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
-import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type StatId } from './config';
+import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type PetDef, type StatId } from './config';
 import { DAMAGE_TYPE_ICON, icon } from './icons';
 import { art, hasPng } from './art';
+import { CLASSES, weaponClass, type HeroClass } from './party';
 
 /** Quality ids in model names (tools/blender/rarity_gear.py): `<def>_<id>`. */
 const RARITY_IDS = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
 
+/** The warrior's weapons and shields have a GLB per quality (tools/blender/rarity_gear.py); other classes' don't. */
+const GEAR_DEFS = [...CLASSES.warrior.weapons, ...CLASSES.warrior.off];
+
 /**
- * 3D model of a weapon or shield. Above common every weapon has its own GLB per quality; shields have all six;
- * a common weapon is the faction's FBX (WeaponDef.model).
+ * 3D model of a weapon, shield or staff: a staff's model per quality (WeaponDef.tiers); above common every warrior
+ * weapon has its own GLB per quality, shields have all six; otherwise the faction's FBX (WeaponDef.model).
  */
 export function itemModel(it: Item, faction: FactionId) {
   const w = WEAPONS[it.def];
-  return w.guard || it.rarity > 0 ? `${it.def}_${RARITY_IDS[it.rarity]}` : w.model[faction];
+  if (w.tiers) return w.tiers[it.rarity] ?? w.model[faction];
+  return GEAR_DEFS.includes(it.def) && (w.guard || it.rarity > 0) ? `${it.def}_${RARITY_IDS[it.rarity]}` : w.model[faction];
 }
 
 /**
@@ -23,12 +28,13 @@ export function armorTrim(it: Item, faction: FactionId): string | null {
   const d = ARMOR[it.def];
   if (!d) return null;
   const jewel = d.slot === 'ring' || d.slot === 'amulet';
-  if (!jewel && it.rarity === 0) return null;
+  // pieces are fitted to the warrior's plate sets only (the hunter's sets have their own textured parts)
+  if (!jewel && (it.rarity === 0 || d.cls !== 'warrior')) return null;
   return `armor_${jewel ? d.slot : d.id}_${RARITY_IDS[it.rarity]}_${faction}`;
 }
 
 /** Every per-quality GLB model (loaded up-front by main.ts). */
-export const GEAR_MODELS = Object.keys(WEAPONS).flatMap((def) =>
+export const GEAR_MODELS = GEAR_DEFS.flatMap((def) =>
   RARITY_IDS.filter((_, r) => r > 0 || WEAPONS[def].guard).map((id) => `${def}_${id}`));
 
 export type ItemKind = 'weapon' | 'armor';
@@ -63,7 +69,8 @@ export const SLOT_NAME = Object.fromEntries(ARMOR_SLOTS.map((s) => [s.id, s.name
 /** Mesh-name prefixes of each body part (all Bitgem characters share these). */
 export const PART_PREFIXES: Record<VisualPart, string[]> = {
   head: ['head_', 'helmet_', 'face_plate_'],
-  chest: ['chest_', 'torso_', 'cape_'],
+  // (the archer's quiver goes with the chest: the hunter sets' torso brings its own)
+  chest: ['chest_', 'torso_', 'cape_', 'quiver_'],
   arms: ['arms_'],
   legs: ['legs_', 'hip_', 'hips_'],
 };
@@ -82,6 +89,8 @@ export interface ArmorDef {
   defense: number;
   bonus: { stat: BonusStat; value: number };
   alwaysBonus?: boolean;
+  /** Only this party class wears it; none = everyone (rings, amulets). */
+  cls?: HeroClass;
 }
 
 // Armour sets reuse other characters of the hero's own race as "outfits". The hero itself is the plainest
@@ -106,6 +115,8 @@ for (const s of SETS) {
       name: { human: `${p.noun} ${s.of.human}`, orc: `${p.noun} ${s.of.orc}` },
       source: s.src, defense: Math.round(p.defense * s.mult),
       bonus: { stat: p.bonus.stat, value: Math.max(1, Math.round(p.bonus.value * s.mult)) },
+      // plate of soldiers, knights and paladins: the warrior's
+      cls: 'warrior',
     };
   }
 }
@@ -115,6 +126,10 @@ ARMOR.amulet_life = { id: 'amulet_life', slot: 'amulet', name: { human: 'Аму�
 ARMOR.amulet_spring = { id: 'amulet_spring', slot: 'amulet', name: { human: 'Амулет родника', orc: 'Тотем крови' }, defense: 2, bonus: { stat: 'regen', value: 1 }, alwaysBonus: true };
 
 export const BAG_SIZE = 128;
+
+/** The party class that may use the item (weapons by the class lists, src/party.ts; plate is the warrior's), or null for everyone. */
+export const itemClass = (it: Item): HeroClass | null =>
+  it.kind === 'weapon' ? weaponClass(it.def) : ARMOR[it.def].cls ?? null;
 
 /** Armour: each extra copy adds 30% of the piece's stats. */
 export const lvlMult = (lvl: number) => 1 + 0.3 * (lvl - 1);
@@ -177,6 +192,11 @@ export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = 
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }
 
+/** The hunter's pet in his second weapon slot (config PETS). */
+export function petCellHtml(pet: PetDef, attrs = '', cls = '', extra = '') {
+  return `<button class="cell pet ${cls}" ${attrs}>${art(pet.icon, 34, 'ic')}${extra}</button>`;
+}
+
 export function scrapValue(it: Item) {
   return Math.round((25 * (it.rarity + 1) * (it.rarity + 1) + it.sharpen * 20) * lvlMult(it.lvl));
 }
@@ -192,6 +212,7 @@ export function itemLines(it: Item): [string, string][] {
       if (g.reflect) out.push(['Отражение', pc(g.reflect)]);
       return out;
     }
+    if (w.orb) return [w.orb.regen ? ['Реген здоровья', `+${Math.round(w.orb.regen * 100)}%`] : ['Урон', `+${Math.round((w.orb.power ?? 0) * 100)}%`]];
     return [
       ['Урон', String(Math.round(weaponDamage(it)))],
       ['Тип', DAMAGE_TYPE_NAME[w.type]],

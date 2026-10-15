@@ -1,8 +1,10 @@
 /**
  * The party: three heroes of different classes, one of them on the field at a time.
- * Each class has two gear slots: a weapon (save.weapons[0]) and its own class item (save.weapons[1]).
- * Only the warrior's kit exists so far; the other classes use it until theirs come.
+ * Each class has two gear slots: a weapon (save.weapons[0]) and its own class item (save.weapons[1]: the warrior's
+ * shield, the hunter's pet, the mage's orb); each keeps its own pair (SaveData.kits).
  */
+import type { FactionId } from './config';
+import type { VisualPart } from './items';
 
 export type HeroClass = 'warrior' | 'hunter' | 'mage';
 
@@ -14,12 +16,21 @@ export interface ClassDef {
   color: [string, string];
   /** Keyboard shortcut. */
   key: string;
-  /** Weapon defs (src/config.ts WEAPONS) for slot 1. */
+  /** Hero model by faction; none = the faction's hero (FactionDef.hero). */
+  model?: Record<FactionId, string>;
+  /** Weapon defs (src/config.ts WEAPONS) for slot 1; empty = the warrior's. */
   weapons: string[];
   /** Class item defs for slot 2. */
   off: string[];
   /** Name of slot 2. */
   offName: string;
+  /** Slot 2 holds a pet (config PETS) instead of an item. */
+  pet?: boolean;
+  /**
+   * What the class holds when it first takes the field, and extra items put into the bag then (src/save.ts classKit);
+   * missing = the faction's start weapon.
+   */
+  kit?: { hand: string; left?: string; bag?: string[] };
 }
 
 /** Order = order of the buttons, bottom-right of the HUD. */
@@ -28,19 +39,48 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
     name: 'Воин', icon: 'shield', color: ['#ff7a6a', '#c0352c'], key: 'Digit1',
     weapons: ['sword', 'axe', 'hammer', 'polearm'], off: ['shield_tower', 'shield_buckler', 'shield_spiked'], offName: 'Щит',
   },
-  hunter: { name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2', weapons: [], off: [], offName: '' },
-  mage: { name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3', weapons: [], off: [], offName: '' },
+  hunter: {
+    name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
+    model: { human: 'human_archer', orc: 'orc_archer' },
+    weapons: ['bow'], off: [], offName: 'Питомец', pet: true, kit: { hand: 'bow' },
+  },
+  mage: {
+    name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
+    weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_vigor', 'orb_fury'], offName: 'Сфера',
+    kit: { hand: 'staff_fire', left: 'orb_vigor', bag: ['staff_ice', 'staff_wind', 'orb_fury'] },
+  },
 };
 
 export const CLASS_IDS = Object.keys(CLASSES) as HeroClass[];
 
-/** The gear lists of class `c` (a class without its own kit yet uses the warrior's). */
-export const kitOf = (c: HeroClass) => (CLASSES[c].weapons.length ? CLASSES[c] : CLASSES.warrior);
+/** Whose gear lists and weapon pair the class uses: its own once it has weapons, else the warrior's. */
+export const kitOf = (c: HeroClass): HeroClass => (CLASSES[c].weapons.length ? c : 'warrior');
 
 /** Which gear slot of class `c` takes weapon def `def`: 0 weapon, 1 class item, null — not for this class. */
 export function classSlot(c: HeroClass, def: string): 0 | 1 | null {
-  const k = kitOf(c);
+  const k = CLASSES[kitOf(c)];
   return k.weapons.includes(def) ? 0 : k.off.includes(def) ? 1 : null;
+}
+
+/** The class whose lists hold weapon def `def` (null: nobody's). */
+export function weaponClass(def: string): HeroClass | null {
+  return CLASS_IDS.find((c) => CLASSES[c].weapons.includes(def) || CLASSES[c].off.includes(def)) ?? null;
+}
+
+/** Hunter looks by quality (tools/import-archers.mjs), in config RARITY order. */
+const ARCHER_RARITY = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+/** Body part on the hero → part file of the hunter sets. */
+const ARCHER_PART: Record<VisualPart, string> = { head: 'head', chest: 'torso', arms: 'arms', legs: 'legs' };
+
+/** The four body parts of the hunter set of quality `rarity` (RARITY index), as models for Character.setOutfit. */
+export function archerSet(f: FactionId, rarity: number): Record<VisualPart, string> {
+  const r = ARCHER_RARITY[rarity];
+  return Object.fromEntries(Object.entries(ARCHER_PART).map(([part, file]) => [part, `archers/${f}_archer_${file}_${r}`])) as Record<VisualPart, string>;
+}
+
+/** The set's bow; above common there are two variants (`v1`: the one close to the base bow). */
+export function archerBow(rarity: number, v1: boolean) {
+  return rarity === 0 ? 'archers/bow_common' : `archers/bow_${ARCHER_RARITY[rarity]}${v1 ? '_v1' : ''}`;
 }
 
 /** Seconds between two switches, so a double tap does not flip the hero back and forth. */

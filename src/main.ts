@@ -7,7 +7,7 @@ import './grade';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { FACTIONS, FORGE3D, MOBS, ORBS, WEAPONS, type FactionId, type OrbKind } from './config';
+import { FACTIONS, FORGE3D, MOBS, ORBS, PETS, WEAPONS, type FactionId, type OrbKind } from './config';
 import { GEAR_MODELS } from './items';
 import { Game } from './game';
 import { Input } from './input';
@@ -22,6 +22,7 @@ import { clearLog, report } from './balancelog';
 import { UI } from './ui';
 import { DragScroll } from './dragscroll';
 import { BREAKABLES } from './world';
+import { CLASSES } from './party';
 
 const ui = new UI();
 const app = ui.app;
@@ -66,10 +67,19 @@ for (const f of Object.values(FACTIONS)) {
   f.campProps.forEach((p) => models.add(p));
   models.add(f.campfire);
 }
-for (const w of Object.values(WEAPONS)) Object.values(w.model).forEach((m) => models.add(m));
+for (const w of Object.values(WEAPONS)) {
+  // (mage orbs are GLB creatures, below)
+  if (!w.orb) Object.values(w.model).forEach((m) => models.add(m));
+  if (w.shot) Object.values(w.shot.arrow).forEach((m) => models.add(m));
+}
+for (const c of Object.values(CLASSES)) Object.values(c.model ?? {}).forEach((m) => models.add(m));
 models.add('sword_undead_king'); // the Lich King's sword: prologue and the faction choice scene
+const props = new Set<string>();
+for (const w of Object.values(WEAPONS)) w.tiers?.forEach((m) => props.add(m));
 const creatures = new Set<string>();
+for (const w of Object.values(WEAPONS)) if (w.orb) Object.values(w.model).forEach((m) => creatures.add(m));
 for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { (m.creature ? creatures : models).add(c); if (w) models.add(w); }
+for (const p of Object.values(PETS)) creatures.add(p.model);
 for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
 // gacha forge scene (src/forge3d.ts): anvil and decor are cloned from here
 models.add('anvil_big');
@@ -95,6 +105,7 @@ await Promise.all([
   assets.loadAll([...models], (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`)),
   assets.loadCreatures([...creatures]),
   assets.loadGear(GEAR_MODELS),
+  assets.loadProps([...props]),
 ]);
 ui.loading(1, 'Готово');
 

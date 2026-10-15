@@ -21,6 +21,12 @@ const circ = (cx: number, cy: number, r: number) => `M${cx - r} ${cy}a${r} ${r} 
 const HEART = 'M32 58C14 45 5 35 5 22C5 13 12 7 20 7C26 7 30 10 32 14C34 10 38 7 44 7C52 7 59 13 59 22C59 35 50 45 32 58Z';
 const HEART_SHADE = 'M9 31C15 41 23 48 32 54C41 48 49 41 55 31C49 39 41 45 32 49C23 45 15 39 9 31Z';
 
+const staffArt = (orb: string, shade: string, glint: string) => `${P(rect(28.5, 22, 7, 40, 3.5), WOOD, ' transform="rotate(20 32 42)"')}
+    ${N(rect(32, 25, 3.5, 34), WOOD_D, ' transform="rotate(20 32 42)"')}
+    ${P('M30 25C24 24 21 18 23 12C25 7 31 5 34 9C30 9 28 13 30 16C32 20 38 19 39 15C42 20 37 26 30 25Z', GOLD)}
+    ${P(circ(31, 14, 9), orb)}${N('M31 5A9 9 0 0 1 31 23Z', shade)}${N(circ(28, 11, 2.8), glint)}
+    ${H('M14 8L17 11M48 12L51 9M46 26L50 27', 2.5)}`;
+
 const ART: Record<string, string> = {
   fist: `${P(rect(21, 44, 24, 18, 3), '#e3a97d')}
     ${[14, 24, 34, 44].map((x) => P(rect(x, 9, 10, 24, 5), SKIN)).join('')}
@@ -145,11 +151,19 @@ const ART: Record<string, string> = {
     ${P(rect(45, 27, 10, 10, 3), LEATHER_D)}${P(rect(29, 2, 6, 6, 2), GOLD)}${P(rect(29, 56, 6, 6, 2), GOLD)}</g>
     ${P(rect(10, 30, 40, 4, 2), WOOD, ' transform="rotate(-45 32 32)"')}
     ${P('M50 7L58 6L57 14L52 12Z', STEEL, ' transform="translate(-1 1)"')}${P('M8 50L15 49L15 56L9 56Z', RED)}`,
-  staff: `${P(rect(28.5, 22, 7, 40, 3.5), WOOD, ' transform="rotate(20 32 42)"')}
-    ${N(rect(32, 25, 3.5, 34), WOOD_D, ' transform="rotate(20 32 42)"')}
-    ${P('M30 25C24 24 21 18 23 12C25 7 31 5 34 9C30 9 28 13 30 16C32 20 38 19 39 15C42 20 37 26 30 25Z', GOLD)}
-    ${P(circ(31, 14, 9), '#8f6cff')}${N('M31 5A9 9 0 0 1 31 23Z', '#6747d6')}${N(circ(28, 11, 2.8), '#e6dcff')}
-    ${H('M14 8L17 11M48 12L51 9M46 26L50 27', 2.5)}`,
+  staff: staffArt('#8f6cff', '#6747d6', '#e6dcff'),
+  // mage staves (config STAVES): the same staff, the orb in the element's colours
+  staff_fire: staffArt('#ff7a2a', '#d8401c', '#ffe08a'),
+  staff_ice: staffArt('#8fd8ff', '#4f9de0', '#f0fbff'),
+  staff_wind: staffArt('#c8f5d8', '#7fcf9e', '#ffffff'),
+  // pets (config PETS): the boar's head, snout forward
+  boar: `${P('M14 10L22 22L10 26Z', '#6b3f24')}${P('M50 10L42 22L54 26Z', '#6b3f24')}
+    ${P('M32 12C46 12 54 22 54 34C54 44 48 52 40 56H24C16 52 10 44 10 34C10 22 18 12 32 12Z', '#8a5530')}
+    ${N('M32 12C46 12 54 22 54 34C54 44 48 52 40 56H34C42 48 46 38 45 28C44 20 39 14 32 12Z', '#6b3f24')}
+    ${P('M20 6L26 12L32 4L38 12L44 6L42 18H22Z', '#3d2414')}
+    ${N(circ(23, 30, 3.5), INK)}${N(circ(41, 30, 3.5), INK)}${N(circ(24, 29, 1.2), '#ff5a3a')}${N(circ(42, 29, 1.2), '#ff5a3a')}
+    ${P(rect(22, 38, 20, 16, 7), '#d9a07a')}${N(circ(28, 46, 2.3), '#6b3f24')}${N(circ(36, 46, 2.3), '#6b3f24')}
+    ${P('M20 44C14 42 11 36 12 30C15 35 18 38 22 39Z', '#f6eedf')}${P('M44 44C50 42 53 36 52 30C49 35 46 38 42 39Z', '#f6eedf')}`,
   anvil: `${P('M4 14H44C44 22 50 26 60 27V32H44L38 38V46H46V58H18V46H26V38L20 32H10C6 27 4 21 4 14Z', '#717c8b')}
     ${N(rect(7, 16, 35, 3), '#aab5c2')}${N('M32 32H44L38 38V46H32Z', '#4f5866')}${N(rect(32, 46, 14, 12), '#4f5866')}`,
   lock: `${P('M18 30V20C18 11 24 5 32 5C40 5 46 11 46 20V30H39V20C39 15 36 12 32 12C28 12 25 15 25 20V30Z', STEEL_D)}

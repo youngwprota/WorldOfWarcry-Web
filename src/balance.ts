@@ -95,13 +95,14 @@ export function heroStats(b: HeroBuild) {
   const p = (k: StatId) => statBreakdown(b, k, g).sum;
   const power = statBreakdown(b, 'power', g);
   const speedStat = p('speed');
+  const orb = orbMul(b.weapons);
   return {
     power: power.sum,
-    powerMul: power.mult,
+    powerMul: power.mult * orb.power,
     defense: p('defense'),
     maxHp: Math.round(statBreakdown(b, 'hp', g).value),
     /** HP per second (percents may make it fractional). */
-    regen: statBreakdown(b, 'regen', g).value,
+    regen: statBreakdown(b, 'regen', g).value * orb.regen,
     speedStat,
     /** Running speed, m/s. */
     speed: runSpeed(speedStat),
@@ -114,13 +115,22 @@ export function heroStats(b: HeroBuild) {
   };
 }
 
-/** Plain-swing DPS of the swinging weapons (a shield never swings beside a weapon); `resist` applies each one's damage type. */
+/** Passive multipliers of the equipped mage orb (1 without one). */
+export function orbMul(weapons: HeroBuild['weapons']) {
+  const o = weapons[1] && WEAPONS[weapons[1].def].orb;
+  return { regen: 1 + (o?.regen ?? 0), power: 1 + (o?.power ?? 0) };
+}
+
+/**
+ * Plain-swing DPS of the swinging weapons (a shield never swings beside a weapon, an orb never swings); `resist`
+ * applies each one's damage type.
+ */
 export function heroDps(weapons: HeroBuild['weapons'], power: number, powerMul: number, crit: number, resist?: Partial<Record<DamageType, ResistTier>>) {
   let dps = 0;
   for (const it of weapons) {
     if (!it) continue;
     const w = WEAPONS[it.def];
-    if (w.guard && weapons.some((x) => x && !WEAPONS[x.def].guard)) continue;
+    if (w.orb || (w.guard && weapons.some((x) => x && !WEAPONS[x.def].guard))) continue;
     const r = resist ? RESIST_MULT[resist[w.type] ?? 'normal'] : 1;
     dps += weaponDamage(it, power, powerMul) * w.aps * r;
   }

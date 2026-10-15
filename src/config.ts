@@ -1,18 +1,18 @@
 import type { SwingKind } from './swing';
 // All gameplay numbers live here (GDD: "все числа — ориентиры").
 
-/** Sword — slash (режущий), axe — chop (рубящий), hammer — crush (дробящий). */
-export type DamageType = 'slash' | 'chop' | 'crush';
+/** Sword — slash (режущий), axe — chop (рубящий), hammer — crush (дробящий), mage staves — magic (магический). */
+export type DamageType = 'slash' | 'chop' | 'crush' | 'magic';
 export type ResistTier = 'weak' | 'normal' | 'resist' | 'immune';
 export type FactionId = 'human' | 'orc';
 export type ZoneId = 'forest' | 'cemetery' | 'peaks' | 'swamp' | 'grove' | 'dunes' | 'hills';
-export type AttackAnim = 'SwordAttack' | 'AxeAttack';
+export type AttackAnim = 'SwordAttack' | 'AxeAttack' | 'MagicAttack';
 /**
  * Hit markers: seconds into each attack clip at natural speed where the blow connects. Mob damage lands on this
  * frame if the hero is still in reach. Humanoid FBX clips by name, GLB creatures as `<model>:attack`.
  */
 export const ATTACK_HIT: Record<string, number> = {
-  SwordAttack: 0.6, AxeAttack: 0.83,
+  SwordAttack: 0.6, AxeAttack: 0.83, MagicAttack: 1.13,
   'orc_boar:attack': 9 / 24, 'undead_boar:attack': 9 / 24, 'human_murloc:attack': 0.6 / 1.3,
   'wild_bear:attack': 0.58, 'wild_direwolf:attack': 0.375, 'wild_lion:attack': 0.4, 'wild_dragon:attack': 1.04,
 };
@@ -26,8 +26,8 @@ export function mobImpact(hit: number, period: number) { return Math.min(hit, pe
 export const UI_REF = { hud: { w: 540, h: 960 }, modal: { w: 760, h: 1351 } };
 
 export const RESIST_MULT: Record<ResistTier, number> = { weak: 1.5, normal: 1, resist: 0.5, immune: 0.25 };
-export const DAMAGE_TYPE_NAME: Record<DamageType, string> = { slash: 'режущий', chop: 'рубящий', crush: 'дробящий' };
-export const DAMAGE_TYPE_COLOR: Record<DamageType, string> = { slash: '#7fd3ff', chop: '#ff8a5a', crush: '#ffb347' };
+export const DAMAGE_TYPE_NAME: Record<DamageType, string> = { slash: 'режущий', chop: 'рубящий', crush: 'дробящий', magic: 'магический' };
+export const DAMAGE_TYPE_COLOR: Record<DamageType, string> = { slash: '#7fd3ff', chop: '#ff8a5a', crush: '#ffb347', magic: '#b49bff' };
 
 /**
  * Item quality. Weapon damage = (base + copy × (level − 1)) × the weapon's dmgMul: every extra copy of the same
@@ -72,10 +72,29 @@ export interface WeaponDef {
    * `reflect`: that share of the damage taken goes back to the attacker.
    */
   guard?: { reduce: number; counter: Record<MobRank, number>; cd: number; reflect?: number };
+  /** Held in the left hand (the bow). */
+  leftHand?: boolean;
+  /**
+   * Bow: the blow looses an arrow (model by faction) flying at `speed` m/s that homes in on the target and hits on
+   * arrival; the finisher is a volley of `volley` arrows at the nearest units in range.
+   */
+  shot?: { speed: number; arrow: Record<FactionId, string>; volley: number };
+  /** Mage staff of this element (STAVES): the mage's weapon (src/party.ts), held in the left hand. */
+  staff?: StaffElement;
+  /**
+   * Mage orb: the mage's second slot (like a shield, never swings), floats above the right shoulder.
+   * Passive multipliers while equipped: `regen` +share of HP regen, `power` +share of damage.
+   */
+  orb?: { regen?: number; power?: number };
+  /** Model per rarity (RARITY index), GLB props with their own materials (src/assets.ts loadProps); over `model`. */
+  tiers?: string[];
 }
 
 export type MobRank = 'normal' | 'elite' | 'mini' | 'boss';
 export const mobRank = (d: MobDef): MobRank => (d.boss ? 'boss' : d.rank ?? 'normal');
+
+const RARITY_IDS = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+const staffTiers = (el: StaffElement) => RARITY_IDS.map((r) => `staff_${el}_${r}`);
 
 export const WEAPONS: Record<string, WeaponDef> = {
   sword: {
@@ -112,7 +131,82 @@ export const WEAPONS: Record<string, WeaponDef> = {
     anim: 'AxeAttack', model: { human: 'shield', orc: 'shield' }, icon: '🛡️',
     guard: { reduce: 0.15, counter: { normal: 0.15, elite: 0.2, mini: 0.25, boss: 0.3 }, cd: 0.4, reflect: 0.5 },
   },
+  // hunter (src/party.ts): ~2.5 sword ranges
+  bow: {
+    id: 'bow', name: 'Лук', type: 'slash', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 5.75,
+    anim: 'SwordAttack', model: { human: 'bow_human_archer', orc: 'bow_orc_archer' }, icon: '🏹', single: true,
+    leftHand: true,
+    shot: { speed: 24, arrow: { human: 'arrow_human_archer', orc: 'arrow_orc_archer' }, volley: 3 },
+  },
+  staff_fire: {
+    id: 'staff_fire', name: 'Посох огня', type: 'magic', dmgMul: 1.9, aps: 0.495, shape: 'arc', arc: 60, range: 4.6,
+    anim: 'MagicAttack', model: { human: 'mage_staff', orc: 'mage_staff' }, icon: '🔥', staff: 'fire',
+    tiers: staffTiers('fire'),
+  },
+  staff_ice: {
+    id: 'staff_ice', name: 'Посох льда', type: 'magic', dmgMul: 0.5, aps: 1.8, shape: 'arc', arc: 60, range: 4.6,
+    anim: 'MagicAttack', model: { human: 'mage_staff', orc: 'mage_staff' }, icon: '❄️', single: true, staff: 'ice',
+    tiers: staffTiers('ice'),
+  },
+  staff_wind: {
+    id: 'staff_wind', name: 'Посох ветра', type: 'magic', dmgMul: 0.45, aps: 1.15, shape: 'arc', arc: 90, range: 4.6,
+    anim: 'MagicAttack', model: { human: 'mage_staff', orc: 'mage_staff' }, icon: '🌪️', staff: 'wind',
+    tiers: staffTiers('wind'),
+  },
+  orb_vigor: {
+    id: 'orb_vigor', name: 'Благословление бодрости', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
+    anim: 'SwordAttack', model: { human: 'orb_vigor', orc: 'orb_vigor' }, icon: '💚', orb: { regen: 0.3 },
+  },
+  orb_fury: {
+    id: 'orb_fury', name: 'Яростный клич', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
+    anim: 'SwordAttack', model: { human: 'orb_fury', orc: 'orb_fury' }, icon: '🎲', orb: { power: 0.1 },
+  },
 };
+
+export type StaffElement = 'fire' | 'ice' | 'wind';
+/**
+ * Mage staves: they strike like melee weapons (WEAPONS range ≈ 2× the sword). A bolt (`bolt`: centre → edge colour)
+ * leaves the hand at the peak of the swing and the hit lands when it arrives. `knock`: knockback speed of a hit (distance ≈ knock / 9 m).
+ */
+export const STAFF_BOLT_SPEED = 14; // m/s
+export const STAVES = {
+  /** Mobs within `splash.radius` m of the target take × `splash.mul`; every mob hit burns for `burn.time` s
+   *  (`burn.dps` of the igniting hit per second, ticks every `burn.tick` s) and takes +`burn.vuln` damage from
+   *  everything; a new hit refreshes the burn, never stacks it. */
+  fire: { color: 0xff6a2a, bolt: [0xffa21f, 0xff2410], knock: 1.5, splash: { radius: 1.6, mul: 0.5 }, burn: { time: 3, dps: 0.06, tick: 0.5, vuln: 0.05 } },
+  /** Hits slow the target's movement to × `slow.mul` for `slow.time` s (bosses too); every `freeze.every`-th hit in a
+   *  row on the same mob freezes it for `freeze.time` s (not micro-bosses and bosses). `tint`: slowed, frozen. */
+  ice: { color: 0x8fd8ff, bolt: [0x2f6bff, 0xffffff], knock: 0, slow: { time: 2.5, mul: 0.55 }, freeze: { every: 5, time: 2 }, tint: [0xa8d4ff, 0x6fe2ff] },
+  /** Every `orb.every`-th landed swing also throws an orb at the target: after `orb.flight` s it hits every mob within
+   *  `orb.radius` m for × `orb.dmg` and pulls them `orb.force` of the way to its centre (bosses too). */
+  wind: { color: 0xd8ffe8, bolt: [0x3ee86a, 0x2fb8ff], knock: 6, orb: { every: 3, radius: 3, force: 0.4, dmg: 0.6, flight: 0.45 } },
+} as const;
+
+/**
+ * Hunter's pets: they sit in the hunter's second weapon slot, run after him and bite what he shoots at. Mobs
+ * ignore them for now. A bite deals `dmg` × the damage of the hunter's bow (with his power and crits off).
+ */
+export interface PetDef {
+  id: string;
+  name: string;
+  /** Art icon id (src/art.ts) in the slot. */
+  icon: string;
+  /** GLB creature (src/creature.ts). */
+  model: string;
+  scale: number;
+  type: DamageType;
+  dmg: number;
+  aps: number;
+  /** Bite reach from its centre to the foe's edge, m. */
+  range: number;
+  /** Run speed, m/s: a bit above the hero's so it keeps up. */
+  speed: number;
+}
+export const PETS: Record<string, PetDef> = {
+  boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, type: 'crush', dmg: 0.6, aps: 0.9, range: 1.3, speed: 6.5 },
+};
+/** Pet the hunter starts with. */
+export const START_PET = 'boar';
 
 export const SHARPEN = { max: 10, perLevel: 0.08, cost: (lvl: number) => 40 + lvl * lvl * 25 };
 
@@ -135,6 +229,11 @@ export const COMBOS: Record<string, ComboDef> = {
   axe: { name: 'Раскол', hits: 3, window: 0.35, mult: 1.6, rangeAdd: 0.8, shape: 'arc', arc: 220, knock: 11, stun: 0.4, spin: false, color: 0xff8a5a },
   hammer: { name: 'Землетрясение', hits: 3, window: 0.4, mult: 1.3, rangeAdd: 0.8, shape: 'circle', arc: 360, knock: 5, stun: 1.6, spin: false, color: 0xffc95a },
   polearm: { name: 'Прокрут', hits: 3, window: 0.4, mult: 1.4, rangeAdd: 0, shape: 'circle', arc: 360, knock: 6, stun: 0, spin: true, color: 0xffe0a0 },
+  // bow: the finisher is a volley (WeaponDef.shot.volley); shape / arc unused
+  bow: { name: 'Залп', hits: 3, window: 0.45, mult: 1.4, rangeAdd: 0.5, shape: 'arc', arc: 60, knock: 4, stun: 0, spin: false, color: 0xc8f07a },
+  staff_fire: { name: 'Огненный шар', hits: 3, window: 0.6, mult: 1.4, rangeAdd: 0, shape: 'arc', arc: 70, knock: 3, stun: 0, spin: false, color: STAVES.fire.color },
+  staff_ice: { name: 'Ледяное копьё', hits: 3, window: 0.3, mult: 1.3, rangeAdd: 0, shape: 'arc', arc: 30, knock: 1, stun: 0, spin: false, color: STAVES.ice.color },
+  staff_wind: { name: 'Порыв', hits: 3, window: 0.3, mult: 1.3, rangeAdd: 0, shape: 'arc', arc: 120, knock: 8, stun: 0, spin: false, color: STAVES.wind.color },
 };
 
 export interface FactionDef {

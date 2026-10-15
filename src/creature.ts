@@ -219,4 +219,14 @@ export class Creature {
     }
     this.mixer.update(dt);
   }
+
+  /** Multiplies the model's own colours by `c` (white = as authored). */
+  setTint(c: THREE.ColorRepresentation) {
+    for (const m of this.materials) {
+      const base = (m.userData.color0 ??= m.color.clone()) as THREE.Color;
+      m.color.copy(base).multiply(tintColor.set(c));
+    }
+  }
 }
+
+const tintColor = new THREE.Color();

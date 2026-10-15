@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import {
   DAMAGE_TYPE_NAME, FACTIONS, fmtOrb, UI_REF, WEAPONS, ZONE_FOES,
-  type FactionId, type OrbKind, type ZoneDef,
+  type FactionId, type OrbKind, type PetDef, type ZoneDef,
 } from './config';
-import { ARMOR_SLOTS, EQUIP_BAR, cellHtml, type ArmorSlot, type Item } from './items';
+import { ARMOR_SLOTS, EQUIP_BAR, cellHtml, petCellHtml, type ArmorSlot, type Item } from './items';
 import { DAMAGE_TYPE_ICON, fmtK, icon, iconImage, resistIcons, rewardChips } from './icons';
 import { STAT_ICON, art, hasPng, mini, tintedArt } from './art';
 import type { MobDef } from './config';
@@ -237,9 +237,14 @@ export class UI {
     $('btn-gacha').dataset.badge = n > 0 ? String(n) : '';
   }
 
-  /** Party buttons bottom-right: the class on the field is lit. */
-  party(active: HeroClass) {
-    $('party').querySelectorAll<HTMLElement>('[data-cls]').forEach((b) => b.classList.toggle('on', b.dataset.cls === active));
+  /** Party buttons bottom-right: the class on the field is lit; `charge` is its staff counter badge ('' = none). */
+  party(active: HeroClass, charge = '', color = '') {
+    $('party').querySelectorAll<HTMLElement>('[data-cls]').forEach((b) => {
+      const on = b.dataset.cls === active;
+      b.classList.toggle('on', on);
+      b.dataset.charge = on ? charge : '';
+      if (on && color) b.style.setProperty('--cc', color);
+    });
   }
 
   bagBadge(n: number, full: boolean) {
@@ -247,10 +252,14 @@ export class UI {
     b.dataset.badge = full ? '!' : n > 0 ? String(n) : '';
   }
 
-  /** Bottom "equipped" bar: armour left, the weapon and the class item (shield) in the centre, gloves and jewellery right. */
-  weapons(items: (Item | null)[], dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>) {
+  /**
+   * Bottom "equipped" bar: armour left, the weapon and the class item (shield, or the hunter's `pet`) in the centre,
+   * gloves and jewellery right.
+   */
+  weapons(items: (Item | null)[], dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>, pet: PetDef | null = null) {
     const box = $('weapons');
     box.innerHTML = [0, 1].map((i) => {
+      if (i === 1 && pet) return petCellHtml(pet, `data-pet title="Питомец: ${pet.name}"`, 'wslot active');
       const it = items[i];
       const title = !it ? '' : WEAPONS[it.def].guard ? `title="${WEAPONS[it.def].name}"` : `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"`;
       return cellHtml(it, `data-w="${i}" ${title}`, i ? 'shield' : 'sword', '', it ? 'wslot active' : 'wslot');

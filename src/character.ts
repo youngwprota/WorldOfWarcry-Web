@@ -5,6 +5,7 @@ import { attachTrim, attachWeapon } from './rig';
 import { Swinger, type SwingKind } from './swing';
 import { PART_PREFIXES, type VisualPart } from './items';
 import { ATTACK_HIT, type AttackAnim } from './config';
+import { FLOAT_TIME, patchFloat } from './floaters';
 
 const shadowTex = (() => {
   const c = document.createElement('canvas');
@@ -24,6 +25,8 @@ const shadowTex = (() => {
 const outlineMat = (() => {
   const m = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide });
   m.onBeforeCompile = (shader) => {
+    // floating crystals move with their shell: the push below lands before the float motion (src/floaters.ts)
+    patchFloat(shader);
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
       // `normal` (not objectNormal): MeshBasicMaterial declares objectNormal only for skinned meshes.
@@ -33,8 +36,15 @@ const outlineMat = (() => {
   return m;
 })();
 
+/** A material's colour as authored, kept on first sight (tints multiply it instead of replacing it). */
+function ownColor(m: THREE.MeshLambertMaterial) {
+  return (m.userData.ownColor ??= m.color.clone()) as THREE.Color;
+}
+
 const shadowGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const shadowMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false });
+/** Mage orb rest point in the character's root space (right shoulder, a bit above it: the staff is in the left hand). */
+const ORB_AT = new THREE.Vector3(-0.45, 1.9, -0.1);
 
 export function blobShadow(size: number): THREE.Mesh {
   const m = new THREE.Mesh(shadowGeo, shadowMat);
@@ -51,10 +61,16 @@ export function blobShadow(size: number): THREE.Mesh {
 export class Character {
   readonly root = new THREE.Group();
   readonly model: THREE.Group;
+  /** Right hand bone (mage spells start there). */
+  readonly handR: THREE.Object3D | null;
   readonly mixer: THREE.AnimationMixer;
   weapon: THREE.Object3D | null = null;
   /** Second weapon in the left hand. */
   weaponL: THREE.Object3D | null = null;
+  /** Mage orb floating above the left shoulder, and its inner core (spins). */
+  private orb: THREE.Object3D | null = null;
+  private orbCore: THREE.Object3D | null = null;
+  private orbT = 0;
   private materials: THREE.MeshLambertMaterial[] = [];
   private flashT = 0;
   private baseColor = new THREE.Color(1, 1, 1);
@@ -87,6 +103,7 @@ export class Character {
 
   constructor(modelName: string, weaponName: string | null, scale = 1, skin?: string) {
     this.model = assets.clone(modelName);
+    this.handR = this.model.getObjectByName('hand_r') ?? null;
     this.model.scale.multiplyScalar(scale);
     this.root.add(this.model);
     this.root.add(blobShadow(1.3 * scale));
@@ -135,7 +152,7 @@ export class Character {
       a.setEffectiveWeight(0);
       return a;
     };
-    this.attackU = { SwordAttack: once(upper.SwordAttack), AxeAttack: once(upper.AxeAttack) };
+    this.attackU = { SwordAttack: once(upper.SwordAttack), AxeAttack: once(upper.AxeAttack), MagicAttack: once(upper.MagicAttack) };
     this.hitU = once(upper.Hit);
     this.death = once(full.Death);
     // Desync idle cycles between characters.
@@ -144,13 +161,26 @@ export class Character {
     this.walkL.time = this.walkU.time = off;
   }
 
-  setWeapon(name: string | null, left: string | null = null) {
+  /** `mainLeft`: the main weapon goes into the left hand (the mage's staff). */
+  setWeapon(name: string | null, left: string | null = null, mainLeft = false) {
     this.weapon?.removeFromParent();
     this.weaponL?.removeFromParent();
-    this.weapon = name ? attachWeapon(this.model, name) : null;
+    this.weapon = name ? attachWeapon(this.model, name, mainLeft) : null;
     this.weaponL = left ? attachWeapon(this.model, left, true) : null;
     for (const w of [this.weapon, this.weaponL]) w?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
     if (this.highlighted) this.rebuildOutline();
+  }
+
+  setOrb(name: string | null) {
+    this.orb?.removeFromParent();
+    this.orb = this.orbCore = null;
+    if (!name) return;
+    this.orb = assets.cloneCreature(name).model;
+    this.orb.position.copy(ORB_AT);
+    this.orbCore = this.orb.getObjectByName(`${name}_core`) ?? null;
+    // the glass must not hide the core behind it
+    this.orb.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material | undefined; if (m?.transparent) m.depthWrite = false; });
+    this.root.add(this.orb);
   }
 
   /** Player hero: a bit bigger and with a dark outline (no extra brightness: it washed the textures out). */
@@ -158,8 +188,13 @@ export class Character {
     this.highlighted = on;
     this.model.scale.multiplyScalar(on ? 1.12 : 1 / 1.12);
     this.baseColor.setScalar(1);
-    for (const m of this.materials) m.color.copy(this.baseColor);
+    this.applyBaseColor();
     this.rebuildOutline();
+  }
+
+  /** Every material's own colour (white for the atlas ones, quality colours on the hunter sets) × the tint. */
+  private applyBaseColor() {
+    for (const m of this.materials) m.color.copy(ownColor(m)).multiply(this.baseColor);
   }
 
   private rebuildOutline() {
@@ -243,7 +278,8 @@ export class Character {
       if (cur) {
         for (const m of cur.meshes) {
           m.removeFromParent();
-          this.materials = this.materials.filter((x) => x !== m.material);
+          const gone = [m.material].flat();
+          this.materials = this.materials.filter((x) => !gone.includes(x));
         }
         this.outfitParts.delete(part);
       }
@@ -251,14 +287,29 @@ export class Character {
       for (const m of base) m.visible = !want;
       if (!want) continue;
       const src = assets.clone(want);
+      // a hunter set part (models/archers) is the whole file, e.g. the chest with its quiver
+      const whole = want.startsWith('archers/');
       const meshes: THREE.SkinnedMesh[] = [];
       src.traverse((o) => {
         const sm = o as THREE.SkinnedMesh;
-        if (sm.isSkinnedMesh && PART_PREFIXES[part].some((p) => sm.name.startsWith(p))) meshes.push(sm);
+        if (sm.isSkinnedMesh && (whole || PART_PREFIXES[part].some((p) => sm.name.startsWith(p)))) meshes.push(sm);
       });
       const parent = base[0]?.parent ?? this.model;
-      const mat = (meshes[0]?.material as THREE.MeshLambertMaterial | undefined)?.clone();
-      if (mat) { mat.color.copy(this.baseColor); this.materials.push(mat); }
+      // own copies of the part's materials (several per mesh for the hunter sets), for hit flashes and tints
+      const own = new Map<THREE.Material, THREE.MeshLambertMaterial>();
+      const copy = (m: THREE.Material) => {
+        let c = own.get(m);
+        if (!c) {
+          c = (m as THREE.MeshLambertMaterial).clone();
+          // clone() drops the shader patch of the floating crystals (src/floaters.ts)
+          if (m.userData.float) { c.onBeforeCompile = m.onBeforeCompile; c.customProgramCacheKey = m.customProgramCacheKey; }
+          c.userData.ownColor = c.color.clone();
+          c.color.multiply(this.baseColor);
+          own.set(m, c);
+          this.materials.push(c);
+        }
+        return c;
+      };
       for (const sm of meshes) {
         const bones = sm.skeleton.bones.map((b) => this.ownBone(b) as THREE.Bone);
         const skel = new THREE.Skeleton(bones, sm.skeleton.boneInverses);
@@ -268,7 +319,7 @@ export class Character {
         sm.bind(skel, bind);
         sm.frustumCulled = false;
         sm.castShadow = true;
-        if (mat) sm.material = mat;
+        sm.material = Array.isArray(sm.material) ? sm.material.map(copy) : copy(sm.material);
       }
       this.outfitParts.set(part, { model: want, meshes });
     }
@@ -332,6 +383,7 @@ export class Character {
   }
 
   update(dt: number, moving: boolean, animate = true) {
+    FLOAT_TIME.value = performance.now() / 1000;
     this.root.rotation.y = this.facing;
     if (this.spinDur > 0) {
       this.spinT += dt;
@@ -342,6 +394,11 @@ export class Character {
     if (this.flashT > 0) {
       this.flashT -= dt;
       applyHitFlash(this.materials, this.flashT);
+    }
+    if (this.orb) {
+      this.orbT += dt;
+      this.orb.position.y = ORB_AT.y + Math.sin(this.orbT * 2.2) * 0.06;
+      if (this.orbCore) this.orbCore.rotation.y += dt * 1.5;
     }
     if (!animate) return;
     if (!this.dead) {
@@ -377,7 +434,7 @@ export class Character {
   setTint(c: THREE.ColorRepresentation, opacity = 1) {
     this.baseColor.set(c);
     for (const m of this.materials) {
-      m.color.copy(this.baseColor);
+      m.color.copy(ownColor(m)).multiply(this.baseColor);
       m.transparent = opacity < 1;
       m.opacity = opacity;
       m.depthWrite = opacity >= 1;

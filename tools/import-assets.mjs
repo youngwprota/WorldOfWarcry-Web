@@ -25,6 +25,8 @@ const models = [
   `${C}/Humans/Soldier/Models/shield_soldier.fbx`,
   `${C}/Humans/Paladin/Models/paladin.fbx`,
   `${C}/Humans/Paladin/Models/hammer_human_paladin.fbx`,
+  `${C}/Humans/Mage/Models/mage.fbx`,
+  `${C}/Humans/Mage/Models/mage_staff.fbx`,
   // orcs
   `${C}/Orcs/Grunt/Models/orc_grunt.fbx`,
   `${C}/Orcs/Grunt/Models/axe_orc_grunt.fbx`,
@@ -99,6 +101,8 @@ const textures = [
   `${C}/Humans/Peasant/Textures/proto_human_RTS_color.tga`,
   `${C}/Humans/Soldier/Textures/human_soldier_texture.tga`,
   `${C}/Humans/Paladin/Textures/human_paladin_texture.tga`,
+  `${C}/Humans/Mage/Textures/human_mage_col.tga`,
+  `${C}/Humans/Mage/Textures/human_mage_glow.tga`,
   `${C}/Orcs/Grunt/Textures/orc_grunt_albedo.tga`,
   `${C}/Orcs/Peon/Textures/orc_peon_albedo.tga`,
   `${C}/Orcs/Peon/Textures/proto_orc_RTS_albedo.tga`,

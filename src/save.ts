@@ -1,7 +1,7 @@
-import { FACTIONS, HERO, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
+import { FACTIONS, HERO, PETS, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
 import { BASE_STATS, type PctPoints, type StatPoints } from './balance';
-import { ARMOR, makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
-import { CLASSES, classSlot, type HeroClass } from './party';
+import { ARMOR, BAG_SIZE, makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
+import { CLASSES, classSlot, kitOf, type HeroClass } from './party';
 
 /**
  * Number scale of the save: 2 = hero HP ×10, regen in HP/s, 6 item qualities, item level = copies; 5 = flat power;
@@ -18,6 +18,7 @@ export interface SaveData {
   src: Partial<Record<SavedSource, StatPoints>>;
   /** Percent bonuses by source (+1 = +1%) to hp, regen and power. */
   pct: Partial<Record<SavedSource, PctPoints>>;
+  /** Gear slots of the party member on the field: weapon, class item (src/party.ts). */
   weapons: [Item | null, Item | null];
   active: 0 | 1;
   equip: Partial<Record<ArmorSlot, Item>>;
@@ -47,6 +48,19 @@ export interface SaveData {
   fog?: string;
   /** The party member on the field (src/party.ts); missing = warrior. */
   cls?: HeroClass;
+  /**
+   * Weapons of the party kits not on the field (src/party.ts kitOf); the kit on the field lives in `weapons`.
+   * A kit missing here has never been on the field: it starts with its class kit (classKit).
+   */
+  kits?: Partial<Record<HeroClass, [Item | null, Item | null]>>;
+  /** Whose kit is in `weapons`; missing = the warrior's. */
+  kit?: HeroClass;
+  /** Armour of the party members not on the field; the one on the field wears `equip`. */
+  gear?: Partial<Record<HeroClass, Partial<Record<ArmorSlot, Item>>>>;
+  /** Whose armour is in `equip`; missing = the warrior's (saves from before the party wore one set for all). */
+  gearOf?: HeroClass;
+  /** The hunter's pet (config PETS id) in his second weapon slot; missing = START_PET. */
+  pet?: string;
 }
 
 const KEY = 'warcry-save-v1';
@@ -58,6 +72,7 @@ export function newSave(faction: FactionId): SaveData {
     src: {},
     pct: {},
     weapons: [makeItem('weapon', FACTIONS[faction].startWeapon, 0, 1), null],
+    kits: {},
     active: 0,
     equip: {},
     bag: [],
@@ -80,23 +95,12 @@ export function loadSave(): SaveData | null {
     if (d.v !== 1 || !FACTIONS[d.faction]) return null;
     // Fields added after the first prototype build.
     // items whose weapon / armour piece is gone from the game (renamed or removed in another branch) are dropped
-    const held = d.weapons.map((w) => (w ? known(normalizeItem(w)) : null));
     d.equip ??= {};
     for (const k of Object.keys(d.equip) as ArmorSlot[]) {
       const it = d.equip[k] && known(normalizeItem(d.equip[k]!));
       if (it) d.equip[k] = it; else delete d.equip[k];
     }
     d.bag = (d.bag ?? []).map(normalizeItem).filter((it) => known(it));
-    // two hands → weapon + class slot: whatever does not fit its slot (a second weapon, a shield in the right
-    // hand that has a pair) goes to the bag; the weapon slot is never empty
-    d.weapons = [null, null];
-    for (const it of held) {
-      if (!it) continue;
-      const s = classSlot('warrior', it.def);
-      if (s !== null && !d.weapons[s]) d.weapons[s] = it;
-      else d.bag.push(it);
-    }
-    d.weapons[0] ??= makeItem('weapon', FACTIONS[d.faction].startWeapon, 0, 1);
     d.gachaPity ??= 0;
     d.pulls ??= 0;
     // gold, hero level, XP and talents are gone from the game
@@ -110,10 +114,63 @@ export function loadSave(): SaveData | null {
     d.src ??= {};
     d.pct ??= {};
     if (!d.cls || !CLASSES[d.cls]) d.cls = 'warrior';
+    if (d.kit && !CLASSES[d.kit]) delete d.kit;
+    // saves of the mage branch kept `kits` without `kit`: the hands in play were the class on the field's
+    if (!d.kit && d.kits) d.kit = kitOf(d.cls);
+    if (d.pet && !PETS[d.pet]) delete d.pet;
+    if (d.gearOf && !CLASSES[d.gearOf]) delete d.gearOf;
+    for (const set of Object.values(d.gear ?? {})) {
+      for (const k of Object.keys(set) as ArmorSlot[]) {
+        const it = set[k] && known(normalizeItem(set[k]!));
+        if (it) set[k] = it; else delete set[k];
+      }
+    }
+    // every pair of hands by its owner's slots: the pair in play is kit `d.kit`'s, the stored ones their class's
+    d.weapons = fitHands(d, d.kit ?? 'warrior', d.weapons);
+    for (const k of Object.keys(d.kits ?? {}) as HeroClass[]) d.kits![k] = fitHands(d, k, d.kits![k]!);
+    giveOrbs(d);
     return d;
   } catch {
     return null;
   }
+}
+
+/**
+ * Two hands → weapon + class slot of class `owner` (src/party.ts classSlot): whatever does not fit its slot (a second
+ * weapon, a shield in the right hand, a weapon of another class) goes to the bag; the weapon slot is never empty.
+ */
+function fitHands(d: SaveData, owner: HeroClass, hands: (Item | null)[]): SaveData['weapons'] {
+  const out: SaveData['weapons'] = [null, null];
+  for (const raw of hands) {
+    const it = raw && known(normalizeItem(raw));
+    if (!it) continue;
+    const s = classSlot(owner, it.def);
+    if (s !== null && !out[s]) out[s] = it;
+    else d.bag.push(it);
+  }
+  out[0] ??= makeItem('weapon', CLASSES[kitOf(owner)].kit?.hand ?? FACTIONS[d.faction].startWeapon, 0, 1);
+  return out;
+}
+
+/** Mages from before the orbs: the kit's orbs once (left slot if free, the rest into the bag). */
+function giveOrbs(d: SaveData) {
+  const kit = CLASSES.mage.kit!;
+  const hands = (d.kit ?? 'warrior') === 'mage' ? d.weapons : d.kits?.mage;
+  if (!hands) return;
+  const owned = [...hands, ...d.bag].some((it) => it && WEAPONS[it.def].orb);
+  if (owned) return;
+  for (const def of [kit.left!, ...(kit.bag ?? []).filter((x) => WEAPONS[x].orb)]) {
+    if (!hands[1]) hands[1] = makeItem('weapon', def, 0, 1);
+    else if (d.bag.length < BAG_SIZE) d.bag.push(makeItem('weapon', def, 0, 1));
+  }
+}
+
+/** Gear of a class taking the field for the first time (ClassDef.kit); its extra start items go into the bag. */
+export function classKit(d: SaveData, c: HeroClass): SaveData['weapons'] {
+  const kit = CLASSES[c].kit;
+  if (!kit) return [makeItem('weapon', FACTIONS[d.faction].startWeapon, 0, 1), null];
+  for (const def of kit.bag ?? []) if (d.bag.length < BAG_SIZE) d.bag.push(makeItem('weapon', def, 0, 1));
+  return [makeItem('weapon', kit.hand, 0, 1), kit.left ? makeItem('weapon', kit.left, 0, 1) : null];
 }
 
 /** The item if its def still exists, else null. */

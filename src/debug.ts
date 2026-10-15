@@ -97,6 +97,17 @@ const SECTIONS: [string, Action[]][] = [
     ['+10% реген', (g) => g.debugAddStat('regen', 10, true)],
     ['Сбросить дебаг-статы', (g) => g.debugClearStats(), 'wide'],
   ]],
+  // hunter look by quality (models load on the first pick); "Базовый" = the archer as imported
+  ['Сет лучника', [
+    ['Базовый', (g) => g.debugArcherSet(-1), 'arch r-1'],
+    ...['Обычный', 'Необычный', 'Редкий', 'Эпический', 'Легендарный', 'Мифический'].map(
+      (label, r): Action => [label, (g) => g.debugArcherSet(r), `arch r${r}`],
+    ),
+  ]],
+  ['Лук лучника (от необычного)', [
+    ['Новый', (g) => g.debugArcherSet(g.archerLook.rarity, false), 'bowv new'],
+    ['Похожий на базовый', (g) => g.debugArcherSet(g.archerLook.rarity, true), 'bowv v1 wide2'],
+  ]],
   ['Горнило', [
     ['+5 круток', (g) => g.debugAddPulls(5), 'wide'],
   ]],
@@ -181,6 +192,9 @@ export class DebugPanel {
   private render() {
     const d = this.game.debugInfo();
     this.el.querySelector('.god')?.classList.toggle('on', d.god);
+    const look = this.game.archerLook;
+    this.el.querySelectorAll('.arch').forEach((b) => b.classList.toggle('on', b.classList.contains(`r${look.rarity}`)));
+    this.el.querySelectorAll('.bowv').forEach((b) => b.classList.toggle('on', b.classList.contains(look.bowV1 ? 'v1' : 'new')));
     this.info.textContent = [
       `ХП ${d.hp}/${d.maxHp}${d.god ? '  [бессмертие]' : ''}`,
       `Крит ${pct(d.crit)} ×${d.critMul.toFixed(2)}  уклон ${pct(d.dodge)}  ${d.speed.toFixed(2)} м/с`,
