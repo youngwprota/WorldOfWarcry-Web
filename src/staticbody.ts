@@ -55,7 +55,7 @@ export class StaticBody {
   // the mob code's attack and walk hooks: a static unit has none
   hitTime(_anim: AttackAnim) { return 0; }
   backstep() { return 0; }
-  attack(_anim: AttackAnim, _period: number, _impactAt: number) {}
+  attack(_anim: AttackAnim, _period: number, _impactAt: number) { return 0; }
 
   hit() {
     this.flashT = HIT_FLASH;

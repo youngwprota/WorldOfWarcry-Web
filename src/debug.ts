@@ -35,10 +35,30 @@ function teleport(g: Game, arg: string) {
   g.debugTeleportTo(at[0] + (dx / l) * 5, at[1] + (dz / l) * 5, kind === 'fort' || kind === 'arena' || kind === 'fmini' ? undefined : gate?.id);
 }
 
+/** Gear a player plausibly has by each boss: armour set + rarity, weapon rarity, ring and amulet. */
+const BOSS_GEAR: Partial<Record<ZoneId, { set: string; rarity: number; weapon: number; jewels: boolean }>> = {
+  forest: { set: 'guard', rarity: 0, weapon: 0, jewels: false },
+  cemetery: { set: 'guard', rarity: 1, weapon: 1, jewels: true },
+  peaks: { set: 'knight', rarity: 1, weapon: 2, jewels: true },
+  hills: { set: 'knight', rarity: 2, weapon: 2, jewels: true },
+  grove: { set: 'lord', rarity: 2, weapon: 3, jewels: true },
+  swamp: { set: 'lord', rarity: 3, weapon: 4, jewels: true },
+  dunes: { set: 'lord', rarity: 4, weapon: 4, jewels: true },
+};
+
+/** `arg`: '<zone> <teleport arg>'; equips BOSS_GEAR, teleports to the boss, then balances the hero against it (Game.debugBalanceBoss). */
+function balanceTp(g: Game, arg: string) {
+  const [zone, at] = arg.split(' ');
+  const gear = BOSS_GEAR[zone as ZoneId];
+  if (gear) g.debugEquipFor(zone as ZoneId, gear);
+  teleport(g, at);
+  if (!g.debugBalanceBoss(zone as ZoneId)) g.ui.toast('Баланс: нет босса или оружия');
+}
+
 /** One row per location: [entrance] [mini-boss] [boss]; the forest starts at the settlement instead of a door. */
 function locationRows(): [string, Action[]][] {
   const rows: [string, Action[]][] = [
-    [zoneName('forest'), [['Лагерь', (g) => g.debugTeleport('camp')], ['Мини', teleport, '', 'fmini'], ['Босс', teleport, '', 'fort']]],
+    [zoneName('forest'), [['Лагерь', (g) => g.debugTeleport('camp')], ['Мини', teleport, '', 'fmini'], ['Босс', teleport, '', 'fort'], ['Баланс+ТП', balanceTp, '', 'forest fort']]],
   ];
   const seen = new Set<ZoneId>();
   for (const gt of GATES) {
@@ -47,8 +67,8 @@ function locationRows(): [string, Action[]][] {
     const row: Action[] = [['Вход', teleport, '', `door:${gt.id}`]];
     const lb = LAND_BOSSES.find((b) => b.zone === gt.to);
     if (lb?.minis.length) row.push(['Мини', teleport, '', `mini:${gt.to}:0`]);
-    if (gt.to === 'cemetery') row.push(['Босс', teleport, '', 'arena']);
-    else if (lb?.boss) row.push(['Босс', teleport, '', `boss:${gt.to}`]);
+    const boss = gt.to === 'cemetery' ? 'arena' : lb?.boss ? `boss:${gt.to}` : null;
+    if (boss) row.push(['Босс', teleport, '', boss], ['Баланс+ТП', balanceTp, '', `${gt.to} ${boss}`]);
     rows.push([zoneName(gt.to), row]);
   }
   return rows;
@@ -148,6 +168,8 @@ export class DebugPanel {
     this.el.id = 'debug';
     this.el.className = 'ui-block hidden';
     this.el.innerHTML = `<div class="dbg-head"><b>🛠 Дебаг</b><span><button data-min title="Свернуть">–</button> <button data-close>✕</button></span></div><pre class="dbg-info"></pre>` +
+      '<div class="dbg-sec"><span>Билд героя</span><div class="dbg-build"><label>Атака <input data-build="power" type="number" min="0"></label>' +
+      '<label>HP <input data-build="hp" type="number" min="1"></label><button data-apply>Применить</button></div></div>' +
       SECTIONS.map(([title, actions], si) => `<div class="dbg-sec"><span>${title}</span><div class="dbg-btns">` +
         actions.map(([label, , cls], ai) => `<button class="${cls ?? ''}" data-a="${si}:${ai}">${label}</button>`).join('') +
         '</div></div>').join('');
@@ -160,6 +182,7 @@ export class DebugPanel {
       if (!b) return;
       sfx.click();
       if (b.dataset.close !== undefined) { this.toggle(false); return; }
+      if (b.dataset.apply !== undefined) { this.applyBuild(); return; }
       if (b.dataset.min !== undefined) { this.el.classList.toggle('min'); b.textContent = this.el.classList.contains('min') ? '+' : '–'; return; }
       const [si, ai] = b.dataset.a!.split(':').map(Number);
       const a = SECTIONS[si][1][ai];
@@ -175,9 +198,26 @@ export class DebugPanel {
     this.el.classList.toggle('hidden', !on);
     clearInterval(this.timer);
     if (on) {
+      this.fillBuild();
       this.render();
       this.timer = window.setInterval(() => this.render(), 250);
     }
+  }
+
+  private inputs() { return [...this.el.querySelectorAll<HTMLInputElement>('[data-build]')]; }
+
+  private fillBuild() {
+    const s = this.game.stats;
+    for (const i of this.inputs()) i.value = String(Math.round(i.dataset.build === 'hp' ? s.maxHp : s.power));
+  }
+
+  private applyBuild() {
+    for (const i of this.inputs()) {
+      const v = Number(i.value);
+      if (i.value !== '' && Number.isFinite(v)) this.game.debugSetStat(i.dataset.build as 'power' | 'hp', Math.max(i.dataset.build === 'hp' ? 1 : 0, v));
+    }
+    this.fillBuild();
+    this.render();
   }
 
   private render() {

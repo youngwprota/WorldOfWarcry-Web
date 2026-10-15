@@ -4,8 +4,8 @@ import { blobShadow } from './character';
 import { FogOfWar } from './fog';
 import { FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
-  ARENA, BORDER, BORDER_GATE_R, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
-  pathAt, pathDist, progressAt, ridgeAway, ridgeDist, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
+  ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
+  borderAway, borderRoom, pathAt, pathDist, progressAt, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
 } from './island';
 import type { Gate } from './island';
 import {
@@ -329,13 +329,14 @@ export class World {
   }
 
   /** Ring of palisade poles with gaps (gates) at the given directions (radians, 0 = +Z/south, PI = north). */
-  private palisade(cx: number, cz: number, radius: number, gates: number[], gateHalf: number, model = 'palisade_pole', scale = 0.75) {
+  private palisade(cx: number, cz: number, radius: number, gates: number[], gateHalf: number, model = 'palisade_pole', scale = 0.75, skip?: (x: number, z: number) => boolean) {
     const items: Inst[] = [];
     const step = 0.95 / radius;
     for (let a = 0; a < Math.PI * 2; a += step) {
       if (gates.some((g) => Math.abs(Math.atan2(Math.sin(a - g), Math.cos(a - g))) < gateHalf)) continue;
       const x = cx + Math.sin(a) * radius;
       const z = cz + Math.cos(a) * radius;
+      if (skip?.(x, z)) continue;
       items.push({ x, z, s: scale * (0.9 + ((a * 7.3) % 0.2)), r: a * 3.7 });
       this.obstacles.push({ x, z, r: 0.45 });
     }
@@ -496,6 +497,12 @@ export class World {
 
   /** A spawner from the config; without `charges` it has one endless charge with the unit's own respawn time. */
   private addSpawn(id: string, d: SpawnerDef, x: number, z: number, zone: ZoneId, depth: number, rot: number) {
+    // nothing spawns in the no-walk band along the ridges: slide the spot out of it
+    for (let i = 0; i < 30 && borderRoom(x, z) < 1; i++) {
+      const n = borderAway(x, z);
+      x += n.x * 0.5;
+      z += n.z * 0.5;
+    }
     const respawn = d.unit === 'mob' ? MOBS[d.id].respawn : BREAKABLES[d.id].respawn;
     this.spawns.push({ id, unit: d.unit, kind: d.id, x, z, charges: d.charges ?? [respawn], zone, depth, rot });
   }
@@ -518,9 +525,9 @@ export class World {
 
   /** Big houses at the user's map marks, each turned to face the nearest trail (long side along it). */
   private hubHouses() {
-    const kit: [string, number, number][] = [
+    const kit: [string, number, number, number?][] = [
       ['house_Lv1', -10.2, -94.8], ['human_house_mid', 24.1, -90.3], ['house_Lv2', -37.8, -77.2], ['house_Lv1', -20, -61.3],
-      ['human_house_mid', 15.5, -56.8], ['human_house_large', -20, -44.4], ['house_Lv2', 23.6, -18.4], ['house_Lv1', 15.5, -8.5],
+      ['human_house_mid', 15.5, -56.8], ['human_house_large', -20, -44.4], ['house_Lv2', 14, -26, Math.PI / 2], ['house_Lv1', 15.5, -8.5],
     ];
     const curves = [PATH, ...BRANCH_PATHS];
     /** Nearest trail point (main trail and its branches). */
@@ -539,7 +546,7 @@ export class World {
     // room to stand (off the pond and other obstacles), 6+ m off every trail (the house is ~4 m across), clear of the camp wall
     const ok = (x: number, z: number) => this.free(x, z, 3) && nearest(x, z).d >= 6
       && Math.hypot(x - ISLAND.campX, z - ISLAND.campZ) >= ISLAND.campR + 4;
-    for (const [name, x0, z0] of kit) {
+    for (const [name, x0, z0, turn = 0] of kit) {
       // the nearest such spot round the map mark (rings out to 20 m); no room — no house
       let spot: { x: number; z: number } | null = null;
       search: for (let d = 0; d <= 20; d += 1) {
@@ -551,7 +558,7 @@ export class World {
       }
       if (!spot) continue;
       const { nx, nz } = nearest(spot.x, spot.z);
-      this.place(name, spot.x, spot.z, 0.5, Math.atan2(nx - spot.x, nz - spot.z));
+      this.place(name, spot.x, spot.z, 0.5, Math.atan2(nx - spot.x, nz - spot.z) + turn);
       this.packCenters.push([spot.x, spot.z]);
     }
   }
@@ -630,12 +637,13 @@ export class World {
     // Rocks around the pond
     const pond = this.ponds[0];
     for (const [dx, dz, s] of [[-5.5, 4, 1.6], [5.5, -4, 1.3], [-3, -6, 1.1]] as const) this.place('orc_stone_big', pond.x + dx, pond.z + dz, s, dx * 3);
-    // Bandit fort around the boss, built from the enemy race's kit. The trail runs through two gates.
+    // Bandit fort around the boss, built from the enemy race's kit. The trail comes in through its one gap;
+    // the far side runs into the ridge up to its crest (no poles past it or in the passage), so the ridge gate is the only way on.
     const fx = FORT.x;
     const fz = FORT.z;
     const aIn = trailExit(fx, fz, FORT.r, false);
-    const aOut = trailExit(fx, fz, FORT.r, true);
-    this.palisade(fx, fz, FORT.r, [aIn, aOut], 0.36);
+    const aOut = Math.atan2(GATE.x - fx, GATE.z - fz);
+    this.palisade(fx, fz, FORT.r, [aIn], 0.36, 'palisade_pole', 0.75, (x, z) => zoneIdAt(x, z) !== 'forest' || gateDist(x, z) < 4.5);
     // decorations laid out with the entrance at local +Z; skip anything standing in the trail
     const exitDir = { x: Math.sin(aOut), z: Math.cos(aOut) };
     const inTrail = (x: number, z: number) => {
@@ -661,8 +669,15 @@ export class World {
       deco('banner', -4.6, 12.4, 0.45, 0, 0.4);
       deco('banner', 4.6, 12.4, 0.45, 0, 0.4);
     }
-    // the second tower is a real one: a turret prop that can be destroyed (BREAKABLES.fort_tower_*), south of the boss, clear of the ridge border
-    const tp = { x: fx - 1, z: fz + 6 };
+    // the second tower is a real one: a turret prop that can be destroyed (BREAKABLES.fort_tower_*), against the south wall
+    // where it meets the ridge: walk the wall from the gate round the south side to the first spot with room for it
+    const south = Math.cos(aOut + 1) > Math.cos(aOut - 1) ? 1 : -1;
+    const tr = FORT.r - 2.6;
+    let tp = { x: fx, z: fz + tr };
+    for (let a = 0.3; a < Math.PI; a += 0.05) {
+      const q = { x: fx + Math.sin(aOut + south * a) * tr, z: fz + Math.cos(aOut + south * a) * tr };
+      if (walkable(q.x, q.z, 2.2)) { tp = q; break; }
+    }
     this.addSpawn('forest:fort_tower', { unit: 'prop', id: H ? 'fort_tower_orc' : 'fort_tower_human' }, tp.x, tp.z, 'forest', 0, aIn - 0.4);
     this.obstacles.push({ x: tp.x, z: tp.z, r: BREAKABLES[H ? 'fort_tower_orc' : 'fort_tower_human'].r });
     const aFar = trailExit(fx, fz, FORT.r + 1.5, false);
@@ -1200,9 +1215,9 @@ export class World {
       p.x += n.x * o;
       p.z += n.z * o;
     }
-    const b = BORDER - ridgeDist(p.x, p.z);
-    if (b > 0 && gateDist(p.x, p.z) > BORDER_GATE_R) {
-      const n = ridgeAway(p.x, p.z);
+    const b = -borderRoom(p.x, p.z);
+    if (b > 0) {
+      const n = borderAway(p.x, p.z);
       p.x += n.x * b;
       p.z += n.z * b;
     }

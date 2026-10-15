@@ -57,7 +57,7 @@ const CASTER_TEXTURES: [string, string][] = [
 ];
 export const keepsMaterials = (name: string) => name.startsWith('caster_');
 
-export const ANIMS = ['Idle', 'Walk', 'SwordAttack', 'AxeAttack', 'MagicAttack', 'Hit', 'Death'] as const;
+export const ANIMS = ['Idle', 'Walk', 'SwordAttack', 'AxeAttack', 'MagicAttack', 'Hit', 'Death', 'SlashAdvance', 'MeleeHigh', 'MeleeLong', 'MeleeHorizontal'] as const;
 export type AnimName = (typeof ANIMS)[number];
 
 /** Bones that belong to the upper-body layer (spine_01 and its descendants). */
@@ -214,7 +214,9 @@ class Assets {
     const upper = {} as Record<AnimName, THREE.AnimationClip>;
     const lower = {} as Record<AnimName, THREE.AnimationClip>;
     for (const n of ANIMS) {
-      const src = this.sources.get(n)!.animations[0];
+      // Mixamo exports on our rig also carry the bind pose as a 'Take 001' clip
+      const anims = this.sources.get(n)!.animations;
+      const src = anims.find((a) => a.name.includes('mixamo')) ?? anims[0];
       const tracks = src.tracks
         .filter((t) => !t.name.endsWith('.scale'))
         .map((t) => {
