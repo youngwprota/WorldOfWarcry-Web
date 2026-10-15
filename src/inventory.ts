@@ -14,7 +14,7 @@ import { DAMAGE_TYPE_ICON, fmtK, icon } from './icons';
 import { art } from './art';
 import type { Game } from './game';
 import type { UI } from './ui';
-import { pairText } from './offhand';
+import { CLASSES, classSlot } from './party';
 
 /** 0.237 → "24%". */
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -142,8 +142,6 @@ type Source = { at: 'bag'; index: number } | { at: 'armor'; slot: ArmorSlot } | 
 
 /** Inventory window: stats, the hero preview, the bag and the equipped slots. */
 
-/** Weapon slot captions: save.weapons[0] is the right hand. */
-const HAND_NAME = ['правая', 'левая'];
 
 export class Inventory {
   private preview: HeroPreview | null = null;
@@ -181,7 +179,7 @@ export class Inventory {
     const g = this.game;
     const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
     const s = g.stats;
-    const hit = g.itemDamage(g.weaponItem) * g.handMul();
+    const hit = g.itemDamage(g.weaponItem);
     const big = (ic: string, v: string, label: string) => `<div>${art(ic, 46)}<b>${v}</b><span>${label}</span></div>`;
     q('#i-big').innerHTML = big('dps', fmtK(g.heroDps()), 'урон/с') + big('heart', fmtK(g.maxHp), 'хп') +
       big('regen', fmtK(g.regen), 'хп/с');
@@ -321,8 +319,8 @@ export class Inventory {
     const pet = g.petDef;
     const weapons = ([0, 1] as const).map((i) => {
       if (i === 1 && pet) return petCellHtml(pet, `title="Питомец: ${pet.name}"`, 'active', '<span class="wtag on">питомец</span>');
-      const tag = `<span class="wtag ${s.weapons[i] ? 'on' : ''}">${HAND_NAME[i]}</span>`;
-      return this.cell(s.weapons[i], `data-weapon="${i}"`, 'sword', tag, s.weapons[i] ? 'active' : '');
+      const tag = `<span class="wtag ${s.weapons[i] ? 'on' : ''}">${g.slotName(i).toLowerCase()}</span>`;
+      return this.cell(s.weapons[i], `data-weapon="${i}"`, i ? 'shield' : 'sword', tag, s.weapons[i] ? 'active' : '');
     }).join('');
     const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
     q('#i-eq-l').innerHTML = armor(EQUIP_BAR.left);
@@ -397,8 +395,9 @@ export class Inventory {
     const x = '<button class="xbtn" data-act="close">✕</button>';
     wrap.classList.remove('hidden');
     if (!it) {
-      const name = src.at === 'armor' ? SLOT_NAME[src.slot] : 'Оружие';
-      const ph = src.at === 'armor' ? ARMOR_SLOTS.find((a) => a.id === src.slot)!.icon : 'sword';
+      const off = src.at === 'weapon' && src.slot === 1;
+      const name = src.at === 'armor' ? SLOT_NAME[src.slot] : g.slotName(off ? 1 : 0);
+      const ph = src.at === 'armor' ? ARMOR_SLOTS.find((a) => a.id === src.slot)!.icon : off ? 'shield' : 'sword';
       tip.innerHTML = `<div class="card-head">${cellHtml(null, 'disabled', ph, '', 'big')}<div class="card-title"><h3>${name}</h3></div>${x}</div>
         <div class="ability well"><p>Слот пуст. Подходящие предметы лежат в сумке.</p></div>`;
       this.bindTip(tip, src);
@@ -408,7 +407,8 @@ export class Inventory {
     const slot = slotOf(it);
     // Compare a bag item with what is equipped in the same slot.
     let cur: Item | null = null;
-    if (src.at === 'bag') cur = slot === 'weapon' ? g.weaponItem : (s.equip[slot] ?? null);
+    const hand = it.kind === 'weapon' ? classSlot(g.heroClass, it.def) : null;
+    if (src.at === 'bag') cur = slot === 'weapon' ? (hand !== null ? s.weapons[hand] : null) : (s.equip[slot] ?? null);
     const theirs = cur ? Object.fromEntries(itemLines(cur)) : {};
     const cmp = (k: string, v: string) => {
       const o = theirs[k];
@@ -418,23 +418,16 @@ export class Inventory {
       return cur && o !== undefined && o !== v ? `<i>${o}</i><em>›</em><b class="${cls}">${v}</b>` : `<b>${v}</b>`;
     };
     const [main, ...rest] = itemLines(it).filter(([k]) => k !== 'Тип');
-    // the stat's own icon: the coloured sword for damage, the coloured shield for defense
-    const mainIcon = it.kind === 'weapon' ? art('dps', 30) : art('defense', 30);
+    // the stat's own icon: the coloured sword for damage, the coloured shield for defense (and a shield's block)
+    const mainIcon = it.kind === 'weapon' && !WEAPONS[it.def].guard ? art('dps', 30) : art('defense', 30);
     const sub = rest.map(([k, v]) => `<div><span>${k}</span>${cmp(k, v)}</div>`).join('');
     let ability: string;
     if (it.kind === 'weapon') {
       const c = COMBOS[it.def];
-      ability = `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
+      ability = !c ? '' : `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
       const w = WEAPONS[it.def];
-      if (w.stack) ability = `<div class="ab-title">Порезы</div><p>Каждый удар по врагу добавляет <b>+${Math.round(w.stack.add * 100)}%</b> урона по нему, до <b>+${Math.round(w.stack.add * w.stack.max * 100)}%</b>. Через <b>${w.stack.decay} с</b> без ударов бонус сгорает.</p>` + ability;
-      if (w.pull) ability = `<div class="ab-title">Жатва душ</div><p>Взмах стягивает врагов в радиусе <b>${w.pull.radius} м</b> перед героем (боссов — нет). Каждый задетый враг сверх первого даёт <b>+${Math.round(w.pull.perEnemy * 100)}%</b> урона, до <b>×${w.pull.max}</b>.</p>` + ability;
-      if (w.cycle) ability = `<div class="ab-title">Цикл</div><p>Без остановки: взмах справа, взмах слева (широко, слабее) и узкий сильный <b>укол</b>. Цикл не сбрасывается.</p>` + ability;
-      if (w.orbit) ability = `<div class="ab-title">Бросок</div><p>Коса летит вокруг героя <b>${w.orbit.time} с</b> и режет всех на пути, потом возвращается в руку.</p>` + ability;
-      if (w.ring) ability = `<div class="ab-title">Бонк</div><p>Бьёт по головам в круге перед героем. Оглушает с шансом <b>${Math.round((w.stun ?? 0) * 100)}%</b>, в <b>${Math.round(w.ring.chance * 100)}%</b> случаев — звонкий удар <b>×${w.ring.mult}</b>.</p>` + ability;
-      if (w.assassin) ability = `<div class="ab-title">Убийца</div><p>Рывок к ближайшему врагу и удар только по нему. Всегда оглушает на <b>${w.assassin.stun} с</b>, обычных врагов ниже <b>${Math.round(w.assassin.execute * 100)}%</b> хп казнит.</p>` + ability;
-      if (w.guard) ability = `<div class="ab-title">Защита</div><p>−${Math.round(w.guard.reduce * 100)}% входящего урона. Удар по герою с шансом <b>${Math.round(w.guard.counter.normal * 100)}–${Math.round(w.guard.counter.boss * 100)}%</b> (чем сильнее враг, тем выше) вызывает контратаку оружием в другой руке. Рядом с оружием сам не бьёт.</p>` + ability;
-      const pt = pairText(it.def);
-      if (pt) ability += `<div class="ab-title">С мечом в другой руке</div><p>${pt}</p>`;
+      if (w.cycle) ability = `<div class="ab-title">Серия</div><p>Укол, укол — только по цели, на большой дистанции — и <b>прокрут</b> вокруг себя. Серия не сбрасывается.</p>` + ability;
+      if (w.guard) ability = `<div class="ab-title">Защита</div><p>−${Math.round(w.guard.reduce * 100)}% входящего урона. Удар по герою с шансом <b>${Math.round(w.guard.counter.normal * 100)}–${Math.round(w.guard.counter.boss * 100)}%</b> (чем сильнее враг, тем выше) вызывает контратаку оружием.${w.guard.reflect ? ` <b>${Math.round(w.guard.reflect * 100)}%</b> полученного урона возвращается атакующему.` : ''} Сам не бьёт.</p>`;
     } else {
       ability = `<div class="ab-title">Комплект</div><p>${it.rarity > 0 || rest.length ? 'Бонус к стату действует, пока предмет надет.' : 'У обычных предметов нет бонуса. Ищи <b>необычные</b> и выше.'}</p>`;
     }
@@ -442,16 +435,14 @@ export class Inventory {
     let actions = '';
     if (src.at === 'bag') {
       actions = btn('discard', 'Выбросить');
-      if (it.kind === 'weapon') {
-        // the hunter's left hand is his pet's slot
-        actions += g.petDef ? btn('eq0', 'Взять', 'primary') : btn('eq0', 'В правую', 'primary') + btn('eq1', 'В левую', 'primary');
-      } else actions += btn('equip', 'Экипировать', 'primary');
+      if (g.canUse(it)) actions += btn('equip', 'Экипировать', 'primary');
+      else actions += `<span class="none">Не для класса «${CLASSES[g.heroClass].name}»</span>`;
     } else if (src.at === 'armor') {
       actions = btn('unequip', 'Снять', 'red');
     } else {
-      if (s.weapons[1 - src.slot] && g.canUse(it)) actions += btn('unequip', 'Снять', 'red');
+      if (src.slot === 1) actions += btn('unequip', 'Снять', 'red');
     }
-    const type = slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
+    const type = WEAPONS[it.def]?.guard ? g.slotName(1) : slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
     tip.innerHTML = `<div class="card-head">${cellHtml(it, 'disabled', '', '', 'big')}
         <div class="card-title"><h3>${itemName(it, g.faction)}${it.sharpen ? ` +${it.sharpen}` : ''}</h3>
           <div class="pills"><span class="rar" style="color:${r.color}">${r.name}</span><span class="typ">${type}</span></div></div>${x}</div>
@@ -476,7 +467,6 @@ export class Inventory {
     let ok = true;
     if (src.at === 'bag') {
       if (action === 'equip') g.equipFromBag(src.index);
-      else if (action === 'eq0' || action === 'eq1') g.equipFromBag(src.index, action === 'eq0' ? 0 : 1);
       else if (action === 'discard') g.discardFromBag(src.index);
     } else if (src.at === 'armor') {
       ok = g.unequipArmor(src.slot);

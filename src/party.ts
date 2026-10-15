@@ -1,6 +1,8 @@
 /**
  * The party: three heroes of different classes, one of them on the field at a time.
- * Each class keeps its own pair of weapons (SaveData.kits); the hunter is done, the mage still plays as the warrior.
+ * Each class has two gear slots: a weapon (save.weapons[0]) and its own class item (save.weapons[1]: the warrior's
+ * shield, the hunter's pet); each keeps its own pair (SaveData.kits). A class without its own lists yet uses the
+ * warrior's.
  */
 import type { FactionId } from './config';
 import type { VisualPart } from './items';
@@ -17,26 +19,47 @@ export interface ClassDef {
   key: string;
   /** Hero model by faction; none = the faction's hero (FactionDef.hero). */
   model?: Record<FactionId, string>;
-  /** Weapon (WEAPONS id) the class starts with; none = it shares the warrior's weapons for now. */
-  weapon?: string;
-  /** The second weapon slot holds a pet (config PETS) instead of a weapon. */
+  /** Weapon defs (src/config.ts WEAPONS) for slot 1; empty = the warrior's for now. */
+  weapons: string[];
+  /** Class item defs for slot 2. */
+  off: string[];
+  /** Name of slot 2. */
+  offName: string;
+  /** Slot 2 holds a pet (config PETS) instead of an item. */
   pet?: boolean;
+  /** What the class holds when it first takes the field (missing = the faction's start weapon). */
+  kit?: { hand: string; left?: string };
 }
 
 /** Order = order of the buttons, bottom-right of the HUD. */
 export const CLASSES: Record<HeroClass, ClassDef> = {
-  warrior: { name: 'Воин', icon: 'shield', color: ['#ff7a6a', '#c0352c'], key: 'Digit1' },
+  warrior: {
+    name: 'Воин', icon: 'shield', color: ['#ff7a6a', '#c0352c'], key: 'Digit1',
+    weapons: ['sword', 'axe', 'hammer', 'polearm'], off: ['shield_tower', 'shield_buckler', 'shield_spiked'], offName: 'Щит',
+  },
   hunter: {
     name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
-    model: { human: 'human_archer', orc: 'orc_archer' }, weapon: 'bow', pet: true,
+    model: { human: 'human_archer', orc: 'orc_archer' },
+    weapons: ['bow'], off: [], offName: 'Питомец', pet: true, kit: { hand: 'bow' },
   },
-  mage: { name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3' },
+  mage: { name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3', weapons: [], off: [], offName: '' },
 };
 
 export const CLASS_IDS = Object.keys(CLASSES) as HeroClass[];
 
-/** Whose weapons the class uses: its own once it has a starting weapon, else the warrior's. */
-export const kitOf = (c: HeroClass): HeroClass => (CLASSES[c].weapon ? c : 'warrior');
+/** Whose gear lists and weapon pair the class uses: its own once it has weapons, else the warrior's. */
+export const kitOf = (c: HeroClass): HeroClass => (CLASSES[c].weapons.length ? c : 'warrior');
+
+/** Which gear slot of class `c` takes weapon def `def`: 0 weapon, 1 class item, null — not for this class. */
+export function classSlot(c: HeroClass, def: string): 0 | 1 | null {
+  const k = CLASSES[kitOf(c)];
+  return k.weapons.includes(def) ? 0 : k.off.includes(def) ? 1 : null;
+}
+
+/** The class whose lists hold weapon def `def` (null: nobody's). */
+export function weaponClass(def: string): HeroClass | null {
+  return CLASS_IDS.find((c) => CLASSES[c].weapons.includes(def) || CLASSES[c].off.includes(def)) ?? null;
+}
 
 /** Hunter looks by quality (tools/import-archers.mjs), in config RARITY order. */
 const ARCHER_RARITY = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];

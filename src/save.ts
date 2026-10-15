@@ -1,7 +1,7 @@
 import { FACTIONS, HERO, PETS, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
 import { BASE_STATS, type PctPoints, type StatPoints } from './balance';
 import { ARMOR, makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
-import { CLASSES, type HeroClass } from './party';
+import { CLASSES, classSlot, kitOf, type HeroClass } from './party';
 
 /**
  * Number scale of the save: 2 = hero HP ×10, regen in HP/s, 6 item qualities, item level = copies; 5 = flat power;
@@ -93,8 +93,6 @@ export function loadSave(): SaveData | null {
     if (d.v !== 1 || !FACTIONS[d.faction]) return null;
     // Fields added after the first prototype build.
     // items whose weapon / armour piece is gone from the game (renamed or removed in another branch) are dropped
-    d.weapons = d.weapons.map((w) => (w ? known(normalizeItem(w)) : null)) as SaveData['weapons'];
-    if (!d.weapons[0] && !d.weapons[1]) d.weapons[0] = makeItem('weapon', FACTIONS[d.faction].startWeapon, 0, 1);
     d.equip ??= {};
     for (const k of Object.keys(d.equip) as ArmorSlot[]) {
       const it = d.equip[k] && known(normalizeItem(d.equip[k]!));
@@ -123,14 +121,30 @@ export function loadSave(): SaveData | null {
         if (it) set[k] = it; else delete set[k];
       }
     }
-    for (const [k, w] of Object.entries(d.kits ?? {}) as [HeroClass, SaveData['weapons']][]) {
-      const kit = w.map((x) => (x ? known(normalizeItem(x)) : null)) as SaveData['weapons'];
-      if (kit[0] || kit[1]) d.kits![k] = kit; else delete d.kits![k];
-    }
+    // every pair of hands by its owner's slots: the pair in play is kit `d.kit`'s, the stored ones their class's
+    d.weapons = fitHands(d, d.kit ?? 'warrior', d.weapons);
+    for (const k of Object.keys(d.kits ?? {}) as HeroClass[]) d.kits![k] = fitHands(d, k, d.kits![k]!);
     return d;
   } catch {
     return null;
   }
+}
+
+/**
+ * Two hands → weapon + class slot of class `owner` (src/party.ts classSlot): whatever does not fit its slot (a second
+ * weapon, a shield in the right hand, a weapon of another class) goes to the bag; the weapon slot is never empty.
+ */
+function fitHands(d: SaveData, owner: HeroClass, hands: (Item | null)[]): SaveData['weapons'] {
+  const out: SaveData['weapons'] = [null, null];
+  for (const raw of hands) {
+    const it = raw && known(normalizeItem(raw));
+    if (!it) continue;
+    const s = classSlot(owner, it.def);
+    if (s !== null && !out[s]) out[s] = it;
+    else d.bag.push(it);
+  }
+  out[0] ??= makeItem('weapon', CLASSES[kitOf(owner)].kit?.hand ?? FACTIONS[d.faction].startWeapon, 0, 1);
+  return out;
 }
 
 /** The item if its def still exists, else null. */

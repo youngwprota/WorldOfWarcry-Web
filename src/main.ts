@@ -8,6 +8,7 @@ import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
 import { FACTIONS, FORGE3D, MOBS, ORBS, PETS, WEAPONS, type FactionId, type OrbKind } from './config';
+import { GEAR_MODELS } from './items';
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
@@ -71,7 +72,6 @@ for (const w of Object.values(WEAPONS)) {
   if (w.shot) Object.values(w.shot.arrow).forEach((m) => models.add(m));
 }
 for (const c of Object.values(CLASSES)) Object.values(c.model ?? {}).forEach((m) => models.add(m));
-models.add('sickle').add('kitchen_knife'); // sword stand-ins in sword pairs (src/offhand.ts)
 models.add('sword_undead_king'); // the Lich King's sword: prologue and the faction choice scene
 const creatures = new Set<string>();
 for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { (m.creature ? creatures : models).add(c); if (w) models.add(w); }
@@ -100,6 +100,7 @@ for (const [m] of FORGE3D.decor) models.add(m);
 await Promise.all([
   assets.loadAll([...models], (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`)),
   assets.loadCreatures([...creatures]),
+  assets.loadGear(GEAR_MODELS),
 ]);
 ui.loading(1, 'Готово');
 

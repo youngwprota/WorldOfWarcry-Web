@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import './grade';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { assets, ANIMS } from './assets';
-import { attachWeapon } from './rig';
+import { attachWeapon, SHIELD_GRIP } from './rig';
+import { KEYS, Swinger, type SwingKind } from './swing';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
@@ -20,15 +21,18 @@ const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 20
 camera.position.set(0, 2.5, 7);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1, 0);
-Object.assign(window, { camera, controls, scene });
+Object.assign(window, { camera, controls, scene, SHIELD_GRIP, attachWeapon });
 
-const pairs: [string, string][] = [
+const pairs: [string, string, string?][] = [
   ['human_knight', 'sword_human_knight'], ['orc_grunt', 'axe_orc_grunt'], ['paladin', 'hammer_human_paladin'],
   ['peasant', 'axe'], ['soldier', 'sword_soldier'], ['orc_peon', 'axe_orc_peon'], ['orc_warrior', 'sword_orc_warrior'],
   ['orc_chieftain', 'axe_orc_chieftain'], ['undead_worker', ''], ['undead_warrior', 'spear_undead_warrior'],
-  ['undead_assassin', ''], ['undead_king', 'sword_undead_king'], ['peasant', 'dagger'], ['orc_peon', 'reaper'],
-  ['human_knight', 'nagamaki'], ['human_knight', 'scythe'], ['human_knight', 'shield'], ['human_knight', 'pan'],
-  ['human_knight', 'hidden_blade'], ['human_knight', 'sickle'], ['human_knight', 'kitchen_knife'],
+  ['undead_assassin', ''], ['undead_king', 'sword_undead_king'], 
+  ['human_knight', 'polearm_mythic'],
+  // per-quality gear (GLB) with a shield in the left hand
+  ['human_knight', 'sword_rare', 'shield_tower_rare'], ['orc_grunt', 'axe_epic', 'shield_buckler_epic'],
+  ['paladin', 'hammer_legendary', 'shield_spiked_legendary'], ['soldier', 'sword_uncommon', 'shield_tower_common'],
+  ['orc_warrior', 'axe_mythic', 'shield_spiked_mythic'],
 ];
 const props = ['barrel', 'box_small_1', 'campfire', 'orc_barrel', 'undead_tomb_stone_1', 'undead_coffin', 'house_Lv1', 'orc_house_Lv1'];
 // ?models=a,b,c — gallery of arbitrary models in a grid (level-design lookup).
@@ -45,12 +49,14 @@ if (gallery) {
   controls.target.set(0, 0, cols * 4);
 }
 const leftName = new URLSearchParams(location.search).get('left');
-const names = gallery ? [] : [...new Set([...pairs.flat().filter(Boolean), ...props, ...(leftName ? [leftName] : [])])];
-if (!gallery) await assets.loadAll(names, () => {});
+const isGear = (n: string) => /_(common|uncommon|rare|epic|legendary|mythic)$/.test(n);
+const all = [...new Set([...pairs.flat(), ...props, leftName].filter((n): n is string => !!n))];
+if (!gallery) await Promise.all([assets.loadAll(all.filter((n) => !isGear(n)), () => {}), assets.loadGear(all.filter(isGear))]);
 
 const mixers: THREE.AnimationMixer[] = [];
+const swingers: { s: Swinger; g: THREE.Object3D }[] = [];
 const solo = new URLSearchParams(location.search).get('solo');
-pairs.forEach(([c, w], i) => {
+pairs.forEach(([c, w, l], i) => {
   if (gallery || (solo !== null && +solo !== i)) return;
   const g = assets.clone(c);
   if (solo === null) g.position.set((i % 6) * 1.6 - 4, 0, -Math.floor(i / 6) * 2.5);
@@ -58,10 +64,11 @@ pairs.forEach(([c, w], i) => {
   if (w) attachWeapon(g, w);
   // ?left=model — the same or another weapon in the left hand too (dual wield grip check)
   const left = new URLSearchParams(location.search).get('left');
-  if (left) attachWeapon(g, left, true);
+  if (left || l) attachWeapon(g, left || l!, true);
   const m = new THREE.AnimationMixer(g);
   m.clipAction(assets.clips.full.Idle).play();
   mixers.push(m);
+  swingers.push({ s: new Swinger(g), g });
 });
 if (solo === null && !gallery) props.forEach((p, i) => {
   const g = assets.clone(p);
@@ -72,14 +79,40 @@ if (solo === null && !gallery) props.forEach((p, i) => {
 const ui = document.getElementById('ui')!;
 const sel = document.createElement('select');
 ANIMS.forEach((a) => sel.add(new Option(a, a)));
-sel.onchange = () => mixers.forEach((m) => { m.stopAllAction(); m.clipAction(assets.clips.full[sel.value as 'Idle']).play(); });
+// procedural swings (src/swing.ts) on top of Idle, repeated; `sweep` also spins the body like the polearm finisher
+const SWINGS: SwingKind[] = ['thrust', 'sweep', 'slashRL', 'slashLR', 'overhead', 'uppercut', 'bash'];
+SWINGS.forEach((k) => sel.add(new Option('swing: ' + k, 'swing:' + k)));
+let swingKind: SwingKind | null = null;
+let swingT = 0;
+sel.onchange = () => {
+  swingKind = sel.value.startsWith('swing:') ? (sel.value.slice(6) as SwingKind) : null;
+  swingT = 0;
+  mixers.forEach((m) => { m.stopAllAction(); m.clipAction(assets.clips.full[swingKind ? 'Idle' : (sel.value as 'Idle')]).play(); });
+};
+/** Swing timing as in the game for the polearm (1 attack/s): impact 0.4 s, swing 0.96 s, spin 0.35 s from the impact. */
+const slow = +(new URLSearchParams(location.search).get('slow') ?? 1);
+function updateSwings(dt: number) {
+  if (swingKind) {
+    if (swingT <= 0) { swingT = 1.4; swingers.forEach(({ s }) => s.start(swingKind!, 0, 0.96, 0.4)); }
+    swingT -= dt;
+  }
+  const t = 1.4 - swingT; // time since the swing started
+  const k = swingKind === 'sweep' ? Math.min(1, Math.max(0, (t - 0.4) / 0.35)) : 0;
+  swingers.forEach(({ s, g }) => { s.apply(dt); g.rotation.y = (1 - (1 - k) * (1 - k)) * Math.PI * 2; });
+}
+Object.assign(window, { KEYS, pause: (on: boolean) => { paused = on; }, step: (dt: number) => tick(dt) });
+let paused = false;
 ui.append(sel);
 const clock = new THREE.Clock();
-renderer.setAnimationLoop(() => {
-  const dt = clock.getDelta();
+function tick(dt: number) {
   mixers.forEach((m) => m.update(dt));
+  updateSwings(dt);
   controls.update();
   renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta() / slow;
+  if (!paused) tick(dt);
 });
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);

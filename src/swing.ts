@@ -2,7 +2,7 @@
 // (the rig only has two attack clips, both right-handed), plus a weapon trail ribbon.
 import * as THREE from 'three';
 
-export type SwingKind = 'slashRL' | 'slashLR' | 'thrust' | 'overhead' | 'throw' | 'assassin' | 'uppercut' | 'bash' | 'aim' | 'draw';
+export type SwingKind = 'slashRL' | 'slashLR' | 'thrust' | 'overhead' | 'uppercut' | 'bash' | 'sweep' | 'aim' | 'draw';
 
 /**
  * One key, character space, radians, for the RIGHT hand (the left one is mirrored):
@@ -13,15 +13,17 @@ export type SwingKind = 'slashRL' | 'slashLR' | 'thrust' | 'overhead' | 'throw' 
 type Key = [phase: number, yaw: number, lean: number, fwd: number, sweep: number, out: number];
 
 // phase: 0 start → 1 the blow lands → 2 back to rest; missing ends are filled with zeros
-const KEYS: Record<SwingKind, Key[]> = {
+export const KEYS: Record<SwingKind, Key[]> = {
   slashRL: [[0.6, -0.55, 0.05, 1.3, -1.1, 0.3], [1, 0, 0.2, 1.4, 0, 0.1], [1.45, 0.6, 0.15, 1.1, 1.15, 0]],
   slashLR: [[0.6, 0.6, 0.05, 1.2, 1.05, 0], [1, 0, 0.2, 1.4, 0, 0.1], [1.45, -0.6, 0.15, 1.1, -1.15, 0.35]],
-  // the blade sits across the fist: a level blade needs a low arm, the lunge comes from the torso
-  thrust: [[0.6, -0.4, -0.1, -0.4, -0.2, 0.25], [1, 0.5, 0.45, 0.25, 0.1, 0], [1.4, 0.45, 0.4, 0.2, 0.1, 0]],
+  // polearm: the shaft stands ~30° up in the fist, a level shaft needs a low arm (measured in viewer.html:
+  // 2° up, straight at the target at the impact); the lunge comes from the torso
+  thrust: [[0.6, -0.4, -0.1, -0.7, -0.2, 0.25], [1, 0.3, 0.35, -0.15, 0.05, 0], [1.4, 0.25, 0.3, -0.2, 0.05, 0]],
   overhead: [[0.6, -0.2, -0.3, 2.7, -0.1, 0.1], [1, 0.1, 0.5, 0.9, 0.1, 0], [1.4, 0.05, 0.4, 0.7, 0.05, 0]],
-  throw: [[0.6, -0.7, -0.2, 2.3, -0.4, 0.6], [1, 0.5, 0.3, 1.5, 0.4, 0], [1.4, 0.6, 0.25, 1.1, 0.6, 0]],
-  assassin: [[0.55, -0.9, 0.6, -0.6, -0.5, 0.3], [1, 0.8, 0.45, 0.3, 0.3, 0], [1.6, 0.75, 0.4, 0.25, 0.3, 0]],
   uppercut: [[0.6, -0.3, 0.45, -0.2, -0.2, 0.2], [1, 0.2, -0.3, 2.7, 0.1, 0], [1.4, 0.15, -0.2, 2.4, 0.1, 0]],
+  // polearm finisher under the body spin (it starts at the impact, 0.35 s): the arm stays low and a bit out so the
+  // shaft stays level (2–6° up) through the whole spin; a raised arm (slashRL) stood the polearm straight up
+  sweep: [[0.6, -0.5, 0.05, -0.45, -0.3, 0.4], [1, 0.1, 0.15, -0.4, 0, 0.2], [1.7, 0.05, 0.1, -0.4, 0, 0.2]],
   bash: [[0.6, -0.45, -0.05, -0.3, -0.3, 0.2], [1, 0.4, 0.35, 0.5, 0.3, 0], [1.35, 0.35, 0.3, 0.45, 0.25, 0]],
   // bow shot: `aim` raises the bow arm (the left hand) at the target, `draw` pulls the string with the other one
   // and turns the torso side-on; the arrow leaves on the impact

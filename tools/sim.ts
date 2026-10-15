@@ -1,16 +1,15 @@
 // Balance simulator: a bot plays the forest and the cemetery on a 1-D model of the trail, using the game's own
 // config and formulas (src/balance.ts). Prints a per-minute curve and when each boss falls.
-// Run: npm run sim -- [--faction human|orc] [--weapon sword] [--left dagger] [--runs 20] [--until 45]
+// Run: npm run sim -- [--faction human|orc] [--weapon sword] [--off shield_tower] [--runs 20] [--until 45]
 //                     [--dodge 0.6] [--uptime 0.8] [--combo 0.85] [--seed 1] [--keep] [--log] [--mobs] [--bench]
 //                     [--set MOBS.bandit_chief.hp=6000 --set GACHA.token.normal=0.05 ...] (what-if: config edits for this run)
 import * as CONFIG from '../src/config';
 import {
-  ATTACK_HIT, BREAKABLES, COMBOS, FACTIONS, GACHA, HERO, MOBS, ORBS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, SWORD_PAIRS,
+  ATTACK_HIT, BREAKABLES, COMBOS, FACTIONS, GACHA, HERO, MOBS, ORBS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS,
   WEAPONS, depthMul, mobImpact, mobRank, type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from '../src/config';
-import { addStat, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, handMulOf, heroStats, type HeroBuild } from '../src/balance';
+import { addStat, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, heroStats, type HeroBuild } from '../src/balance';
 import { ARMOR, armorStats, dropItem, makeItem, sameItem, weaponDamage, type Item } from '../src/items';
-import { swordPair, type Pair } from '../src/offhand';
 import { pull } from '../src/gacha';
 import { ARENA, FORT, GATE, SPAWN, pathAt, progressAt } from '../src/island';
 
@@ -22,7 +21,7 @@ const flag = (k: string) => argv.includes(`--${k}`);
 const OPT = {
   faction: arg('faction', 'human') as FactionId,
   weapon: arg('weapon', ''),
-  left: arg('left', ''),
+  off: arg('off', ''), // the class slot (a shield)
   runs: +arg('runs', '20'),
   until: +arg('until', '45') * 60,
   dodge: +arg('dodge', '0.6'), // share of boss slams / blasts dodged
@@ -33,7 +32,7 @@ const OPT = {
   keep: flag('keep'), // never change weapons
   log: flag('log'), // per-minute table of the first run
   mobs: flag('mobs'), // per-mob fight table
-  bench: flag('bench'), // single-target kill time of every weapon and sword pair, then exit
+  bench: flag('bench'), // single-target kill time of every weapon, then exit
 };
 
 // --set path=value: config objects are mutable, so a what-if needs no file edit
@@ -124,8 +123,7 @@ function foeOf(u: Unit): Foe {
 
 /**
  * One duel. `mean`: no dice (rolls at their expected value, slams hit for their expected share) — the bot's
- * quick estimate. Weapon mechanics are modelled for a single target: crowd effects (reaper pull, reaper pair,
- * pan pair's fear, hammer helpers) are left out.
+ * quick estimate. Weapon mechanics are modelled for a single target: crowd effects are left out.
  */
 function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const st = stats(h);
@@ -134,13 +132,10 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const rank = mobRank(d);
   const roll = () => (mean ? 1 : 0.9 + rand() * 0.2);
   const chance = (p: number) => (mean ? false : rand() < p);
-  const pair: Pair | null = swordPair(h.weapons[0]?.def, h.weapons[1]?.def);
   let hp = h.hp;
   let mhp = foe.hp;
   const mmax = foe.hp;
   let stun = 0;
-  let stacks = 0;
-  let haste = 0, hasteAt = -99;
   let lastCounter = -99;
   const period = 1 / d.aps;
   let matk = mobImpact(ATTACK_HIT[d.creature ? `${d.model.human[0]}:attack` : d.anim] ?? 0.6, period);
@@ -151,7 +146,6 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const pending: [number, number][] = []; // [time, damage] of telegraphed blasts
   // hands
   const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1, combo: 0 }));
-  const orbits: { until: number; next: number; dmg: number }[] = [];
   // crits and dodges: dice, or their expected value with `mean`
   const heroCrit = () => (mean ? critAvg(st.critPts, st.critDmgPts) : chance(st.crit) ? st.critMul : 1);
   const foeHits = () => (mean ? 1 - dodgeChance(d.dodge) : chance(dodgeChance(d.dodge)) ? 0 : 1);
@@ -163,12 +157,14 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     const dmg = Math.max(1, raw * armorMul(st.defense) * guardMul(h.weapons) * roll());
     taken += dmg;
     hp -= dmg;
+    // spiked shield: a share of the blow goes back
+    const reflect = h.weapons[1] && WEAPONS[h.weapons[1].def].guard?.reflect;
+    if (reflect) mhp -= dmg * reflect;
   };
   const hit = (it: Item, mult: number) => {
     const w = WEAPONS[it.def];
     const r = RESIST_MULT[d.resist[w.type] ?? 'normal'];
-    let dmg = weaponDamage(it, st.power, st.powerMul) * handMulOf(h.weapons, pair, it) * heroCrit() * foeHits() * r * mult * roll();
-    if (w.stack) { dmg *= 1 + w.stack.add * stacks; stacks = Math.min(w.stack.max, stacks + 1); }
+    const dmg = weaponDamage(it, st.power, st.powerMul) * heroCrit() * foeHits() * r * mult * roll();
     mhp -= dmg;
     return dmg;
   };
@@ -177,31 +173,9 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     const it = hd.it!;
     const w = WEAPONS[it.def];
     const fin = !counter && hd.combo >= COMBOS[it.def].hits ? COMBOS[it.def] : null;
-    let mult = fin ? fin.mult : 1;
-    if (w.ring && chance(w.ring.chance)) mult *= w.ring.mult;
-    else if (w.ring && mean) mult *= 1 + w.ring.chance * (w.ring.mult - 1);
-    const swordHit = !!pair && hd.i === pair.sword;
-    if (pair?.kind === 'hidden_blade' && w.assassin) mult *= SWORD_PAIRS.hidden_blade.dmg;
-    if (pair?.kind === 'pan') mult *= SWORD_PAIRS.pan.dmg;
-    if (pair?.kind === 'hammer' && !swordHit) mult *= 1 + SWORD_PAIRS.hammer.center * 0.5;
-    if (w.orbit) {
-      // the thrown scythe circles the hero: one cut per lap on a target in melee
-      orbits.push({ until: t + w.orbit.time, next: t + w.orbit.time / w.orbit.turns / 2, dmg: mult });
-      return;
-    }
+    const mult = fin ? fin.mult : 1;
     hit(it, mult);
-    if (swordHit && pair!.kind === 'axe') mhp -= mhp * (rank === 'normal' ? SWORD_PAIRS.axe.pct : SWORD_PAIRS.axe.boss);
-    if (swordHit && pair!.kind === 'dagger') { haste = Math.min(SWORD_PAIRS.dagger.max, (t - hasteAt < SWORD_PAIRS.dagger.decay ? haste : 0) + SWORD_PAIRS.dagger.aps); hasteAt = t; }
-    if (swordHit && pair!.kind === 'scythe') {
-      const sp = SWORD_PAIRS.scythe;
-      if (mean) mhp -= sp.chance * (sp.time / sp.rehit) * sp.mult * weaponDamage(it, st.power, st.powerMul) * handMulOf(h.weapons, pair, it) * heroCrit() * foeHits() * RESIST_MULT[d.resist[w.type] ?? 'normal'];
-      else if (chance(sp.chance)) orbits.push({ until: t + sp.time, next: t + sp.rehit, dmg: -sp.mult });
-    }
-    if (fin && pair?.kind === 'nagamaki' && w.cycle) hit(it, SWORD_PAIRS.nagamaki.mult);
-    if (w.assassin) {
-      if (!boss) stun = Math.max(stun, w.assassin.stun);
-      if (rank === 'normal' && mhp < mmax * w.assassin.execute) mhp = 0;
-    } else if (!boss) {
+    if (!boss) {
       if (fin?.stun) stun = Math.max(stun, fin.stun);
       else if (w.stun && (mean ? false : chance(w.stun))) stun = Math.max(stun, 0.9);
     }
@@ -214,31 +188,16 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     for (const hd of hands) {
       if (!hd.it) continue;
       const w = WEAPONS[hd.it.def];
-      const other = h.weapons[1 - hd.i];
-      if (w.guard && other && !WEAPONS[other.def].guard) continue;
-      if (pair?.kind === 'hidden_blade' && hd.i === pair.sword) continue;
+      if (w.guard) continue;
       hd.cd -= DT;
       if (hd.cd > 0 || busy > 0) continue;
-      let per = 1 / w.aps;
-      if (pair && hd.i !== pair.sword) {
-        if (pair.kind === 'dagger' && t - hasteAt < SWORD_PAIRS.dagger.decay) per /= 1 + haste;
-        if (pair.kind === 'hidden_blade') per /= SWORD_PAIRS.hidden_blade.aps;
-      }
-      if (w.orbit && orbits.some((o) => o.dmg > 0 && o.until > t)) continue;
+      const per = 1 / w.aps;
       // uptime: the hero spends part of the fight repositioning — swings come later and the chain may break
       hd.cd = per / OPT.uptime;
       hd.combo = w.cycle || mean || rand() < OPT.combo ? hd.combo + 1 : 1;
       swings++;
       strike(hd);
     }
-    for (const o of orbits) {
-      if (o.until <= t || t < o.next) continue;
-      const it = o.dmg > 0 ? h.weapons.find((x) => x && WEAPONS[x.def].orbit) : h.weapons[pair?.sword ?? 0];
-      if (!it) { o.until = 0; continue; }
-      if (o.dmg > 0) { hit(it, o.dmg); o.next += WEAPONS[it.def].orbit!.time / WEAPONS[it.def].orbit!.turns; }
-      else { hit(it, -o.dmg); o.next += SWORD_PAIRS.scythe.rehit; }
-    }
-    if (orbits.length > 8) orbits.splice(0, orbits.length - 8);
     if (mhp <= 0) break;
     // the foe
     if (stun > 0) stun -= DT;
@@ -247,14 +206,13 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       if (matk <= 0) {
         matk += period;
         hurt(foe.dmg * (phase2 ? boss!.phase2Dmg : 1));
-        // shield: a blow taken may be answered by the other hand
-        const sh = h.weapons.find((x) => x && WEAPONS[x.def].guard);
-        const g = sh && WEAPONS[sh.def].guard!;
-        const other = sh && h.weapons.find((x) => x && x !== sh);
-        if (g && other && t - lastCounter >= g.cd && (mean ? true : chance(g.counter[rank]))) {
+        // shield in the class slot: a blow taken may be answered by the weapon
+        const g = h.weapons[1] && WEAPONS[h.weapons[1].def].guard;
+        const weapon = h.weapons[0];
+        if (g && weapon && t - lastCounter >= g.cd && (mean ? true : chance(g.counter[rank]))) {
           lastCounter = t;
-          if (mean) hit(other, g.counter[rank]);
-          else strike({ i: h.weapons.indexOf(other), it: other, combo: 0 }, true);
+          if (mean) hit(weapon, g.counter[rank]);
+          else strike({ i: 0, it: weapon, combo: 0 }, true);
         }
       }
     }
@@ -307,14 +265,15 @@ function lootItem(h: Hero, it: Item) {
   if (!OPT.keep) regear(h);
 }
 const dpsCache = new Map<string, number>();
-/** The best pair of hands for each open location (by DPS against its resists); armour by defense + bonus. */
+/** The best weapon + shield for each open location (by DPS against its resists); armour by defense + bonus. */
 function regear(h: Hero) {
   const all = [...h.weapons, ...h.bag].filter((x): x is Item => !!x && x.kind === 'weapon');
   h.bag = h.bag.filter((x) => x.kind !== 'weapon');
   for (const zone of Object.keys(h.kit) as ZoneId[]) {
     let bestDps = -1;
-    for (const a of all) for (const b of [null, ...all]) {
-      if (b === a) continue;
+    const shields = all.filter((x) => WEAPONS[x.def].guard);
+    for (const a of all) for (const b of [null, ...shields]) {
+      if (WEAPONS[a.def].guard) continue;
       const key = `${zone}|${wname(a)}|${wname(b)}`;
       let dps = dpsCache.get(key);
       if (dps === undefined) dpsCache.set(key, (dps = dummyDps(h, [a, b], zone)));
@@ -358,7 +317,7 @@ function run(seed: number): RunOut {
   const f = FACTIONS[OPT.faction];
   const h: Hero = {
     faction: OPT.faction, src: {}, pct: {}, equip: {},
-    weapons: [makeItem('weapon', OPT.weapon || f.startWeapon, 0, 1), OPT.left ? makeItem('weapon', OPT.left, 0, 1) : null],
+    weapons: [makeItem('weapon', OPT.weapon || f.startWeapon, 0, 1), OPT.off ? makeItem('weapon', OPT.off, 0, 1) : null],
     hp: 0, bag: [], pulls: 0, pity: 0, spot: { s: sCamp, off: 0 }, kit: { forest: [null, null], cemetery: [null, null] } as Hero['kit'],
   };
   h.kit.forest = h.kit.cemetery = h.weapons;
@@ -533,9 +492,9 @@ if (OPT.bench) {
     }
     return (sum / n).toFixed(0).padStart(4);
   };
-  console.log('== Стенд: время убийства цели 4000 HP (редкое ур.1, сила 0, без резистов), с — одно / в паре с мечом');
-  for (const w of Object.keys(WEAPONS)) console.log(`${w.padEnd(13)} ${w === 'shield' ? '   —' : ttk(w, null)} / ${ttk(w, 'sword')}`);
-  console.log(`axe+shield    ${ttk('axe', 'shield')}`);
+  console.log('== Стенд: время убийства цели 4000 HP (редкое ур.1, сила 0, без резистов), с');
+  for (const w of Object.keys(WEAPONS)) if (!WEAPONS[w].guard) console.log(`${w.padEnd(13)} ${ttk(w, null)}`);
+  for (const s of Object.keys(WEAPONS)) if (WEAPONS[s].guard) console.log(`sword+${s.padEnd(15)} ${ttk('sword', s)}`);
   process.exit(0);
 }
 
@@ -546,7 +505,7 @@ const t0 = Date.now();
 const runs: RunOut[] = Array.from({ length: OPT.runs }, (_, i) => run(OPT.seed + i));
 const lines: string[] = [];
 const say = (s = '') => lines.push(s);
-say(`== Сим: ${OPT.faction}, ${OPT.weapon || FACTIONS[OPT.faction].startWeapon}${OPT.left ? '+' + OPT.left : ''}, прогонов ${OPT.runs}, до ${OPT.until / 60} мин; увороты ${OPT.dodge}, uptime ${OPT.uptime}, комбо ${OPT.combo}`);
+say(`== Сим: ${OPT.faction}, ${OPT.weapon || FACTIONS[OPT.faction].startWeapon}${OPT.off ? '+' + OPT.off : ''}, прогонов ${OPT.runs}, до ${OPT.until / 60} мин; увороты ${OPT.dodge}, uptime ${OPT.uptime}, комбо ${OPT.combo}`);
 say(`   тропа: лагерь s=${sCamp.toFixed(0)}, форт s=${sFort.toFixed(0)}, ворота s=${GATE.s.toFixed(0)}, арена s=${sArena.toFixed(0)} м`);
 if (OPT.log) {
   say('\n== Минуты (прогон 1): время зона | сила HP реген защ | убийств смертей круток | оружие | шанс победы над боссами');

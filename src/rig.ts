@@ -32,7 +32,24 @@ export const WEAPON_GRIPS: Record<string, { tilt?: number; out?: number; grip?: 
   // (also the hunter sets' bows, models/archers/bow_*)
   bow_human_archer: { scale: 0.75, grip: 0.5, tilt: 0, out: 0 },
   bow_orc_archer: { scale: 0.6, grip: 0.5, tilt: 0, out: 0 },
+  // per-quality models (tools/blender/rarity_gear.py, `<kind>_<quality>`): the kind's grip
+  sword: { scale: 0.6, grip: 0.1 },
+  hammer: { scale: 0.75, grip: 0.16 },
+  polearm: { scale: 1.0, grip: 0.22, tilt: 0.15, out: 0.3 },
 };
+
+/** Shields (`shield_<type>_<quality>`): authored with the grip at the origin, face toward +Z, up +Y (cm). */
+export const SHIELD_GRIP = {
+  scale: 0.72,
+  /** The grip bar's centre behind the plate (shield space, cm): it goes into the palm. */
+  handle: new THREE.Vector3(0, 0, -3),
+  /** Tilt of the shield's up axis from the forearm (hand +X) toward the fist axis (hand +Z), radians. */
+  lean: 0.6,
+  /** Push from the palm out of the body (hand +Y, cm): the big cartoon fist stays behind the plate. */
+  at: new THREE.Vector3(0, 9, 0),
+};
+
+const QUALITY = /_(common|uncommon|rare|epic|legendary|mythic)$/;
 
 /** Palm centre in hand_r space (cm). */
 const PALM = new THREE.Vector3(-9, -4, 0);
@@ -70,7 +87,9 @@ function gripPoint(name: string, w: THREE.Object3D, frac: number): THREE.Vector3
  */
 export function attachWeapon(character: THREE.Object3D, weapon: string, left = false): THREE.Object3D {
   const hand = character.getObjectByName(left ? 'hand_l' : 'hand_r')!;
-  const cfg = WEAPON_GRIPS[weapon] ?? (weapon.startsWith('archers/bow') ? WEAPON_GRIPS.bow_human_archer : {});
+  const kind = weapon.replace(QUALITY, '');
+  if (kind.startsWith('shield_')) return attachShield(hand, weapon, left);
+  const cfg = WEAPON_GRIPS[weapon] ?? WEAPON_GRIPS[kind] ?? (weapon.startsWith('archers/bow') ? WEAPON_GRIPS.bow_human_archer : {});
   const inner = assets.clone(weapon);
   inner.scale.setScalar(1); // hand bone already lives in the 0.01-scaled character space (cm)
   inner.position.set(0, 0, 0);
@@ -100,6 +119,29 @@ export function attachWeapon(character: THREE.Object3D, weapon: string, left = f
   holder.position.copy(PALM);
   if (left) mirrorX(holder);
   holder.scale.setScalar(cfg.scale ?? 1);
+  hand.add(holder);
+  return holder;
+}
+
+/**
+ * A shield held by its grip bar in the fist: the bar sits in the palm, the face looks out from the body (hand +Y),
+ * the top leans from the forearm toward the fist axis (SHIELD_GRIP.lean). Same mirroring as weapons for the left hand.
+ */
+function attachShield(hand: THREE.Object3D, name: string, left: boolean): THREE.Object3D {
+  const g = SHIELD_GRIP;
+  const inner = assets.clone(name);
+  inner.position.copy(g.handle).negate();
+  const holder = new THREE.Group();
+  holder.name = 'weapon';
+  holder.add(inner);
+  // shield +Y (up) → between the forearm and the fist axis, shield +Z (face) → hand +Y (out from the body)
+  const c = Math.cos(g.lean), s = Math.sin(g.lean);
+  const basis = new THREE.Matrix4().makeBasis(new THREE.Vector3(-s, 0, c), new THREE.Vector3(c, 0, s), new THREE.Vector3(0, 1, 0));
+  holder.quaternion.setFromRotationMatrix(basis);
+  holder.position.copy(PALM).add(g.at);
+  holder.userData.tip = new THREE.Box3().setFromObject(inner).max.y;
+  if (left) mirrorX(holder);
+  holder.scale.setScalar(g.scale);
   hand.add(holder);
   return holder;
 }

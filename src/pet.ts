@@ -6,6 +6,8 @@ import type { PetDef } from './config';
 
 export interface PetFoe { pos: THREE.Vector3; radius: number; hittable: boolean }
 
+/** Without a target of the hero's the pet goes for fighting mobs this close to him, m. */
+export const PET_SEEK = 7;
 /** Where the pet waits beside the hero, m. */
 const HEEL = 1.8;
 /** Further than this from the hero it gives up the foe and comes back; further still it is put next to him. */
