@@ -18,6 +18,7 @@ import {
 import { Input } from './input';
 import { sfx } from './audio';
 import { writeSave, type SaveData } from './save';
+import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, type HeroClass } from './party';
 import { GATE, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
 import { UI, type MapMark } from './ui';
@@ -340,6 +341,10 @@ export class Game {
   onOpenBag: () => void = () => {};
   onOpenMap: () => void = () => {};
   onOpenGacha: () => void = () => {};
+  /** After the party member on the field changes (src/party.ts): the classes hook in here later. */
+  onClassChange: (c: HeroClass) => void = () => {};
+  /** Game time of the last class switch (SWITCH_COOLDOWN). */
+  private classT = -Infinity;
   private time = 0;
   private hp: number;
   private target: Unit | null = null;
@@ -459,6 +464,22 @@ export class Game {
 
   // ---------- hero stats ----------
   get faction() { return this.save.faction; }
+  /** The party member on the field. */
+  get heroClass(): HeroClass { return this.save.cls ?? 'warrior'; }
+
+  /** Puts another party member on the field; false while the switch cooldown runs or if it is already there. */
+  switchClass(c: HeroClass) {
+    if (c === this.heroClass || this.dead || this.time - this.classT < SWITCH_COOLDOWN) return false;
+    this.classT = this.time;
+    this.save.cls = c;
+    sfx.click();
+    this.particles.burst(this.hero.position.clone().setY(1), new THREE.Color(CLASSES[c].color[0]).getHex(), 18, 0.14, 4, 0.6);
+    this.ui.party(c);
+    this.ui.toast(CLASSES[c].name, 1200);
+    this.onClassChange(c);
+    this.persist();
+    return true;
+  }
   /** Totals from equipped armour and jewellery. */
   gear() { return gearOf(this.save.equip); }
   /** Final stats (base points + gear), see heroStats. */
@@ -525,6 +546,7 @@ export class Game {
     if (this.input.pressed('KeyB')) { this.onOpenBag(); return; }
     if (this.input.pressed('KeyM')) { this.onOpenMap(); return; }
     if (this.input.pressed('KeyG')) { this.onOpenGacha(); return; }
+    for (const c of CLASS_IDS) if (this.input.pressed(CLASSES[c].key)) this.switchClass(c);
     this.updateHero(dt);
     this.updateMobs(dt);
     this.updateOrbits(dt);
@@ -2025,6 +2047,7 @@ export class Game {
       this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it) * this.handMul(), this.save.equip);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
       this.ui.gachaBadge(this.save.pulls ?? 0);
+      this.ui.party(this.heroClass);
     }
     this.ui.minimap(this.hero.position, this.hero.facing, this.mapDots(45), this.world, this.mapMarks(45));
   }

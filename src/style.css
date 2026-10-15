@@ -764,6 +764,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .round-btn.bag { background: linear-gradient(#ffb24a 0 50%, #d8701c 50%); }
 #btn-gacha { position: absolute; right: 14px; top: calc(50% - 110px); }
 .round-btn.forge { background: linear-gradient(#ff8a4a 0 50%, #b8321c 50%); }
+/* party: class switch buttons bottom-right, above the equip bar; the class on the field is big and lit */
+#party { position: absolute; right: 12px; bottom: calc(150px + env(safe-area-inset-bottom)); display: flex; align-items: flex-end; gap: 10px; }
+#party .cls { position: relative; width: 56px; height: 56px; border: 4px solid var(--ink); border-radius: 50%; background: var(--gloss, none), linear-gradient(var(--c1) 0 50%, var(--c2) 50%); box-shadow: inset 0 -5px 0 #0000002e, 0 4px 0 var(--ink); filter: saturate(0.45) brightness(0.8); transition: transform 0.12s, filter 0.12s; }
+#party .cls .svgi { width: 38px; height: 38px; margin: 0; }
+#party .cls b { position: absolute; right: -4px; bottom: -6px; font-size: 14px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); }
+#party .cls.on { filter: none; transform: scale(1.18); box-shadow: inset 0 -5px 0 #0000002e, 0 4px 0 var(--ink), 0 0 0 3px #ffe04a, 0 0 16px #ffe04acc; }
+#party .cls:active { transform: translateY(2px); }
+#party .cls.on:active { transform: scale(1.18) translateY(2px); }
 .round-btn.nav { position: relative; }
 .round-btn.nav span { position: absolute; bottom: -11px; right: 0; font-size: 13px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); text-transform: uppercase; }
 .bw-name { font-size: 16px; }

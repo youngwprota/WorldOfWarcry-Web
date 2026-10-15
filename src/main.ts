@@ -123,6 +123,7 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   applyGfx(!!save.lowGfx);
   const inv = new Inventory(ui, game);
   ui.onBag = ui.onArmor = game.onOpenCharacter = game.onOpenBag = () => { input.reset(); inv.open(); };
+  ui.onClass = (c) => game?.switchClass(c);
   const debug = new DebugPanel(app, game);
   ui.onDebug = () => debug.toggle(true);
   const map = new MapView(game);

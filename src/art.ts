@@ -128,6 +128,19 @@ const ART: Record<string, string> = {
   shield: `${P('M32 3L56 11V30C56 45 46 55 32 61C18 55 8 45 8 30V11Z', STEEL)}
     ${P('M32 10L50 16V30C50 41 43 49 32 54C21 49 14 41 14 30V16Z', BLUE)}${N('M32 10L50 16V30C50 41 43 49 32 54Z', BLUE_D)}
     ${P(circ(32, 30, 6.5), GOLD)}${H('M18 20V31C18 36 20 40 23 43', 2.5)}`,
+  // party classes (src/party.ts): the warrior's is `shield`
+  bow: `<g transform="rotate(45 32 32)">
+    <path d="M32 6L32 58" fill="none" stroke="${STEEL}" stroke-width="2.2"/>
+    ${P('M32 4C46 4 54 18 54 32C54 46 46 60 32 60L32 54C42 54 47 43 47 32C47 21 42 10 32 10Z', WOOD)}
+    ${N('M32 4C46 4 54 18 54 32C54 46 46 60 32 60L32 57C44 56 51 45 51 32C51 19 44 8 32 7Z', WOOD_D)}
+    ${P(rect(45, 27, 10, 10, 3), LEATHER_D)}${P(rect(29, 2, 6, 6, 2), GOLD)}${P(rect(29, 56, 6, 6, 2), GOLD)}</g>
+    ${P(rect(10, 30, 40, 4, 2), WOOD, ' transform="rotate(-45 32 32)"')}
+    ${P('M50 7L58 6L57 14L52 12Z', STEEL, ' transform="translate(-1 1)"')}${P('M8 50L15 49L15 56L9 56Z', RED)}`,
+  staff: `${P(rect(28.5, 22, 7, 40, 3.5), WOOD, ' transform="rotate(20 32 42)"')}
+    ${N(rect(32, 25, 3.5, 34), WOOD_D, ' transform="rotate(20 32 42)"')}
+    ${P('M30 25C24 24 21 18 23 12C25 7 31 5 34 9C30 9 28 13 30 16C32 20 38 19 39 15C42 20 37 26 30 25Z', GOLD)}
+    ${P(circ(31, 14, 9), '#8f6cff')}${N('M31 5A9 9 0 0 1 31 23Z', '#6747d6')}${N(circ(28, 11, 2.8), '#e6dcff')}
+    ${H('M14 8L17 11M48 12L51 9M46 26L50 27', 2.5)}`,
   anvil: `${P('M4 14H44C44 22 50 26 60 27V32H44L38 38V46H46V58H18V46H26V38L20 32H10C6 27 4 21 4 14Z', '#717c8b')}
     ${N(rect(7, 16, 35, 3), '#aab5c2')}${N('M32 32H44L38 38V46H32Z', '#4f5866')}${N(rect(32, 46, 14, 12), '#4f5866')}`,
   lock: `${P('M18 30V20C18 11 24 5 32 5C40 5 46 11 46 20V30H39V20C39 15 36 12 32 12C28 12 25 15 25 20V30Z', STEEL_D)}

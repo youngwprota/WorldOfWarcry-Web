@@ -9,6 +9,7 @@ import { STAT_ICON, art, hasPng, mini, tintedArt } from './art';
 import type { MobDef } from './config';
 import { sfx } from './audio';
 import type { World } from './world';
+import { CLASSES, CLASS_IDS, type HeroClass } from './party';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 /** Seconds a "+N stat" line stays under the buffs after the last orb of that stat. */
@@ -110,6 +111,7 @@ export class UI {
   onMap: () => void = () => {};
   onArmor: () => void = () => {};
   onDebug: () => void = () => {};
+  onClass: (c: HeroClass) => void = () => {};
   private gains = new Map<OrbKind, { el: HTMLDivElement; n: number; until: number }>();
   private mm = $<HTMLCanvasElement>('minimap').getContext('2d')!;
 
@@ -126,6 +128,15 @@ export class UI {
       if (!(e.target as HTMLElement).closest('[data-armor]')) return;
       sfx.click();
       this.onArmor();
+    });
+    const party = $('party');
+    party.innerHTML = CLASS_IDS.map((c, i) => {
+      const d = CLASSES[c];
+      return `<button class="ui-block round-btn cls" data-cls="${c}" style="--c1:${d.color[0]};--c2:${d.color[1]}" aria-label="${d.name} (${i + 1})">${art(d.icon, 40)}<b>${i + 1}</b></button>`;
+    }).join('');
+    party.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-cls]');
+      if (b) this.onClass(b.dataset.cls as HeroClass);
     });
     const stats = $('stats');
     stats.innerHTML = (['power', 'hp', 'regen', 'speed'] as OrbKind[])
@@ -224,6 +235,11 @@ export class UI {
   /** Pulls the hero can spend in the forge. */
   gachaBadge(n: number) {
     $('btn-gacha').dataset.badge = n > 0 ? String(n) : '';
+  }
+
+  /** Party buttons bottom-right: the class on the field is lit. */
+  party(active: HeroClass) {
+    $('party').querySelectorAll<HTMLElement>('[data-cls]').forEach((b) => b.classList.toggle('on', b.dataset.cls === active));
   }
 
   bagBadge(n: number, full: boolean) {

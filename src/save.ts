@@ -1,6 +1,7 @@
-import { FACTIONS, HERO, type FactionId, type SavedSource, type StatId } from './config';
+import { FACTIONS, HERO, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
 import { BASE_STATS, type PctPoints, type StatPoints } from './balance';
-import { makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
+import { ARMOR, makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
+import { CLASSES, type HeroClass } from './party';
 
 /**
  * Number scale of the save: 2 = hero HP ×10, regen in HP/s, 6 item qualities, item level = copies; 5 = flat power;
@@ -44,6 +45,8 @@ export interface SaveData {
   lowGfx?: boolean;
   /** Fog of war: explored location ids, comma-separated (src/fog.ts). */
   fog?: string;
+  /** The party member on the field (src/party.ts); missing = warrior. */
+  cls?: HeroClass;
 }
 
 const KEY = 'warcry-save-v1';
@@ -65,6 +68,7 @@ export function newSave(faction: FactionId): SaveData {
     gachaPity: 0,
     pulls: 0,
     muted: false,
+    cls: 'warrior',
   };
 }
 
@@ -75,10 +79,15 @@ export function loadSave(): SaveData | null {
     const d = JSON.parse(raw) as SaveData;
     if (d.v !== 1 || !FACTIONS[d.faction]) return null;
     // Fields added after the first prototype build.
-    d.weapons = d.weapons.map((w) => (w ? normalizeItem(w) : null)) as SaveData['weapons'];
+    // items whose weapon / armour piece is gone from the game (renamed or removed in another branch) are dropped
+    d.weapons = d.weapons.map((w) => (w ? known(normalizeItem(w)) : null)) as SaveData['weapons'];
+    if (!d.weapons[0] && !d.weapons[1]) d.weapons[0] = makeItem('weapon', FACTIONS[d.faction].startWeapon, 0, 1);
     d.equip ??= {};
-    for (const k of Object.keys(d.equip) as ArmorSlot[]) { const it = d.equip[k]; if (it) d.equip[k] = normalizeItem(it); }
-    d.bag = (d.bag ?? []).map(normalizeItem);
+    for (const k of Object.keys(d.equip) as ArmorSlot[]) {
+      const it = d.equip[k] && known(normalizeItem(d.equip[k]!));
+      if (it) d.equip[k] = it; else delete d.equip[k];
+    }
+    d.bag = (d.bag ?? []).map(normalizeItem).filter((it) => known(it));
     d.gachaPity ??= 0;
     d.pulls ??= 0;
     // gold, hero level, XP and talents are gone from the game
@@ -91,11 +100,15 @@ export function loadSave(): SaveData | null {
     if ((d.scale ?? 1) < 6) migrateSources(d);
     d.src ??= {};
     d.pct ??= {};
+    if (!d.cls || !CLASSES[d.cls]) d.cls = 'warrior';
     return d;
   } catch {
     return null;
   }
 }
+
+/** The item if its def still exists, else null. */
+const known = (it: Item) => ((it.kind === 'weapon' ? WEAPONS[it.def] : ARMOR[it.def]) ? it : null);
 
 /**
  * Scale (1 → 2): hero HP ×10 and regen from %/s to HP/s (×10 of the old base), qualities
