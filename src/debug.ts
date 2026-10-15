@@ -66,7 +66,7 @@ const SECTIONS: [string, Action[]][] = [
     ['Меч', (g) => g.debugGiveWeapon('sword')],
     ['Топор', (g) => g.debugGiveWeapon('axe')],
     ['Молот', (g) => g.debugGiveWeapon('hammer')],
-    ['Нагамаки', (g) => g.debugGiveWeapon('nagamaki')],
+    ['Древковое', (g) => g.debugGiveWeapon('polearm')],
   ]],
   ['Оружие в левую', [
     ['Меч', (g) => g.debugGiveWeapon('sword', 1)],

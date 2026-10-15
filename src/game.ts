@@ -693,7 +693,7 @@ export class Game {
     h.atkCd -= dt;
     const period = 1 / w.aps;
     const combo = COMBOS[it.def];
-    // A pause or a whiff breaks the chain (GDD: combo = N uninterrupted attacks); the nagamaki's cycle never breaks.
+    // A pause or a whiff breaks the chain (GDD: combo = N uninterrupted attacks); the polearm's series never breaks.
     if (!w.cycle && h.combo > 0 && h.impact < 0 && this.time - h.lastSwing > period + combo.window) h.combo = 0;
     // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
     // up to 1 m further for facing, and swinging there was a whiff into thin air.

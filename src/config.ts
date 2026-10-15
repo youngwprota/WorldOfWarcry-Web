@@ -66,7 +66,7 @@ export interface WeaponDef {
   single?: boolean;
   /** Procedural swings (src/swing.ts) cycled along the combo chain, instead of the `anim` clip. */
   swing?: SwingKind[];
-  /** Nagamaki: the chain never breaks (a pause or a whiff does not reset it), the finisher is a narrow thrust. */
+  /** Polearm: the series never breaks (a pause or a whiff does not reset it). */
   cycle?: boolean;
   /**
    * Shield: never swings by itself; incoming damage × (1 − `reduce`); a hit taken may trigger a counter-strike of
@@ -92,10 +92,11 @@ export const WEAPONS: Record<string, WeaponDef> = {
     id: 'hammer', name: 'Молот', type: 'crush', dmgMul: 1.7, aps: 0.7, shape: 'circle', arc: 360, range: 2.1,
     anim: 'AxeAttack', model: { human: 'hammer_human_paladin', orc: 'hammer_human_paladin' }, icon: '🔨', stun: 0.25,
   },
-  nagamaki: {
-    id: 'nagamaki', name: 'Нагамаки', type: 'slash', dmgMul: 0.95, aps: 1.3, shape: 'arc', arc: 200, range: 2.6,
-    anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️', cycle: true,
-    swing: ['slashRL', 'slashLR', 'thrust'],
+  // board «Система оружий»: damage a bit under the sword, slow, long reach; thrust → thrust (target only) → spin 360°
+  polearm: {
+    id: 'polearm', name: 'Древковое', type: 'slash', dmgMul: 0.9, aps: 0.8, shape: 'arc', arc: 60, range: 3.1,
+    anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️', single: true, cycle: true,
+    swing: ['thrust', 'thrust', 'slashRL'],
   },
   shield: {
     id: 'shield', name: 'Щит', type: 'crush', dmgMul: 0.5, aps: 0.8, shape: 'arc', arc: 120, range: 1.8,
@@ -125,7 +126,7 @@ export const COMBOS: Record<string, ComboDef> = {
   sword: { name: 'Вихрь', hits: 3, window: 0.35, mult: 1.3, rangeAdd: 0.5, shape: 'circle', arc: 360, knock: 7, stun: 0, spin: true, color: 0x9fe3ff },
   axe: { name: 'Раскол', hits: 3, window: 0.35, mult: 1.6, rangeAdd: 0.8, shape: 'arc', arc: 220, knock: 11, stun: 0.4, spin: false, color: 0xff8a5a },
   hammer: { name: 'Землетрясение', hits: 3, window: 0.4, mult: 1.3, rangeAdd: 0.8, shape: 'circle', arc: 360, knock: 5, stun: 1.6, spin: false, color: 0xffc95a },
-  nagamaki: { name: 'Укол', hits: 3, window: 0.4, mult: 2.6, rangeAdd: 0.8, shape: 'arc', arc: 50, knock: 6, stun: 0.3, spin: false, color: 0xffe0a0 },
+  polearm: { name: 'Прокрут', hits: 3, window: 0.4, mult: 1.2, rangeAdd: 0, shape: 'circle', arc: 360, knock: 6, stun: 0, spin: true, color: 0xffe0a0 },
   shield: { name: 'Таран', hits: 3, window: 0.5, mult: 1.5, rangeAdd: 0.5, shape: 'arc', arc: 140, knock: 9, stun: 0.8, spin: false, color: 0xa0c8ff },
 };
 

@@ -34,7 +34,7 @@
   handMulOf/heroDps в balance.ts, pairText в inventory, пары в tools/sim.ts (`--left`, bench пар).
 - [x] 2. Удалить экзотическое оружие и его механику (stack/pull/orbit/ring/assassin, свинги throw/assassin, COMBOS),
   кнопки в debug.ts, пары в viewer.ts; гача берёт оружие из списков воина.
-- [ ] 3. Древковое: nagamaki → polearm (числа и COMBOS.polearm с прокрутом), `cycle` без 4-го удара.
+- [x] 3. Древковое: nagamaki → polearm (числа и COMBOS.polearm с прокрутом), `cycle` без 4-го удара.
 - [ ] 4. Три щита + `guard.reflect` (отражение в обработке удара по герою), щит никогда не бьёт, иконки/тинт в art.ts.
 - [ ] 5. Слоты по классу: списки в ClassDef, equip/unequip в game.ts без выбора руки, проверка класса,
   одна атакующая рука (слот 2 не свингует), миграция в save.ts.
