@@ -94,6 +94,37 @@ class Assets {
     );
   }
 
+  /**
+   * Per-quality weapons and shields (tools/blender/rarity_gear.py): static GLB with flat colours, vertex colours and
+   * glowing gems; their PBR materials become Lambert like everything else (cheap on phones).
+   */
+  async loadGear(names: string[]) {
+    await Promise.all(
+      names.map(async (n) => {
+        const g = await this.gltf.loadAsync(`${BASE}models/${n}.glb`);
+        g.scene.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (!m.isMesh) return;
+          m.material = Array.isArray(m.material) ? m.material.map((x) => this.lambert(x)) : this.lambert(m.material);
+        });
+        this.sources.set(n, g.scene);
+      }),
+    );
+  }
+
+  private lambert(src: THREE.Material) {
+    const s = src as THREE.MeshStandardMaterial;
+    let m = this.materials.get('gear:' + s.name);
+    if (!m) {
+      m = new THREE.MeshLambertMaterial({
+        color: s.color, vertexColors: s.vertexColors, emissive: s.emissive, emissiveIntensity: s.emissiveIntensity, flatShading: true,
+      });
+      m.name = s.name;
+      this.materials.set('gear:' + s.name, m);
+    }
+    return m;
+  }
+
   /** Creature clone with its own skeleton, plus its clips by name (idle, walk, attack, death). */
   cloneCreature(name: string): { model: THREE.Group; clips: Record<string, THREE.AnimationClip> } {
     const src = this.creatures.get(name);

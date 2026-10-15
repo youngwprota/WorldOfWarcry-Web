@@ -3,6 +3,22 @@ import { DAMAGE_TYPE_NAME, RARITY, SHARPEN, WEAPONS, type FactionId, type ItemDr
 import { DAMAGE_TYPE_ICON, icon } from './icons';
 import { art, hasPng } from './art';
 
+/** Quality ids in model names (tools/blender/rarity_gear.py): `<def>_<id>`. */
+const RARITY_IDS = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+
+/**
+ * 3D model of a weapon or shield. Above common every weapon has its own GLB per quality; shields have all six;
+ * a common weapon is the faction's FBX (WeaponDef.model).
+ */
+export function itemModel(it: Item, faction: FactionId) {
+  const w = WEAPONS[it.def];
+  return w.guard || it.rarity > 0 ? `${it.def}_${RARITY_IDS[it.rarity]}` : w.model[faction];
+}
+
+/** Every per-quality GLB model (loaded up-front by main.ts). */
+export const GEAR_MODELS = Object.keys(WEAPONS).flatMap((def) =>
+  RARITY_IDS.filter((_, r) => r > 0 || WEAPONS[def].guard).map((id) => `${def}_${id}`));
+
 export type ItemKind = 'weapon' | 'armor';
 export interface Item {
   uid: number;

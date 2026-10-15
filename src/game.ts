@@ -9,7 +9,7 @@ import {
 } from './config';
 import { FloatingText, Particles, Pickups, Shockwaves, Telegraphs, type PickupKind } from './fx';
 import {
-  ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemName, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, copyGain, dropIconId, dropItem, itemModel, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
@@ -465,7 +465,7 @@ export class Game {
 
   /** Model names of the right / left hand weapons. */
   handModels(): [string | null, string | null] {
-    const m = (it: Item | null) => (it ? WEAPONS[it.def].model[this.faction] : null);
+    const m = (it: Item | null) => (it ? itemModel(it, this.faction) : null);
     return [m(this.save.weapons[0]), m(this.save.weapons[1])];
   }
 

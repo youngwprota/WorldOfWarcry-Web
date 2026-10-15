@@ -9,9 +9,9 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { assets } from './assets';
 import { sfx } from './audio';
-import { FORGE3D as F, GACHA, RARITY, WEAPONS, type FactionId } from './config';
+import { FORGE3D as F, GACHA, RARITY, type FactionId } from './config';
 import { gachaTier } from './gacha';
-import type { Item } from './items';
+import { itemModel, type Item } from './items';
 
 let propsPromise: Promise<THREE.Group> | null = null;
 function loadProps() {
@@ -335,8 +335,8 @@ export class Forge3D {
 
   private buildItem(item: Item) {
     let m: THREE.Object3D;
-    if (item.kind === 'weapon' && assets.has(WEAPONS[item.def].model[this.faction])) {
-      m = assets.clone(WEAPONS[item.def].model[this.faction]);
+    if (item.kind === 'weapon' && assets.has(itemModel(item, this.faction))) {
+      m = assets.clone(itemModel(item, this.faction));
       const b = new THREE.Box3().setFromObject(m);
       const h = b.max.y - b.min.y || 1;
       m.scale.multiplyScalar(F.itemSize / h);
