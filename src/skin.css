@@ -244,3 +244,22 @@ html, body { background: radial-gradient(circle at 50% 30%, #6e4527, #1e1008); }
 
 /* pack PNG icons sit inside the same boxes as the vector ones */
 img.svgi.png { object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
+
+/*
+ * Loading screen: the key art (logo included) full-bleed, a gold progress bar at the bottom. "Live photo": the art
+ * slowly pushes in (.art), the shield clash and the logo glow in pulses (.glow), sparks fly up (canvas, src/loadfx.ts).
+ */
+#loading { justify-content: flex-end; padding-bottom: 8%; box-sizing: border-box; overflow: hidden; background: #2a2d38; }
+#loading .art { position: absolute; inset: 0; background: url('/assets/ui/loading.jpg') center / cover no-repeat; transform-origin: 53% 42%; animation: load-push 24s ease-out forwards; }
+@keyframes load-push { from { transform: scale(1) translate(0, 0); } to { transform: scale(1.08) translate(-1.2%, 0.8%); } }
+/* light spots over the art (they push in with it): additive, breathing */
+#loading .glow { position: absolute; border-radius: 50%; mix-blend-mode: screen; pointer-events: none; }
+#loading .glow.clash { left: 53%; top: 42%; width: 46%; aspect-ratio: 1; translate: -50% -50%; background: radial-gradient(#fff6c8 0%, #ffcf4acc 18%, #c76bff55 45%, transparent 70%); animation: load-clash 2.6s ease-in-out infinite; }
+#loading .glow.logo { left: 50%; top: 12%; width: 92%; height: 15%; translate: -50% -50%; border-radius: 40%; background: radial-gradient(closest-side, #ffd46a66, transparent); animation: load-logo 4.2s ease-in-out infinite; }
+@keyframes load-clash { 0%, 100% { opacity: 0.35; scale: 0.85; } 12% { opacity: 0.95; scale: 1.08; } 40% { opacity: 0.55; scale: 0.95; } }
+@keyframes load-logo { 0%, 100% { opacity: 0.15; } 50% { opacity: 0.6; } }
+#loading .sparks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; }
+#loading .bar, #loading .pct { position: relative; }
+#loading .bar { width: 72%; height: 22px; margin: 0; border: 3px solid var(--ink); border-radius: 12px; background: #1d120bd9; box-shadow: 0 0 0 2px #e8b84a, 0 6px 14px #000b; overflow: hidden; }
+#loading .fill { height: 100%; border-radius: 8px; background: linear-gradient(#fff4b8, #ffd23f 45%, #e0962a); box-shadow: inset 0 3px 0 #ffffff99, 0 0 12px #ffd23faa; transition: width 0.2s; }
+#loading .pct { color: #fff; text-shadow: var(--stroke-s), 0 2px 6px #000; }

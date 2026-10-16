@@ -6,7 +6,7 @@ import {
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, orbLine, petCellHtml, slotOf, weaponBase,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, orbLine, slotOf, weaponBase, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -15,6 +15,7 @@ import { art } from './art';
 import type { Game } from './game';
 import type { UI } from './ui';
 import { CLASSES, CLASS_IDS, classSlot, weaponClass, type HeroClass } from './party';
+import { CLASS_LOOK } from './looks';
 
 /** 0.237 → "24%". */
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -105,10 +106,10 @@ class HeroPreview {
    * `mainLeft`: the main weapon in the left hand (the mage's staff); `orb`: the mage's orb model over the shoulder;
    * `trims`: armour quality pieces (Game.trims).
    */
-  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>, mainLeft = false, orb: string | null = null, trims: string[] = []) {
+  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>, mainLeft = false, orb: string | null = null, trims: string[] = [], keep: string[] = []) {
     this.ch.setWeapon(weapon, left, mainLeft);
     this.ch.setOrb(orb);
-    this.ch.setOutfit(outfit);
+    this.ch.setOutfit(outfit, keep);
     this.ch.setTrims(trims);
   }
 
@@ -343,9 +344,7 @@ export class Inventory {
       const x = ARMOR_SLOTS.find((a) => a.id === id)!;
       return this.cell(s.equip[id], `data-armor="${id}" title="${x.name}"`, x.icon);
     }).join('');
-    const pet = g.petDef;
     const weapons = ([0, 1] as const).map((i) => {
-      if (i === 1 && pet) return petCellHtml(pet, `title="Питомец: ${pet.name}"`, 'active', '<span class="wtag on">питомец</span>');
       const tag = `<span class="wtag ${s.weapons[i] ? 'on' : ''}">${g.slotName(i).toLowerCase()}</span>`;
       return this.cell(s.weapons[i], `data-weapon="${i}"`, i ? 'shield' : 'sword', tag, s.weapons[i] ? 'active' : '');
     }).join('');
@@ -358,8 +357,14 @@ export class Inventory {
       const st = `${c === g.heroClass ? ' on' : ''}${g.classOpen(c) ? '' : ' locked'}`;
       return `<button class="cls${st}" data-cls="${c}" style="--c1:${d.color[0]};--c2:${d.color[1]}" title="${d.name}">${art(d.icon, 30)}</button>`;
     }).join('');
-    this.preview?.setGear(...g.heldModels(), g.outfit(), g.staffInHand(), g.orbModel(), g.trims());
+    this.dressPreview();
+    void g.outfitReady.then(() => this.dressPreview()); // parts loaded on demand (the hunter sets)
     g.newItems = 0;
+  }
+
+  private dressPreview() {
+    const g = this.game;
+    this.preview?.setGear(...g.heldModels(), g.outfit(), g.staffInHand(), g.orbModel(), g.trims(), CLASS_LOOK[g.heroClass].keep);
   }
 
   private renderBag() {
@@ -368,7 +373,7 @@ export class Inventory {
     const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
     // only what the class on the field can use; the rest stays in the bag (and takes room) for the others
     const hidden = s.bag.filter((it) => !g.canUse(it)).length;
-    q('#b-sub').innerHTML = `<span>${s.bag.length}/${BAG_SIZE}</span>${hidden ? `<small class="b-other">ещё ${hidden} для других классов</small>` : ''}`;
+    q('#b-sub').innerHTML = `<span>${s.bag.length}/${s.bagUnlimited ? '∞' : BAG_SIZE}</span>${hidden ? `<small class="b-other">ещё ${hidden} для других классов</small>` : ''}`;
     const section = (kind: 'weapon' | 'armor', title: string) => {
       const cells = s.bag.map((it, i) => (it.kind === kind && g.canUse(it) ? this.cell(it, `data-bag="${i}"`) : '')).join('');
       return cells ? `<div class="divider"><span>${title}</span></div><div class="grid">${cells}</div>` : '';
@@ -465,6 +470,9 @@ export class Inventory {
       const c = COMBOS[it.def];
       ability = !c ? '' : `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
       const w = WEAPONS[it.def];
+      if (w.pet) ability = `<div class="ab-title">Питомец</div><p>Второй слот охотника: бежит рядом и кусает его цель — <b>${Math.round(weaponDamage(it))}</b> урона ${w.aps} раз/с. Урон свой — от качества и уровня питомца, сила героя и лук на него не влияют.</p>`;
+      const pl = w.shot?.pellets;
+      if (pl) ability = `<div class="ab-title">Дробь</div><p>Стреляет реже лука: <b>${pl.n}</b> дробинок веером <b>${pl.spread}°</b> на <b>${w.range} м</b>, каждая — <b>×${pl.mul}</b> урона.</p>` + ability;
       if (w.staff === 'fire') {
         const f = STAVES.fire;
         ability = `<div class="ab-title">Поджог</div><p>Бьёт на <b>${w.range} м</b>. Враги в <b>${f.splash.radius} м</b> от цели получают <b>×${f.splash.mul}</b> урона. Задетые горят <b>${f.burn.time} с</b> и получают <b>+${Math.round(f.burn.vuln * 100)}%</b> урона от всего.</p>` + ability;
@@ -489,11 +497,9 @@ export class Inventory {
       else actions += `<span class="none">Не для класса «${CLASSES[g.heroClass].name}»</span>`;
     } else if (src.at === 'armor') {
       actions = btn('unequip', 'Снять', 'red');
-    } else {
-      if (src.slot === 1) actions += btn('unequip', 'Снять', 'red');
     }
     // a class item (shield, orb) shows its slot's name instead of a damage type
-    const offOf = it.kind === 'weapon' && (WEAPONS[it.def].guard || WEAPONS[it.def].orb) ? weaponClass(it.def) : null;
+    const offOf = it.kind === 'weapon' && (WEAPONS[it.def].guard || WEAPONS[it.def].orb || WEAPONS[it.def].pet) ? weaponClass(it.def) : null;
     const type = offOf ? CLASSES[offOf].offName : slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
     tip.innerHTML = `<div class="card-head">${cellHtml(it, 'disabled', '', '', 'big', this.game.wearer)}
         <div class="card-title"><h3>${itemName(it, g.faction)}${it.sharpen ? ` +${it.sharpen}` : ''}</h3>
@@ -516,16 +522,12 @@ export class Inventory {
 
   private act(action: string, src: Source) {
     const g = this.game;
-    let ok = true;
     if (src.at === 'bag') {
       if (action === 'equip') g.equipFromBag(src.index);
       else if (action === 'discard') g.discardFromBag(src.index);
     } else if (src.at === 'armor') {
-      ok = g.unequipArmor(src.slot);
-    } else if (action === 'unequip') {
-      ok = g.unequipWeapon(src.slot);
+      g.unequipArmor(src.slot);
     }
-    if (!ok) this.ui.toast('Сумка полна');
     this.hideTip();
     this.rerender();
   }

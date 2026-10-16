@@ -44,6 +44,11 @@ interface Active { kind: SwingKind; t: number; dur: number; impact: number }
 /** Swing state of one character: up to one swing per hand. */
 export class Swinger {
   private hands: (Active | null)[] = [null, null];
+  /**
+   * How far each hand is into its swing, 0..1: for the bow `aim` how far the arm is raised, for the other swings
+   * the wind-up and the recovery (rig.ts aimBlend turns a weapon from its rest hold into the hand with it).
+   */
+  readonly raise = [0, 0];
   private spine: THREE.Object3D | null;
   private arms: (THREE.Object3D | null)[];
 
@@ -65,11 +70,14 @@ export class Swinger {
     let yaw = 0, lean = 0;
     for (let h = 0; h < 2; h++) {
       const a = this.hands[h];
+      this.raise[h] = 0;
       if (!a) continue;
       a.t += dt;
       if (a.t >= a.dur) { this.hands[h] = null; continue; }
       const phase = a.t < a.impact ? a.t / a.impact : 1 + (a.t - a.impact) / (a.dur - a.impact);
       sample(KEYS[a.kind], phase, pose);
+      if (a.kind === 'aim') this.raise[h] = Math.min(1, Math.max(0, pose[2] / 1.45));
+      else this.raise[h] = smooth(phase / 0.5) * (1 - smooth((phase - 1.5) / 0.5));
       const m = h ? -1 : 1; // the left hand mirrors the twist and the sweep
       yaw += pose[0] * m;
       lean += pose[1];
@@ -98,6 +106,11 @@ function sample(keys: Key[], phase: number, out: number[]) {
   let u = span > 0 ? (phase - prev[0]) / span : 1;
   u = u * u * (3 - 2 * u);
   for (let i = 0; i < 5; i++) out[i] = prev[i + 1] + (next[i + 1] - prev[i + 1]) * u;
+}
+/** Smoothstep of `u` clamped to 0..1. */
+function smooth(u: number) {
+  u = Math.min(1, Math.max(0, u));
+  return u * u * (3 - 2 * u);
 }
 const REST0 = [0, 0, 0, 0, 0, 0] as const;
 const REST2 = [2, 0, 0, 0, 0, 0] as const;

@@ -188,8 +188,8 @@ function aggregate(runs: Omit<RunOut, 'fights'>[], untilMin: number): Agg {
 
 function renderSim(root: HTMLElement) {
   const fac = Object.keys(FACTIONS) as FactionId[];
-  const mains = Object.keys(WEAPONS).filter((w) => !WEAPONS[w].guard && !WEAPONS[w].orb);
-  const offs = Object.keys(WEAPONS).filter((w) => WEAPONS[w].guard || WEAPONS[w].orb);
+  const mains = Object.keys(WEAPONS).filter((w) => !WEAPONS[w].guard && !WEAPONS[w].orb && !WEAPONS[w].pet);
+  const offs = Object.keys(WEAPONS).filter((w) => WEAPONS[w].guard || WEAPONS[w].orb || WEAPONS[w].pet);
   const n = editCount();
   const num = (k: keyof SimOpts, label: string, step: number, v: number, title = '') =>
     `<label class="f" title="${esc(title)}">${label}<input type="number" data-o="${k}" step="${step}" value="${v}"></label>`;

@@ -5,12 +5,13 @@ import { Creature } from './creature';
 import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
-  ATTACK_HIT, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
-  mobRank, zoneResist, ZONE_FOES, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
+  ATTACK_HIT, FACTIONS, PETS, tokenChance, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
+  mobRank, zoneResist, ZONE_FOES, ZONE_SUN, type DamageType, type ResistTier, type ItemDrop, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
-import { ArenaFog, FloatingText, FogPuffs, Particles, Shockwaves, Spells, Telegraphs, type Bolt } from './fx';
+import { ArenaFog, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, Telegraphs, type Bolt } from './fx';
+import { Glows, SunLight } from './vfx';
 import {
-  ARMOR, BAG_SIZE, CLASS_SET, armorTrim, copyGain, dropIconId, dropItem, fixedRarity, itemClass, itemIcon, itemModel, itemName, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, CLASS_SET, armorTrim, copyGain, dropAny, dropIconId, dropItem, fixedRarity, rollDrop, itemClass, itemIcon, itemModel, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
@@ -51,6 +52,14 @@ const HIT_SPARK = 0xfff3a8;
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
+const fxA = new THREE.Vector3();
+const fxB = new THREE.Vector3();
+/** RARITY colours as numbers (particles). */
+const RARITY_HEX = RARITY.map((r) => new THREE.Color(r.color).getHex());
+/** Dust kicked up by running, by location (Game.footDust). */
+const DUST: Partial<Record<ZoneId, number>> = {
+  forest: 0xb8a07a, cemetery: 0x8c8298, peaks: 0xeef4ff, dunes: 0xe6cf98, hills: 0xa8a090, grove: 0xd0a060, swamp: 0x8a9468,
+};
 /** Slack over the weapon's range for a hit to land (unit edge to hero centre); targeting and swings use the same. */
 const STRIKE_PAD = 0.35;
 /** Gate cutscene timing, s: after the boss's death, camera flight each way, hold at the gate. */
@@ -123,6 +132,12 @@ export class Game {
   private clearOf = new Map<ZoneId, Mob[]>();
   private fx: FloatingText;
   private particles: Particles;
+  /** Glowing particles, stat orbs flying in, the sun's shafts (src/vfx.ts). */
+  private glows: Glows;
+  private pickups: Pickups;
+  private sunFx: SunLight;
+  private lowGfx = false;
+  private footT = 0;
   private arrows: Arrows;
   /** What mob projectiles fly at: the hero, unhittable while dead. */
   private heroMark: ArrowTarget;
@@ -272,6 +287,11 @@ export class Game {
     labels.appendChild(hb);
     this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, text: hb.querySelector('span')! };
     this.particles = new Particles(this.scene);
+    this.glows = new Glows(this.scene);
+    this.pickups = new Pickups(this.scene);
+    this.pickups.onCollect = (k) => this.collect(k);
+    this.pickups.onTrail = (pos, k) => this.glows.emit(pos, 1, { color: ORBS[k].color, bright: 1.5, size: 0.12, life: 0.35 });
+    this.sunFx = new SunLight(this.scene);
     this.arrows = new Arrows(this.scene);
     this.telegraphs = new Telegraphs(this.scene);
     this.ui.onFlyEnd = this.flyEnd;
@@ -291,7 +311,7 @@ export class Game {
     def = this.zoneDef(def, zone);
     const mul = def.boss || def.rank ? { hp: 1, dmg: 1, reward: 1, scale: 1 } : depthMul(zone, depth);
     const tier = ZONE_TIER[zone] ?? 1;
-    const items = [this.dropBadge(def), ...(def.moreDrops ?? []).map((d) => ({ icon: dropIconId(d), color: RARITY[d.rarity].color }))];
+    const items = [this.dropBadge(def), ...(def.moreDrops ?? []).map(dropBadgeOf)];
     const m = new Mob(def, at, this.save.faction, labels, { ...mul, hp: mul.hp * tier, dmg: mul.dmg * tier }, behavior, items.filter((b) => !!b));
     m.ch.root.scale.setScalar(this.mobScale);
     this.addUnit(m);
@@ -335,7 +355,7 @@ export class Game {
   private dropBadge(d: MobDef): DropBadge | null {
     const cls = d.boss?.unlockClass;
     if (cls) return { icon: CLASSES[cls].icon, color: CLASSES[cls].color[0] };
-    return d.drop ? { icon: dropIconId(d.drop), color: RARITY[d.drop.rarity].color } : null;
+    return d.drop ? dropBadgeOf(d.drop) : null;
   }
 
   /** The class can take the field: it is not closed (ClassDef.locked) or a boss has opened it. */
@@ -345,6 +365,14 @@ export class Game {
   private openClass(c: HeroClass) {
     if (this.classOpen(c)) return false;
     (this.save.classes ??= []).push(c);
+    // its start set at once: one weapon in its hands, the other two into the bag (classKit)
+    const k = kitOf(c);
+    const kits = (this.save.kits ??= {});
+    if ((this.save.kit ?? 'warrior') !== k && !kits[k]) {
+      const bag = this.save.bag.length;
+      kits[k] = classKit(this.save, k);
+      this.newItems += this.save.bag.length - bag;
+    }
     this.ui.lockClasses((k) => !this.classOpen(k));
     return true;
   }
@@ -431,7 +459,8 @@ export class Game {
   get weaponItem(): Item { return this.save.weapons[0] ?? this.save.weapons[1]!; }
   get weapon() { return WEAPONS[this.weaponItem.def]; }
   /** Damage of one plain blow of `it` with the hero's power and damage percents (no crit, no hand multiplier). */
-  itemDamage(it: Item) { const s = this.stats; return weaponDamage(it, s.power, s.powerMul); }
+  /** A weapon's blow with the hero's power; a pet item's bite is its own (no hero power). */
+  itemDamage(it: Item) { const s = this.stats; return WEAPONS[it.def].pet ? weaponDamage(it) : weaponDamage(it, s.power, s.powerMul); }
   /** Both hands together, crits on average; `resist` applies each hand's own damage type. */
   heroDps(resist?: Partial<Record<DamageType, ResistTier>>) {
     const s = this.stats;
@@ -445,7 +474,8 @@ export class Game {
     const m = (it: Item | null) => (it ? itemModel(r >= 0 ? { ...it, rarity: r } : it, this.faction) : null);
     // the mage's orb is not held: it floats over the shoulder (Character.setOrb)
     const left = this.save.weapons[1];
-    return [m(this.save.weapons[0]), left && WEAPONS[left.def].orb ? null : m(left)];
+    // the mage's orb floats over the shoulder (orbModel), the hunter's pet runs beside him (Pet): neither is held
+    return [m(this.save.weapons[0]), left && (WEAPONS[left.def].orb || WEAPONS[left.def].pet) ? null : m(left)];
   }
 
   /** Weapon models as the hero holds them, [right hand, left hand]: the bow goes into the left hand while that one is free. */
@@ -471,9 +501,9 @@ export class Game {
   /** Weapons, armour parts and quality pieces on the hero; parts still loading follow (loadOutfit). */
   private dressHero() {
     this.equipVisual();
-    this.hero.setOutfit(this.outfit());
+    this.hero.setOutfit(this.outfit(), CLASS_LOOK[this.heroClass].keep);
     this.hero.setTrims(this.trims());
-    void this.loadOutfit();
+    this.outfitReady = this.loadOutfit();
   }
 
   private equipVisual() {
@@ -495,6 +525,8 @@ export class Game {
   }
 
   private outfitLoad = 0;
+  /** Settles once the parts of the latest dressHero have loaded and are on the hero (the inventory preview follows). */
+  outfitReady: Promise<void> = Promise.resolve();
   /** Loads the parts of the outfit that come on demand (class sets, the set bow), then dresses the hero in them. */
   private async loadOutfit() {
     const need = [...Object.values(this.wantedOutfit()), this.setBow()].filter((n): n is string => !!n && !assets.has(n));
@@ -503,7 +535,7 @@ export class Game {
     await assets.ensure(need);
     if (token !== this.outfitLoad) return; // a later change won
     this.equipVisual();
-    this.hero.setOutfit(this.outfit());
+    this.hero.setOutfit(this.outfit(), CLASS_LOOK[this.heroClass].keep);
   }
 
   private wantedOutfit(): Partial<Record<VisualPart, string>> {
@@ -564,6 +596,7 @@ export class Game {
     this.world.fog.update(dt);
     this.spells.update(dt);
     this.puffs.update(dt);
+    this.updateVfx(dt);
     for (const a of this.arenas.values()) a.update(dt, this.time);
     this.world.update(dt, this.time, this.hero.position);
     this.ambient.update(this.time, this.hero.position, this.viewH);
@@ -654,6 +687,7 @@ export class Game {
     if (moving) {
       p.addScaledVector(this.moveDir, speed * dt);
       ch.walkRate = Math.min(2.4, (speed * this.moveDir.length()) / 2.1);
+      this.footDust(dt);
     }
     if (this.heroKnock.lengthSq() > 0.001) {
       p.addScaledVector(this.heroKnock, dt);
@@ -740,7 +774,8 @@ export class Game {
       // no trail for the shield and the orb (they never swing) or the bow (it shoots)
       const w = it && WEAPONS[it.def];
       const on = !!w && !w.guard && !w.orb && !w.shot && since > h.impactAt * 0.45 && since < h.impactAt * 1.5;
-      this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, 0xffffff);
+      // the swing's ribbon in the weapon's quality colour (common: white)
+      this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, it && it.rarity ? RARITY_HEX[it.rarity] : 0xffffff);
     }
   }
 
@@ -757,7 +792,7 @@ export class Game {
     if (!it) { h.combo = 0; h.impact = -1; return; }
     const w = WEAPONS[it.def];
     // the shield never swings, it only answers blows (shieldAnswer); the mage's orb never swings either
-    if (w.guard || w.orb) { h.combo = 0; return; }
+    if (w.guard || w.orb || w.pet) { h.combo = 0; return; }
     h.atkCd -= dt;
     const period = 1 / w.aps;
     // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
@@ -852,12 +887,14 @@ export class Game {
       if (u instanceof Prop) {
         const { dmg, tier } = this.damageFor(it, u.def);
         this.hitProp(u, dmg, tier);
+        this.hitFx(u, w.type, false);
         continue;
       }
       const m = u as Mob;
       const { dmg, tier, fx } = this.damageFor(it, m.def);
       this.fightOf(m).hits++;
       this.damageMob(m, dmg, tier, w.staff ? STAVES[w.staff].knock : 3.5, fx);
+      if (fx !== 'miss') this.hitFx(m, w.type, fx === 'crit');
       if (w.staff && fx !== 'miss') this.staffHit(m, w.staff, dmg, m === focus);
       if (m.alive && !m.def.boss && w.stun && Math.random() < w.stun) m.stun = 0.9;
     }
@@ -983,7 +1020,10 @@ export class Game {
     this.ui.party(this.heroClass, n < 0 ? '' : String(n), el ? '#' + STAVES[el].color.toString(16).padStart(6, '0') : '');
   }
 
-  /** Bow: looses an arrow at the target; the damage lands when it arrives (arrowHit). Returns the number of arrows. */
+  /**
+   * Bow: looses an arrow at the target; gun: a fan of pellets (shotFan). The damage lands when each arrives
+   * (arrowHit). Returns the number of shots that will hit.
+   */
   private shoot(it: Item, w: WeaponDef) {
     const shot = w.shot!;
     const u = this.target && this.target.hittable && this.inStrike(this.target, w.range) ? this.target : null;
@@ -991,25 +1031,66 @@ export class Game {
     sfx.swing();
     const yaw = this.hero.facing;
     const from = v1.copy(this.hero.position).add(v2.set(Math.sin(yaw) * 0.6, 1.35, Math.cos(yaw) * 0.6));
+    if (shot.pellets) return this.shotFan(it, w, from, Math.atan2(u.pos.x - from.x, u.pos.z - from.z));
     this.arrows.fire(shot.arrow[this.faction], from, u, shot.speed, () => this.arrowHit(u, it));
     return 1;
   }
 
-  /** A bow arrow reaches its unit. */
-  private arrowHit(u: Unit, it: Item) {
+  /**
+   * Gun: `pellets.n` pellets spread evenly over `pellets.spread`° around `yaw`; each flies straight and hits the first
+   * unit on its line within the weapon's reach (× `pellets.mul` of the damage), else flies out to the reach and is gone.
+   */
+  private shotFan(it: Item, w: WeaponDef, from: THREE.Vector3, yaw: number) {
+    const shot = w.shot!;
+    const pl = shot.pellets!;
+    const reach = w.range + STRIKE_PAD;
+    let hits = 0;
+    for (let k = 0; k < pl.n; k++) {
+      const a = yaw + THREE.MathUtils.degToRad(pl.spread) * (pl.n > 1 ? k / (pl.n - 1) - 0.5 : 0) + (Math.random() - 0.5) * 0.06;
+      const dx = Math.sin(a);
+      const dz = Math.cos(a);
+      let best: Unit | null = null;
+      let bestAlong = Infinity;
+      for (const u of this.units) {
+        if (!u.hittable) continue;
+        const ox = u.pos.x - from.x;
+        const oz = u.pos.z - from.z;
+        const along = ox * dx + oz * dz;
+        if (along < 0 || along - u.radius > reach || along >= bestAlong) continue;
+        if (Math.abs(ox * dz - oz * dx) <= u.radius + 0.25) { best = u; bestAlong = along; }
+      }
+      if (best) {
+        const u = best;
+        hits++;
+        this.arrows.fire(shot.arrow[this.faction], from, u, shot.speed, () => this.arrowHit(u, it, pl.mul), true);
+      } else {
+        // a miss: the pellet flies out to the reach (the aim point sits CHEST over this spot's ground)
+        const end = { pos: new THREE.Vector3(from.x + dx * reach, from.y - 1, from.z + dz * reach), radius: 0, hittable: true };
+        this.arrows.fire(shot.arrow[this.faction], from, end, shot.speed, () => {}, true);
+      }
+    }
+    this.shake = Math.max(this.shake, 0.12);
+    return hits;
+  }
+
+  /** A bow arrow (or a gun pellet, × `mult`) reaches its unit. */
+  private arrowHit(u: Unit, it: Item, mult = 1) {
+    const type = WEAPONS[it.def].type;
     if (u instanceof Prop) {
-      const { dmg, tier } = this.damageFor(it, u.def);
+      const { dmg, tier } = this.damageFor(it, u.def, mult);
       this.hitProp(u, dmg, tier);
+      this.hitFx(u, type, false);
       return;
     }
     const m = u as Mob;
-    const { dmg, tier, fx } = this.damageFor(it, m.def);
+    const { dmg, tier, fx } = this.damageFor(it, m.def, mult);
     this.fightOf(m).hits++;
-    this.damageMob(m, dmg, tier, 1.5, fx);
+    this.damageMob(m, dmg, tier, mult < 1 ? 0.8 : 1.5, fx);
+    if (fx !== 'miss') this.hitFx(m, type, fx === 'crit');
   }
 
-  /** The pet in the class's second slot (the hunter's), or null. */
-  get petDef(): PetDef | null { return CLASSES[this.heroClass].pet ? PETS[this.save.pet ?? START_PET] : null; }
+  /** The pet whose item is in the class slot (the hunter's), or null. */
+  get petDef(): PetDef | null { const it = this.save.weapons[1]; const p = it && WEAPONS[it.def].pet; return p ? PETS[p] : null; }
 
   /** Puts the class's pet on the field (or takes it away). */
   private syncPet() {
@@ -1038,9 +1119,11 @@ export class Game {
       return best;
     }, (foe) => {
       const m = foe as Mob;
-      const it = this.weaponItem;
-      const tier = m.def.resist[pet.def.type] ?? 'normal';
-      const dmg = Math.max(1, Math.round(this.itemDamage(it) * pet.def.dmg * RESIST_MULT[tier] * (0.9 + Math.random() * 0.2)));
+      const it = this.save.weapons[1];
+      if (!it) return;
+      // the pet item's own damage (quality, copies), never the hero's or his bow's
+      const tier = m.def.resist[WEAPONS[it.def].type] ?? 'normal';
+      const dmg = Math.max(1, Math.round(this.itemDamage(it) * RESIST_MULT[tier] * (0.9 + Math.random() * 0.2)));
       this.fightOf(m).hits++;
       // only extra damage: mobs never turn on the pet, the bite does not wake or shove them
       this.damageMob(m, dmg, tier, 0, '', false);
@@ -1093,6 +1176,7 @@ export class Game {
     m.knock.multiplyScalar(KILL_FX.knockMul).clampLength(0, KILL_FX.maxKnock);
     this.shake = Math.max(this.shake, KILL_FX.shake);
     this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), bloodColor(m), KILL_FX.blood, 0.12, 6, 0.7);
+    this.deathFx(m);
     this.save.kills++;
     this.endFight(m, 'kill');
     const d = m.def;
@@ -1104,7 +1188,7 @@ export class Game {
       const kit = this.kitOf(m);
       if (kit) { kit.died?.(); this.despawnMinions(m); }
       // elites: their own item on every kill (spawner charges limit the farming)
-      if (d.drop) m.loot.push(dropItem(d.drop));
+      if (d.drop) m.loot.push(rollDrop(d.drop));
       if (m.temp) m.respawnAt = Infinity;
     }
     this.grantKillRewards(m);
@@ -1187,12 +1271,13 @@ export class Game {
 
   /** Stats of a dead unit go straight to the hero (a mob's wait for its death clip, see grantKillRewards). */
   private payRewards(u: Unit) {
-    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) this.collect(k);
+    // glowing orbs fly out of it into the hero; each pays on arrival (Pickups.onCollect), at once if the pool is full
+    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) if (!this.pickups.spawn(u.pos, k)) this.collect(k);
   }
 
   /** Spawners: a dead unit comes back when its charge's cooldown ends (the hero's position does not matter). */
   private updateRespawns() {
-    for (const u of this.units) if (!u.alive && this.time >= u.respawnAt && this.mayRespawn(u)) u.respawn();
+    for (const u of this.units) if (!u.alive && this.time >= u.respawnAt && this.mayRespawn(u)) { u.respawn(); this.spawnFx(u); }
   }
 
   private mayRespawn(u: Unit) {
@@ -1226,10 +1311,11 @@ export class Game {
     this.kitOf(m)?.died?.();
     this.despawnMinions(m);
     this.shake = 0.6;
+    this.bossDeathFx(m);
     sfx.levelUp();
     // its own items on every kill (copies level them up)
-    if (d.drop) m.loot.push(dropItem(d.drop));
-    for (const x of d.moreDrops ?? []) m.loot.push(dropItem(x));
+    if (d.drop) m.loot.push(rollDrop(d.drop));
+    for (const x of d.moreDrops ?? []) m.loot.push(rollDrop(x));
     let classToast: (() => void) | null = null;
     const cls = d.boss!.unlockClass;
     if (cls && this.openClass(cls)) {
@@ -1294,6 +1380,110 @@ export class Game {
       c.then?.();
       this.persist();
     }
+  }
+
+  // ---------- visual effects (src/vfx.ts) ----------
+  /** Per frame: glow particles, flying orbs, campfire embers and smoke, the gear's aura, the sun. */
+  private updateVfx(dt: number) {
+    const hp = this.hero.position;
+    this.glows.setViewport(this.ui.size().h * (this.lowGfx ? 1 : Math.min(devicePixelRatio || 1, 2)));
+    this.glows.update(dt);
+    this.pickups.update(dt, hp);
+    if (this.lowGfx) { this.sunFx.strength = 0; this.sunFx.update(dt, v1, v1, hp); return; }
+    // campfires near the hero: embers rising and a thin smoke
+    for (const f of this.world.fires) {
+      if (Math.abs(f.position.x - hp.x) > 28 || Math.abs(f.position.z - hp.z) > 28) continue;
+      if (Math.random() < dt * 9) this.glows.emit(fxA.copy(f.position).setY(0.7), 1, { color: 0xff9a2a, bright: 1.8, size: 0.07, life: 1.6, up: 1.6, spread: 0.4, drag: 0.6 });
+      if (Math.random() < dt * 2.5) this.puffs.spawn(fxA.copy(f.position).setY(1.3), 0x5a5550, 1 + Math.random() * 0.6, 2.4, 0.18);
+    }
+    this.auraFx(dt);
+    // the sun's shafts on sunny locations, faded in and out as the hero crosses borders
+    const want = ZONE_SUN[this.zone?.id ?? 'forest'] ?? 0;
+    this.sunFx.strength += (want - this.sunFx.strength) * Math.min(1, dt * 0.8);
+    this.sunFx.update(dt, fxB.copy(this.sun.position).sub(this.sun.target.position).normalize(), this.camera.position, hp);
+  }
+
+  /** Weapons from rare up shed motes of their quality colour; armour from epic up circles the hero with them; mythic armour smoulders. */
+  private auraFx(dt: number) {
+    const ch = this.hero;
+    const k = this.heroScale;
+    const it = this.save.weapons[0];
+    if (it && it.rarity >= 2) {
+      const holder = WEAPONS[it.def].leftHand ? ch.weaponL : ch.weapon;
+      if (holder && Math.random() < dt * (it.rarity - 1) * 7) {
+        const tip = (holder.userData.tip as number | undefined) ?? 60;
+        holder.localToWorld(fxA.set(0, tip * (0.3 + Math.random() * 0.7), 0));
+        this.glows.emit(fxA, 1, { color: RARITY_HEX[it.rarity], bright: 1.6, size: 0.06 + it.rarity * 0.012, life: 0.8, up: 0.5, drag: 1.5, spread: 0.06 });
+      }
+    }
+    let armor = -1;
+    for (const x of Object.values(this.save.equip)) if (x) armor = Math.max(armor, x.rarity);
+    if (armor >= 3 && Math.random() < dt * (armor - 2) * 5) {
+      const a = Math.random() * Math.PI * 2;
+      fxA.set(ch.position.x + Math.sin(a) * 0.55 * k, (0.3 + Math.random() * 1.2) * k, ch.position.z + Math.cos(a) * 0.55 * k);
+      this.glows.emit(fxA, 1, { color: RARITY_HEX[armor], bright: 1.5, size: 0.09, life: 1.4, up: 0.35, drag: 0.4, vel: fxB.set(Math.cos(a) * 0.8, 0, -Math.sin(a) * 0.8) });
+    }
+    if (armor >= 5 && Math.random() < dt * 5) {
+      this.glows.emit(fxA.copy(ch.position).setY(0.3 * k), 1, { color: 0xff3b2a, bright: 1.8, size: 0.06, life: 1.1, up: 1.3, spread: 0.7, drag: 0.6 });
+    }
+  }
+
+  /** Dust from the hero's feet while running, in the ground's colour. */
+  private footDust(dt: number) {
+    this.footT -= dt;
+    if (this.footT > 0 || this.lowGfx) return;
+    this.footT = 0.16;
+    const p = this.hero.position;
+    fxA.set(p.x + (Math.random() - 0.5) * 0.4, 0.15, p.z + (Math.random() - 0.5) * 0.4);
+    this.puffs.spawn(fxA, DUST[this.zone?.id ?? 'forest'] ?? 0xb8a07a, 0.45 + Math.random() * 0.3, 0.6, 0.3);
+  }
+
+  /** A blow lands on `u`: sparks by the weapon's damage type thrown away from the hero, a star burst on a crit. */
+  private hitFx(u: Unit, type: DamageType, crit: boolean) {
+    const at = fxA.copy(u.pos).setY(u instanceof Mob ? 1.05 * u.def.scale : 0.6);
+    const away = fxB.set(u.pos.x - this.hero.position.x, 0.4, u.pos.z - this.hero.position.z).normalize().multiplyScalar(4);
+    if (type === 'slash') this.glows.emit(at, 7, { color: 0xdff4ff, bright: 1.6, size: 0.09, life: 0.3, speed: 4, vel: away, drag: 4 });
+    else if (type === 'chop') {
+      this.particles.burst(at, 0x8a5a2b, 4, 0.07, 4, 0.5);
+      this.glows.emit(at, 4, { color: 0xffd27a, bright: 1.5, size: 0.08, life: 0.3, speed: 3, vel: away, drag: 4 });
+    } else if (type === 'crush') {
+      this.waves.add(u.pos, 1.3, 0xd8c8a8, 0.3);
+      for (let i = 0; i < 3; i++) this.puffs.spawn(fxB.set(u.pos.x + (Math.random() - 0.5), 0.3, u.pos.z + (Math.random() - 0.5)), 0xb8a888, 0.8, 0.7, 0.35);
+      this.glows.emit(at, 4, { color: 0xfff0c0, bright: 1.4, size: 0.08, life: 0.3, speed: 3, drag: 4 });
+    } else if (type === 'pierce') this.glows.emit(at, 4, { color: 0xfff0b0, bright: 1.6, size: 0.07, life: 0.25, speed: 2, vel: away.multiplyScalar(1.4), drag: 5 });
+    else this.glows.emit(at, 6, { color: 0xc9a8ff, bright: 1.6, size: 0.1, life: 0.45, speed: 2.5, up: 1, drag: 2 });
+    if (crit) {
+      this.glows.emit(at, 12, { color: 0xffe066, bright: 2, size: 0.12, life: 0.45, speed: 6, drag: 3 });
+      this.glows.emit(at, 1, { color: 0xffffff, bright: 2.5, size: 0.9, life: 0.14, shrink: 1.6 });
+    }
+  }
+
+  /** On top of the blood: the undead give up green souls, beasts a cloud of dust, everyone a puff of dust. */
+  private deathFx(m: Mob) {
+    const p = m.pos;
+    const undead = m.def.model.human[0].startsWith('undead') || m.def.id.startsWith('skel') || m.def.id === 'ghost';
+    if (undead) this.glows.emit(fxA.copy(p).setY(0.9 * m.def.scale), 10, { color: SOUL_GREEN, bright: 1.6, size: 0.16, life: 1.4, up: 1.6, spread: 0.6, drag: 1 });
+    const dust = DUST[this.world.zoneAt(p.x, p.z).id] ?? 0xb8a07a;
+    for (let i = 0; i < (m.def.creature ? 6 : 3); i++) {
+      this.puffs.spawn(fxA.set(p.x + (Math.random() - 0.5) * 1.2, 0.3, p.z + (Math.random() - 0.5) * 1.2), dust, 1 + Math.random() * 0.6, 1, 0.35);
+    }
+  }
+
+  /** A main boss falls: a burst of golden light, a wide ring and a dust cloud. */
+  private bossDeathFx(m: Mob) {
+    const at = fxA.copy(m.pos).setY(1.2 * m.def.scale);
+    this.glows.emit(at, 70, { color: 0xffd46a, bright: 2, size: 0.18, life: 1.4, speed: 9, up: 3, gravity: 4, drag: 1.5 });
+    this.glows.emit(at, 1, { color: 0xffffff, bright: 2.5, size: 4, life: 0.35, shrink: 2 });
+    this.waves.add(m.pos, 7, 0xffd46a, 0.7);
+    this.puffs.cloud(m.pos, 2.5, DUST[this.world.zoneAt(m.pos.x, m.pos.z).id] ?? 0xb8a07a, 12, 1.6);
+  }
+
+  /** A unit comes back near the hero: a puff of dust and a faint ring where it appears. */
+  private spawnFx(u: Unit) {
+    const p = u.pos;
+    if (this.lowGfx || Math.abs(p.x - this.hero.position.x) > 30 || Math.abs(p.z - this.hero.position.z) > 30) return;
+    this.puffs.cloud(p, 0.7, DUST[this.world.zoneAt(p.x, p.z).id] ?? 0xb8a07a, 5, 1);
+    this.waves.add(p, 1.6, 0xffffff, 0.4);
   }
 
   private collect(k: OrbKind) {
@@ -2093,7 +2283,7 @@ export class Game {
       this.afterGearChange();
       this.fx.spawn(head, `${name} → ${this.slotName(slot)}`, 'loot', 1.4, { color });
       where = `Надето: ${this.slotName(slot)}`;
-    } else if (this.save.bag.length < BAG_SIZE) {
+    } else if (!this.bagFull) {
       this.save.bag.push(item);
       this.newItems++;
       this.fx.spawn(head, `+ ${name}`, 'loot', 1.4, { color });
@@ -2136,26 +2326,18 @@ export class Game {
     return true;
   }
 
+  get bagFull() { return !this.save.bagUnlimited && this.save.bag.length >= BAG_SIZE; }
+
   unequipArmor(slot: ArmorSlot) {
     const it = this.save.equip[slot];
-    if (!it || this.save.bag.length >= BAG_SIZE) return false;
+    // goes to the bag even past BAG_SIZE: taking armour off is never refused
+    if (!it) return;
     delete this.save.equip[slot];
     this.save.bag.push(it);
     this.afterGearChange();
-    return true;
   }
 
   private offFixed() { return !!CLASSES[kitOf(this.heroClass)].fixedOff; }
-
-  /** Only the class item comes off: the weapon slot is never empty, it is only swapped. */
-  unequipWeapon(slot: 0 | 1) {
-    const it = this.save.weapons[slot];
-    if (slot === 0 || this.offFixed() || !it || this.save.bag.length >= BAG_SIZE) return false;
-    this.save.weapons[slot] = null;
-    this.save.bag.push(it);
-    this.afterGearChange();
-    return true;
-  }
 
   /** Throws an item out of the bag for good. */
   discardFromBag(index: number) {
@@ -2177,6 +2359,7 @@ export class Game {
     this.dressHero();
     this.hp = Math.min(this.maxHp, Math.max(1, hpFrac * this.maxHp));
     this.resetHands();
+    this.syncPet();
     sfx.click();
     this.persist();
     this.refreshHud(true);
@@ -2209,6 +2392,7 @@ export class Game {
         x: pos.x, z: pos.z, kind, alive: m.alive,
         color: kind === 'elite' && d.drop ? RARITY[d.drop.rarity].color : MARK_COLOR[kind],
         cls: kind === 'elite' && d.drop ? dropClass(d.drop) : undefined,
+        any: kind === 'elite' && !!d.drop && dropAny(d.drop),
         icon: kind === 'elite' && d.drop ? dropIconId(d.drop) : 'skull',
         name: d.boss ? d.boss.titles[this.faction] : d.name,
         respawnIn: m.alive ? 0 : Math.max(0, m.respawnAt - this.time),
@@ -2247,8 +2431,8 @@ export class Game {
     const foes = this.clearOf.get(zone.id) ?? [];
     this.ui.clearProgress(zone.id, zone.name, foes.filter((m) => !m.alive).length, foes.length);
     if (full) {
-      this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it), this.save.equip, this.wearer, this.petDef);
-      this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
+      this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it), this.save.equip, this.wearer);
+      this.ui.bagBadge(this.newItems, this.bagFull);
       this.ui.gachaBadge(this.save.pulls ?? 0);
       this.showCharge();
     }
@@ -2256,6 +2440,7 @@ export class Game {
 
   /** Quality preset: shadows, mist and grass are the expensive parts on phones. */
   setLowGfx(low: boolean) {
+    this.lowGfx = low;
     this.sun.castShadow = !low;
     this.world.setLowDetail(low);
     this.ambient.points.visible = !low;
@@ -2348,7 +2533,7 @@ export class Game {
       const dps = bosses.reduce((a, m) => a + heroDps([it, null], s.power, s.powerMul, crit, m.def.resist), 0);
       if (dps > bestDps) { best = it; bestDps = dps; }
     }
-    const stash = (it: Item | null | undefined) => { if (it && this.save.bag.length < BAG_SIZE) this.save.bag.push(it); };
+    const stash = (it: Item | null | undefined) => { if (it && !this.bagFull) this.save.bag.push(it); };
     stash(this.save.weapons[0]);
     stash(this.save.weapons[1]);
     this.save.weapons = [best, null];
@@ -2387,7 +2572,7 @@ export class Game {
   debugGiveWeapon(def: string, slot: 0 | 1 = 0) {
     const old = this.save.weapons[slot];
     this.save.weapons[slot] = dropItem({ kind: 'weapon', def, rarity: 2 });
-    if (old && this.save.bag.length < BAG_SIZE) this.save.bag.push(old);
+    if (old && !this.bagFull) this.save.bag.push(old);
     this.afterGearChange();
   }
 
@@ -2413,6 +2598,7 @@ export class Game {
         }
       }
     }
+    this.save.bagUnlimited = true;
     this.newItems += n;
     this.ui.toast(`Выдано предметов: ${n}`);
     this.refreshHud(true);
@@ -2437,7 +2623,7 @@ export class Game {
     const it = this.save.weapons[1];
     if (!it || !this.save.weapons[0]) return;
     this.save.weapons[1] = null;
-    if (this.save.bag.length < BAG_SIZE) this.save.bag.push(it);
+    if (!this.bagFull) this.save.bag.push(it);
     this.afterGearChange();
   }
 
@@ -2566,10 +2752,11 @@ export class Game {
     writeSave(this.save);
   }
 
-  /** Debug: open every closed class for good. */
+  /** Debug: opens every closed class (with its start weapons, like a boss would: openClass). */
   debugOpenClasses() {
-    for (const c of CLASS_IDS) this.openClass(c);
-    this.ui.toast('Все классы открыты');
+    const opened = CLASS_IDS.filter((c) => this.openClass(c));
+    this.ui.toast(opened.length ? `Открыты классы: ${opened.map((c) => CLASSES[c].name).join(', ')}` : 'Все классы уже открыты');
+    this.refreshHud(true);
     this.persist();
   }
 
@@ -2635,7 +2822,9 @@ interface ShotTag { at: THREE.Vector3; dmg: number; r: number }
 const rndSort = () => Math.random() - 0.5;
 
 /** Item badge over a unit and at its map mark: the item's icon in its quality colour. */
-type DropBadge = { icon: string; color: string };
+type DropBadge = { icon: string; color: string; any?: boolean };
+/** A drop's badge: its icon in its quality colour; `any`: a random weapon of the class (dropAny). */
+const dropBadgeOf = (d: ItemDrop): DropBadge => ({ icon: dropIconId(d), color: RARITY[d.rarity].color, any: dropAny(d) });
 /** The class whose item a mob drops (null: anyone's, rings and amulets). */
 const dropClass = (d: MobDef['drop'] & {}) => (d.kind === 'weapon' ? weaponClass(d.def) : ARMOR[d.def].cls ?? null) ?? undefined;
 

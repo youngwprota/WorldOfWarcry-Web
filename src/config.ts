@@ -83,10 +83,11 @@ export interface WeaponDef {
   /** Held in the left hand (the bow). */
   leftHand?: boolean;
   /**
-   * Bow: the blow looses an arrow (model by faction) flying at `speed` m/s that homes in on the target and hits on
-   * arrival; the finisher is a volley of `volley` arrows at the nearest units in range.
+   * Bow, gun: the blow looses an arrow (model by faction) flying at `speed` m/s that homes in on the target and hits
+   * on arrival. `pellets` (the gun): instead, `n` pellets fan out over `spread`° toward the target, each flies straight
+   * and hits the first unit on its line within reach for × `mul` of the weapon's damage.
    */
-  shot?: { speed: number; arrow: Record<FactionId, string>; volley: number };
+  shot?: { speed: number; arrow: Record<FactionId, string>; pellets?: { n: number; spread: number; mul: number } };
   /** Mage staff of this element (STAVES): the mage's weapon (src/party.ts), held in the left hand. */
   staff?: StaffElement;
   /**
@@ -96,11 +97,21 @@ export interface WeaponDef {
    * and added to the crit multiplier.
    */
   orb?: { regen?: number; power?: number; speed?: number; defense?: number; pull?: number; critDmg?: [number, number] };
+  /**
+   * The hunter's pet (his class slot, config PETS id): an item of its own that never swings; the pet bites the
+   * hunter's target with this item's damage (quality, copies, sharpening — not the hero's power, bow or crits).
+   */
+  pet?: string;
   /** Model per rarity (RARITY index), GLB props with their own materials (src/assets.ts loadProps); over `model`. */
   tiers?: string[];
   /** The item exists only at this rarity (RARITY index): the mage's orbs. */
   rarity?: number;
 }
+
+/** Share of the gun's pellets that hit a lone target on average (the fan's edges miss): for DPS and the simulator. */
+export const PELLET_HIT = 0.6;
+/** One attack of the weapon on one target, in weapon damages (a gun's volley: its pellets that hit). */
+export const attackMul = (w: WeaponDef) => (w.shot?.pellets ? w.shot.pellets.n * w.shot.pellets.mul * PELLET_HIT : 1);
 
 export type MobRank = 'normal' | 'elite' | 'mini' | 'boss';
 export const mobRank = (d: MobDef): MobRank => (d.boss ? 'boss' : d.rank ?? 'normal');
@@ -113,20 +124,21 @@ export const casterModel = (faction: FactionId, rarity: number) => `casters/${fa
 export const WEAPONS: Record<string, WeaponDef> = {
   sword: {
     id: 'sword', name: 'Меч', type: 'slash', dmgMul: 1, aps: 1.15, shape: 'arc', arc: 140, range: 2.3,
-    anim: 'SwordAttack', model: { human: 'sword_human_knight', orc: 'sword_orc_warrior' }, icon: '🗡️', single: true,
+    anim: 'SwordAttack', model: { human: 'sword_common', orc: 'sword_common' }, icon: '🗡️', single: true,
   },
   axe: {
     id: 'axe', name: 'Топор', type: 'chop', dmgMul: 1.25, aps: 0.95, shape: 'arc', arc: 160, range: 2.3,
-    anim: 'AxeAttack', model: { human: 'axe', orc: 'axe_orc_grunt' }, icon: '🪓',
+    anim: 'AxeAttack', model: { human: 'axe_common', orc: 'axe_common' }, icon: '🪓',
   },
   hammer: {
     id: 'hammer', name: 'Молот', type: 'crush', dmgMul: 1.7, aps: 0.7, shape: 'circle', arc: 360, range: 2.1,
-    anim: 'AxeAttack', model: { human: 'hammer_human_paladin', orc: 'hammer_human_paladin' }, icon: '🔨',
+    anim: 'AxeAttack', model: { human: 'hammer_common', orc: 'hammer_common' }, icon: '🔨',
   },
   // board «Система оружий»: damage a bit under the sword, slow, long reach; thrust → thrust (target only) → spin 360°
+  // the hunter's melee weapon: its blows are the hunter's damage (pierce, DAMAGE_CLASS)
   polearm: {
-    id: 'polearm', name: 'Древковое', type: 'slash', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 3.1,
-    anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️', single: true, cycle: true,
+    id: 'polearm', name: 'Древковое', type: 'pierce', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 3.1,
+    anim: 'SwordAttack', model: { human: 'polearm_common', orc: 'polearm_common' }, icon: '⚔️', single: true, cycle: true,
     swing: ['thrust', 'thrust', 'sweep'],
   },
   // shields: the warrior's class slot (src/party.ts); they never swing, the swing numbers are unused
@@ -150,7 +162,19 @@ export const WEAPONS: Record<string, WeaponDef> = {
     id: 'bow', name: 'Лук', type: 'pierce', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 5.75,
     anim: 'SwordAttack', model: { human: 'bow_human_archer', orc: 'bow_orc_archer' }, icon: '🏹', single: true,
     leftHand: true,
-    shot: { speed: 24, arrow: { human: 'arrow_human_archer', orc: 'arrow_orc_archer' }, volley: 3 },
+    shot: { speed: 24, arrow: { human: 'arrow_human_archer', orc: 'arrow_orc_archer' } },
+  },
+  // the hunter's gun (a dwarven blunderbuss, gun_<quality>.glb): slower than the bow, a fan of weaker pellets
+  gun: {
+    id: 'gun', name: 'Ружьё', type: 'pierce', dmgMul: 0.9, aps: 0.6, shape: 'arc', arc: 40, range: 4.8,
+    anim: 'SwordAttack', model: { human: 'gun_common', orc: 'gun_common' }, icon: '🔫', single: true,
+    leftHand: true,
+    shot: { speed: 40, arrow: { human: 'pellet_mock', orc: 'pellet_mock' }, pellets: { n: 5, spread: 40, mul: 0.4 } },
+  },
+  // the hunter's pet as an item (WeaponDef.pet): `aps` = its bite rate (PETS.boar.aps)
+  boar: {
+    id: 'boar', name: 'Вепрь', type: 'crush', dmgMul: 0.8, aps: 0.9, shape: 'arc', arc: 0, range: 0,
+    anim: 'SwordAttack', model: { human: 'orc_boar', orc: 'orc_boar' }, icon: '🐗', pet: 'boar',
   },
   staff_fire: {
     id: 'staff_fire', name: 'Посох огня', type: 'magic', dmgMul: 1.9, aps: 0.495, shape: 'arc', arc: 60, range: 3.2,
@@ -224,8 +248,7 @@ export interface PetDef {
   /** GLB creature (src/creature.ts). */
   model: string;
   scale: number;
-  type: DamageType;
-  dmg: number;
+  /** Bites per second (its damage comes from the pet item, WeaponDef.pet). */
   aps: number;
   /** Bite reach from its centre to the foe's edge, m. */
   range: number;
@@ -233,10 +256,8 @@ export interface PetDef {
   speed: number;
 }
 export const PETS: Record<string, PetDef> = {
-  boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, type: 'crush', dmg: 0.6, aps: 0.9, range: 1.3, speed: 6.5 },
+  boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, aps: 0.9, range: 1.3, speed: 6.5 },
 };
-/** Pet the hunter starts with. */
-export const START_PET = 'boar';
 
 export const SHARPEN = { max: 10, perLevel: 0.08, cost: (lvl: number) => 40 + lvl * lvl * 25 };
 
@@ -945,12 +966,16 @@ export const ZONES: ZoneDef[] = [
   { id: 'forest', name: 'Лесная опушка', ground: 0x509a3a, ground2: 0x76b246, sky: 0x9ad8c8, fog: 0xb2dfcc, hemi: [0xc4d8ff, 0x6b8a4a], fogDensity: 0.008, mist: 0.08, mistColor: 0xf0fff4 },
   { id: 'cemetery', name: 'Старое кладбище', ground: 0x5a5698, ground2: 0x6c64aa, sky: 0x7c6ed0, fog: 0x9086d4, hemi: [0xbcb4ff, 0x4e4888], fogDensity: 0.012, mist: 0.3, mistColor: 0xddd4ff },
   // Placeholder locations around the forest (no content yet: ground, sky and fog only).
-  { id: 'peaks', name: 'Снежный перевал', ground: 0xdfe9f4, ground2: 0xf2f6fc, sky: 0xbfe2ff, fog: 0xe2f1ff, hemi: [0xd2e2ff, 0x8a9ab0], fogDensity: 0.009, mist: 0.12, mistColor: 0xffffff },
+  // snow is kept a cool mid blue-grey with a dim cool sky: lit white snow and white fog burned the screen out
+  { id: 'peaks', name: 'Снежный перевал', ground: 0xb7c5d6, ground2: 0xcbd6e3, sky: 0x9cbbd8, fog: 0xabbfd2, hemi: [0xaabcd8, 0x627186], fogDensity: 0.007, mist: 0.06, mistColor: 0xd4dfeb },
   { id: 'swamp', name: 'Гнилое болото', ground: 0x587f3a, ground2: 0x6c9044, sky: 0x9cc8b0, fog: 0xa4ccb4, hemi: [0xc4dcec, 0x4a6a3a], fogDensity: 0.01, mist: 0.25, mistColor: 0xd8f0e0 },
   { id: 'grove', name: 'Осенняя роща', ground: 0xcc8a30, ground2: 0xdea244, sky: 0xffd8a0, fog: 0xffe0bc, hemi: [0xe8d8e8, 0x8a6a3a], fogDensity: 0.007, mist: 0.06, mistColor: 0xfff0e0 },
   { id: 'dunes', name: 'Песчаные дюны', ground: 0xe6c674, ground2: 0xf0d68e, sky: 0xa8dcff, fog: 0xfff0d0, hemi: [0xd4e4ff, 0xa08a5a], fogDensity: 0.006, mist: 0.03, mistColor: 0xffffff },
   { id: 'hills', name: 'Скалистые холмы', ground: 0x9a9286, ground2: 0xaca496, sky: 0xb0c8e0, fog: 0xc8d4e0, hemi: [0xccd8f0, 0x6a6458], fogDensity: 0.008, mist: 0.06, mistColor: 0xeef0f4 },
 ];
+
+/** How sunny each location is (0..1): soft shafts of sunlight (src/vfx.ts SunLight). */
+export const ZONE_SUN: Partial<Record<ZoneId, number>> = { forest: 1, grove: 1, dunes: 1, hills: 0.7, peaks: 0.5, swamp: 0.35 };
 
 /**
  * Zone depth: packs further along the trail are bigger, tougher and pay more, so progress means

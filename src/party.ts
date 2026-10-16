@@ -24,13 +24,11 @@ export interface ClassDef {
   off: string[];
   /** Name of slot 2. */
   offName: string;
-  /** Slot 2 holds a pet (config PETS) instead of an item. */
-  pet?: boolean;
   /** Slot 2 always holds the kit's `left` item: it never drops and is never swapped or taken off. */
   fixedOff?: boolean;
   /**
-   * What the class holds when it first takes the field, and extra items put into the bag then (src/save.ts classKit);
-   * missing = the faction's start weapon.
+   * The class's start gear (src/save.ts classKit), given when the class opens: `hand` in the weapon slot, `left` in the
+   * class slot and `bag` into the bag — all three of its weapons, common. Missing = the faction's start weapon.
    */
   kit?: { hand: string; left?: string; bag?: string[] };
   /**
@@ -44,18 +42,19 @@ export interface ClassDef {
 export const CLASSES: Record<HeroClass, ClassDef> = {
   warrior: {
     name: 'Воин', icon: 'shield', color: ['#ff7a6a', '#c0352c'], key: 'Digit1',
-    weapons: ['sword', 'axe', 'hammer', 'polearm'], off: ['shield_spiked'], offName: 'Щит',
+    weapons: ['sword', 'axe', 'hammer'], off: ['shield_spiked'], offName: 'Щит',
+    kit: { hand: 'sword', left: 'shield_spiked', bag: ['axe', 'hammer'] },
   },
   hunter: {
     name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
     model: { human: 'human_archer', orc: 'orc_archer' },
-    weapons: ['bow'], off: [], offName: 'Питомец', pet: true, kit: { hand: 'bow' }, locked: true,
+    weapons: ['bow', 'polearm', 'gun'], off: ['boar'], offName: 'Питомец', kit: { hand: 'bow', left: 'boar', bag: ['polearm', 'gun'] }, locked: true,
   },
   mage: {
     name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
     model: { human: 'mage', orc: 'orc_shaman' },
     weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_fury', 'orb_vigor', 'orb_swift', 'orb_ward', 'orb_fortune', 'orb_demon'], offName: 'Сфера',
-    kit: { hand: 'staff_fire', left: 'orb_fury' }, locked: true,
+    kit: { hand: 'staff_fire', left: 'orb_fury', bag: ['staff_ice', 'staff_wind'] }, locked: true,
   },
 };
 

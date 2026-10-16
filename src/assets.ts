@@ -355,6 +355,9 @@ class Assets {
 
   /** Merged, static geometry for props (cheap to instance). */
   has(name: string) { return this.sources.has(name); }
+
+  /** A model built in code (src/mocks.ts) under `name`: cloned like a loaded one. */
+  register(name: string, model: THREE.Group) { this.sources.set(name, model); }
 }
 
 export const assets = new Assets();

@@ -4,7 +4,7 @@
 import * as CONFIG from './config';
 import {
   ATTACK_HIT, BREAKABLES, CEMETERY_BOARS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
-  PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, START_PET, STAVES, WEAPONS, depthMul, mobImpact, packUnits, mobRank, tokenChance as zoneTokenChance,
+  PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, depthMul, mobImpact, packUnits, mobRank, tokenChance as zoneTokenChance,
   type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
 import { addStat, heroDps, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, heroStats, type HeroBuild } from './balance';
@@ -230,7 +230,8 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1 }));
   // class extras (game.ts staffHit / iceHit / throwGust / updatePet), single target: the hunter's pet bites what he
   // shoots; the fire staff burns (+vulnerability), the ice staff freezes every Nth hit, the wind staff throws an orb
-  const pet = CLASSES[h.cls].pet ? PETS[START_PET] : null;
+  const petItem = h.weapons[1] && WEAPONS[h.weapons[1].def].pet ? h.weapons[1] : null;
+  const pet = petItem ? PETS[WEAPONS[petItem.def].pet!] : null;
   let petCd = 0.6;
   const B = STAVES.fire.burn;
   let burn = 0, burnTick = 0, burnDps = 0, iceN = 0, windN = 0;
@@ -271,7 +272,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   /** One swing of a hand (counters too). */
   const strike = (it: Item) => {
     const w = WEAPONS[it.def];
-    const dmg = hit(it, 1);
+    const dmg = hit(it, CONFIG.attackMul(w)); // a gun's volley: its pellets that hit (PELLET_HIT)
     if (w.staff === 'fire' && dmg > 0) { if (burn <= 0) burnTick = B.tick; burn = B.time; burnDps = dmg * B.dps; }
     if (w.staff === 'ice' && dmg > 0) {
       const f = STAVES.ice.freeze;
@@ -292,7 +293,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     for (const hd of hands) {
       if (!hd.it) continue;
       const w = WEAPONS[hd.it.def];
-      if (w.guard || w.orb) continue; // shields and mage orbs never swing
+      if (w.guard || w.orb || w.pet) continue; // shields, mage orbs and pets never swing
       hd.cd -= DT;
       if (hd.cd > 0 || busy > 0) continue;
       const per = 1 / w.aps;
@@ -301,12 +302,12 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       swings++;
       strike(hd.it);
     }
-    // the pet: always on the target (slams do not stop it), × the plain blow of the weapon, no crits or dodges
-    if (pet && h.weapons[0]) {
+    // the pet: always on the target (slams do not stop it), its item's own damage (no hero power), no crits or dodges
+    if (pet && petItem) {
       petCd -= DT;
       if (petCd <= 0) {
         petCd += 1 / pet.aps;
-        mhp -= weaponDamage(h.weapons[0], st.power, st.powerMul) * pet.dmg * RESIST_MULT[d.resist[pet.type] ?? 'normal'] * roll() * vuln();
+        mhp -= weaponDamage(petItem) * RESIST_MULT[d.resist[WEAPONS[petItem.def].type] ?? 'normal'] * roll() * vuln();
       }
     }
     if (burn > 0) {
@@ -787,7 +788,7 @@ export function bench(): BenchRow[] {
     let sum = 0;
     for (let i = 0; i < n; i++) {
       rs = i + 1;
-      const cls = weaponClass(a) ?? 'warrior'; // the hunter's bow comes with his pet
+      const cls = weaponClass(a) ?? 'warrior'; // (the hunter's pet is his class item: `b`, none for a lone bow)
       const h: Hero = {
         faction: 'human', src: { debug: { hp: 1e6, regen: -HERO.regen } }, pct: {}, equip: {}, hp: 1e6, bag: [], pulls: 0, pity: 0, spot: { s: 0, off: 0 },
         weapons: [makeItem('weapon', a, 2, 1), b ? makeItem('weapon', b, 2, 1) : null], cls, classes: [cls], kits: {} as Hero['kits'], gear: {} as Hero['gear'],
@@ -797,7 +798,7 @@ export function bench(): BenchRow[] {
     return sum / n;
   };
   const rows: BenchRow[] = [];
-  for (const w of Object.keys(WEAPONS)) if (!WEAPONS[w].guard && !WEAPONS[w].orb) rows.push({ label: w, ttk: ttk(w, null) });
+  for (const w of Object.keys(WEAPONS)) if (!WEAPONS[w].guard && !WEAPONS[w].orb && !WEAPONS[w].pet) rows.push({ label: w, ttk: ttk(w, null) });
   for (const s of Object.keys(WEAPONS)) if (WEAPONS[s].guard) rows.push({ label: `sword+${s}`, ttk: ttk('sword', s) });
   if (WEAPONS.staff_fire) for (const o of Object.keys(WEAPONS)) if (WEAPONS[o].orb) rows.push({ label: `staff_fire+${o}`, ttk: ttk('staff_fire', o) });
   return rows;

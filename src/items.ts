@@ -1,23 +1,26 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
-import { DAMAGE_TYPE_NAME, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type PetDef, type StatId, type WeaponDef } from './config';
-import { DAMAGE_TYPE_ICON, icon } from './icons';
+import { DAMAGE_TYPE_NAME, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type StatId, type WeaponDef } from './config';
+import { CLASS_DAMAGE_ICON, DAMAGE_TYPE_ICON, icon } from './icons';
 import { art, hasPng } from './art';
 import { CLASSES, weaponClass, type HeroClass } from './party';
 import { CLASS_LOOK, type Wearer } from './looks';
 
 /** Quality ids in model names (tools/blender/rarity_gear.py): `<def>_<id>`. */
 
-/** The warrior's weapons and shields have a GLB per quality (tools/blender/rarity_gear.py); other classes' don't. */
-const GEAR_DEFS = [...CLASSES.warrior.weapons, ...CLASSES.warrior.off];
+/**
+ * Sword, axe, hammer, polearm, the gun and the shields have a GLB per quality, common included
+ * (tools/blender/rarity_gear.py, gun_v5.py / gun_rarity.py): one model for every race, no faction FBX.
+ */
+const GEAR_DEFS = ['sword', 'axe', 'hammer', 'polearm', 'gun', ...CLASSES.warrior.off];
 
 /**
- * 3D model of a weapon, shield or staff: a staff's model per quality (WeaponDef.tiers); above common every warrior
- * weapon has its own GLB per quality, shields have all six; otherwise the faction's FBX (WeaponDef.model).
+ * 3D model of a weapon, shield or staff: a staff's model per quality (WeaponDef.tiers); the per-quality GLB of a
+ * GEAR_DEFS weapon or shield; otherwise the faction's model (WeaponDef.model: bow, gun).
  */
 export function itemModel(it: Item, faction: FactionId) {
   const w = WEAPONS[it.def];
   if (w.tiers) return w.tiers[it.rarity] ?? w.model[faction];
-  return GEAR_DEFS.includes(it.def) && (w.guard || it.rarity > 0) ? `${it.def}_${RARITY_IDS[it.rarity]}` : w.model[faction];
+  return GEAR_DEFS.includes(it.def) ? `${it.def}_${RARITY_IDS[it.rarity]}` : w.model[faction];
 }
 
 /**
@@ -37,8 +40,7 @@ export function armorTrim(it: Item, faction: FactionId): string | null {
 export const trimModel = (id: string, rarity: number, faction: FactionId) => `armor_${id}_${RARITY_IDS[rarity]}_${faction}`;
 
 /** Every per-quality GLB model (loaded up-front by main.ts). */
-export const GEAR_MODELS = GEAR_DEFS.flatMap((def) =>
-  RARITY_IDS.filter((_, r) => r > 0 || WEAPONS[def].guard).map((id) => `${def}_${id}`));
+export const GEAR_MODELS = GEAR_DEFS.flatMap((def) => RARITY_IDS.map((id) => `${def}_${id}`));
 
 export type ItemKind = 'weapon' | 'armor';
 export interface Item {
@@ -208,11 +210,6 @@ export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = 
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }
 
-/** The hunter's pet in his second weapon slot (config PETS). */
-export function petCellHtml(pet: PetDef, attrs = '', cls = '', extra = '') {
-  return `<button class="cell pet ${cls}" ${attrs}>${art(pet.icon, 34, 'ic')}${extra}</button>`;
-}
-
 export function scrapValue(it: Item) {
   return Math.round((25 * (it.rarity + 1) * (it.rarity + 1) + it.sharpen * 20) * lvlMult(it.lvl));
 }
@@ -229,6 +226,7 @@ export function itemLines(it: Item): [string, string][] {
       return out;
     }
     if (w.orb) return [orbLine(w.orb)];
+    if (w.pet) return [['Урон укуса', String(Math.round(weaponDamage(it)))], ['Тип', DAMAGE_TYPE_NAME[w.type]], ['Укусов/с', String(w.aps)]];
     return [
       ['Урон', String(Math.round(weaponDamage(it)))],
       ['Тип', DAMAGE_TYPE_NAME[w.type]],
@@ -265,8 +263,21 @@ export function makeItem(kind: ItemKind, def: string, rarity: number, lvl: numbe
 
 /** The item a mob's `drop` describes (one copy). */
 export const dropItem = (d: ItemDrop) => makeItem(d.kind, d.def, d.rarity, 1);
+/** What a weapon drop stands for: the whole weapon set of its class when it is one of them (ClassDef.weapons), else itself. */
+export function dropChoices(d: ItemDrop): string[] {
+  const c = d.kind === 'weapon' ? weaponClass(d.def) : null;
+  return c && CLASSES[c].weapons.includes(d.def) ? CLASSES[c].weapons : [d.def];
+}
+/** The drop is a random weapon of a class's set (the elites' and bosses' weapons): rolled on the kill (rollDrop). */
+export const dropAny = (d: ItemDrop) => dropChoices(d).length > 1;
+/** What a kill gives: a random weapon of the class's set at the drop's quality, any other item as it is. */
+export function rollDrop(d: ItemDrop) {
+  const ch = dropChoices(d);
+  return makeItem(d.kind, ch[Math.floor(Math.random() * ch.length)], d.rarity, 1);
+}
 /** Icon id of a drop (weapon id or armour slot). */
-export const dropIconId = (d: ItemDrop) => (d.kind === 'weapon' ? d.def : ARMOR[d.def].slot);
+/** Icon of a drop over its mob and on the maps: a random weapon (dropAny) shows its class's weapon icon (and a «?»). */
+export const dropIconId = (d: ItemDrop) => (d.kind !== 'weapon' ? ARMOR[d.def].slot : dropAny(d) ? CLASS_DAMAGE_ICON[weaponClass(d.def)!] : d.def);
 
 /** Old saves stored bare {def, rarity, sharpen} weapons. Items taken out of the game become the kept one of their slot. */
 const RENAMED: Record<string, string> = {

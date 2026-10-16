@@ -123,7 +123,7 @@ function snowMat(src: THREE.Material) {
   if (!m) {
     const c = src.clone() as THREE.MeshLambertMaterial;
     c.map = null;
-    c.color.set(0xffffff);
+    c.color.set(0xc8d2dc); // shaded snow: pure white burned out under the sun
     snowMats.set(src, m = c);
   }
   return m;
@@ -229,6 +229,8 @@ export class World {
   private gateStones: Inst[] = [];
   readonly gates: { def: Gate; mesh: THREE.Mesh; mat: THREE.ShaderMaterial; obstacles: Obstacle[]; open: boolean }[] = [];
   private flames: THREE.Mesh[] = [];
+  /** The campfires' flames (embers and smoke rise from them, Game.updateVfx). */
+  get fires(): readonly THREE.Object3D[] { return this.flames; }
   private time = { value: 0 };
   private mist: ReturnType<typeof buildMist>;
   /** Grass, flowers and the rest of the knee-high clutter (hidden on low graphics). */

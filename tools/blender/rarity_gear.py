@@ -3,9 +3,8 @@
 The blend holds sword / axe / hammer / polearm x common..mythic (collections Swords, Axes, Hammers, Polearms) in metres,
 long axis along +Z. This script adds the shields in the same style (collection Shields: tower / buckler / spiked x six
 qualities, palette taken from the weapons: steel, the quality's accent colour, a glowing gem, floating crystals on
-mythic), optionally saves the blend, and exports every non-common weapon and every shield to
-public/assets/models/<name>.glb in centimetres (Y up, like the Bitgem FBX weapons). Common weapons are the game's
-existing FBX models, so they are not exported.
+mythic), optionally saves the blend, and exports every weapon (common included: one model for every race) and every
+shield to public/assets/models/<name>.glb in centimetres (Y up, like the Bitgem FBX weapons).
 
 blender -b <wow.blend> --factory-startup --python-exit-code 1 -P tools/blender/rarity_gear.py -- [save_as.blend] [preview_dir]
 """
@@ -465,8 +464,7 @@ def main():
         print("saved", SAVE_AS)
     for c in WEAPON_COLLECTIONS:
         for ob in bpy.data.collections[c].objects:
-            if not ob.name.endswith("_common"):
-                export_glb(ob, ob.name)
+            export_glb(ob, ob.name)
     for ob in shields:
         export_glb(ob, ob.name)
     if PREVIEW_DIR:

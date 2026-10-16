@@ -16,6 +16,8 @@ interface ClassLook {
   set(f: FactionId, rarity: number): Record<VisualPart, string>;
   /** Quality pieces (Character.setTrims) fit only the warrior's peasant / peon skeleton. */
   trims: boolean;
+  /** Base mesh prefixes (PART_PREFIXES) a worn part leaves visible: the hunter's set legs are only the boots, the pants stay. */
+  keep: string[];
   /** Item icon (public/assets/ui/armor) of the body part an equipped armour item puts on the hero. */
   icon(f: FactionId, it: Item): string;
 }
@@ -30,18 +32,21 @@ export const CLASS_LOOK: Record<HeroClass, ClassLook> = {
     part: (f, it) => ARMOR[it.def].source?.[f],
     set: (f) => Object.fromEntries(BODY_PARTS.map((p) => [p, ARMOR[`${WARRIOR_DEBUG_SET}_${p}`].source![f]])) as Record<VisualPart, string>,
     trims: true,
+    keep: [],
     icon: (f, it) => `${ARMOR[it.def].trim?.[f]}_${ARMOR[it.def].slot}_${RARITY_IDS[it.rarity]}_${f}`,
   },
   hunter: {
     part: (f, it, part) => archerSet(f, it.rarity)[part],
     set: archerSet,
     trims: false,
+    keep: ['hip_'],
     icon: skinIcon('archer'),
   },
   mage: {
     part: (f, it) => casterModel(f, it.rarity),
     set: (f, r) => allParts(casterModel(f, r)),
     trims: false,
+    keep: [],
     icon: skinIcon('caster'),
   },
 };
@@ -63,6 +68,7 @@ export function classPreview(c: HeroClass, f: FactionId, rarity: number | null) 
     weapon: (w.leftHand ? [null, main, false] : [main, null, !!w.staff]) as [string | null, string | null, boolean],
     orb: kit?.left && WEAPONS[kit.left].orb ? WEAPONS[kit.left].model[f] : null,
     outfit,
+    keep: CLASS_LOOK[c].keep,
     trims: rarity !== null && CLASS_LOOK[c].trims ? debugSetTrims(f, rarity) : [],
     load: [...Object.values(outfit), ...(c === 'hunter' && rarity !== null ? [main] : [])] as string[],
   };

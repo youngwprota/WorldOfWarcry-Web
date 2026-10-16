@@ -24,9 +24,14 @@ import { DragScroll } from './dragscroll';
 import { BREAKABLES } from './world';
 import { CLASSES, type HeroClass } from './party';
 import { classPreview } from './looks';
+import { registerMocks } from './mocks';
+import { startArtWave, startLoadingFx } from './loadfx';
 import { Post } from './post';
 
 const ui = new UI();
+// the loading art comes alive: its background sways, sparks fly
+startArtWave(document.getElementById('loading')!, `${import.meta.env.BASE_URL}assets/ui/loading.jpg`);
+startLoadingFx(document.getElementById('loading')!);
 const app = ui.app;
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -71,10 +76,11 @@ for (const f of Object.values(FACTIONS)) {
   f.campBuildings.forEach((b) => models.add(b));
   f.campProps.forEach((p) => models.add(p));
   models.add(f.campfire);
+  f.preview.forEach((m) => models.add(m)); // the faction choice scene
 }
 for (const w of Object.values(WEAPONS)) {
   // (mage orbs are GLB creatures, below)
-  if (!w.orb) Object.values(w.model).forEach((m) => models.add(m));
+  if (!w.orb && !w.pet) Object.values(w.model).forEach((m) => models.add(m)); // pets are GLB creatures (PETS)
   if (w.shot) Object.values(w.shot.arrow).forEach((m) => models.add(m));
 }
 for (const c of Object.values(CLASSES)) Object.values(c.model ?? {}).forEach((m) => models.add(m));
@@ -88,8 +94,9 @@ for (const p of Object.values(PETS)) creatures.add(p.model);
 for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
 // gacha forge scene (src/forge3d.ts): anvil and decor are cloned from here
 models.add('anvil_big');
+models.add('hammer_human_paladin');
 for (const [m] of FORGE3D.decor) models.add(m);
-['orc_stone_big', 'orc_stone_mid', 'orc_stone_small', 'orc_log', 'orc_wood_pile_big', 'orc_tusk_standing', 'orc_skull',
+['orc_stone_big', 'orc_log', 'orc_wood_pile_big', 'orc_tusk_standing', 'orc_skull',
   'undead_fence', 'undead_ruins_01', 'undead_ruins_02', 'undead_obelisk', 'undead_column_1', 'undead_big_bone',
   'undead_bones_remains', 'undead_lamp_post', 'campfire',
   // level design kit
@@ -97,8 +104,8 @@ for (const [m] of FORGE3D.decor) models.add(m);
   'barrack_Lv2', 'tower_big', 'orc_cabin', 'orc_barrack_Lv2', 'orc_tower_Lv2',
   'practice_dummy', 'orc_practice_dummy', 'target', 'orc_practice_aim', 'elf_well', 'wood_pile_big', 'orc_wood_pile_big',
   'orc_head_lantern', 'orc_flag_red', 'orc_drum_big', 'orc_altar', 'orc_horned_skull', 'cauldron', 'box_large_2',
-  'elf_log_pile', 'saw', 'wood_pile_small', 'bucket', 'elf_stone_big', 'mine_enterance', 'minecart',
-  'mine_rail_piece', 'box_small_2', 'orc_throne', 'tower_Lv2', 'throne_Lv1', 'banner', 'elf_rock_small', 'elf_tree',
+  'elf_log_pile', 'saw', 'wood_pile_small', 'bucket',
+  'box_small_2', 'orc_throne', 'tower_Lv2', 'throne_Lv1', 'banner', 'elf_rock_small', 'elf_tree',
   'elf_foliage_small', 'elf_foliage_mid', 'elf_tree_root_1', 'elf_rock_big', 'undead_tusk_gate', 'undead_house_tower', 'undead_tower_small',
   'undead_smithy_house', 'undead_building', 'undead_tower', 'undead_wheel_of_pain', 'undead_cauldron', 'undead_flag',
   'undead_windmill', 'undead_tower_Lv2', 'undead_throne_Lv1', 'undead_throne', 'undead_floating_stone',
@@ -106,8 +113,10 @@ for (const [m] of FORGE3D.decor) models.add(m);
   'undead_ground_bone_2', 'undead_ground_bone_3', 'orc_bucket', 'orc_box_large_2', 'shield', 'spear',
   'orc_wood_pile_small', 'orc_beam_pile', 'undead_wood_pile', 'undead_oracle_Lv1', 'house_Lv1', 'lantern_street', 'elf_mine_Lv1', 'elf_oracle_Lv1', 'elf_throne_Lv1', 'elf_fountain'].forEach((m) => models.add(m));
 
+registerMocks(); // stand-in models built in code (the gun): not loaded from files
 await Promise.all([
-  assets.loadAll([...models], (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`)),
+  // per-quality GLB gear (sword_common…) comes from loadGear, not as FBX
+  assets.loadAll([...models].filter((m) => !assets.has(m) && !GEAR_MODELS.includes(m)), (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`)),
   assets.loadCreatures([...creatures]),
   assets.loadGear(GEAR_MODELS),
   assets.loadProps([...props]),
@@ -267,7 +276,7 @@ function factionScreen(gains: Gains) {
         void assets.ensure(look.load).then(() => {
           if (cls !== c || !heroes.some((h) => h.ch === ch)) return;
           ch.setWeapon(...look.weapon);
-          ch.setOutfit(look.outfit);
+          ch.setOutfit(look.outfit, look.keep);
           ch.setTint(tintOf(f));
         });
       }
