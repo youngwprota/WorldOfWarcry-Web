@@ -426,6 +426,7 @@ export class Game {
 
     this.wearKit(kitOf(this.heroClass));
     this.wearGear(this.heroClass);
+    this.syncParty();
     this.hero = new Character(this.heroModel(), null, 1);
     this.hero.root.scale.setScalar(this.heroScale);
     this.dressHero();
@@ -517,7 +518,21 @@ export class Game {
   get wearer(): Wearer { return { cls: this.heroClass, faction: this.faction }; }
 
   /** Puts another party member on the field; false while the switch cooldown runs or if it is already there. */
+  /** Whether class `c` is in the party: its ClassDef.unlock gate is open (the class on the field always is). */
+  classOpen(c: HeroClass) {
+    const g = CLASSES[c].unlock;
+    return !g || c === this.heroClass || !!this.world.gates.find((x) => x.def.id === g)?.open;
+  }
+
+  /** Shows the party buttons of the open classes; `gate` just opened: toast the classes it brings. */
+  private syncParty(gate?: string) {
+    const fresh = gate ? CLASS_IDS.find((c) => CLASSES[c].unlock === gate) : undefined;
+    this.ui.partyOpen((c) => this.classOpen(c), fresh);
+    if (fresh) setTimeout(() => this.ui.toast(`Открыт класс «${CLASSES[fresh].name}» — кнопка справа`, 2600), 2600);
+  }
+
   switchClass(c: HeroClass) {
+    if (!this.classOpen(c)) return false;
     if (c === this.heroClass || this.dead || this.time - this.classT < SWITCH_COOLDOWN) return false;
     this.classT = this.time;
     const model = this.heroModel();
@@ -1445,6 +1460,7 @@ export class Game {
     if (gates.includes(id)) return false;
     gates.push(id);
     this.world.openGate(id, instant);
+    this.syncParty(id);
     return true;
   }
 
@@ -2699,6 +2715,7 @@ export class Game {
   debugOpenGates() {
     this.save.gatesOpen = true;
     this.world.openAllGates();
+    this.syncParty();
     sfx.barrier();
     this.ui.toast('Все ворота открыты');
     this.persist();

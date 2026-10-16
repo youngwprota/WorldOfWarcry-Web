@@ -287,6 +287,15 @@ export class UI {
     $('btn-gacha').dataset.badge = n > 0 ? String(n) : '';
   }
 
+  /** Hides the buttons of classes not in the party yet; `fresh` flashes a button that just appeared. */
+  partyOpen(open: (c: HeroClass) => boolean, fresh?: HeroClass) {
+    $('party').querySelectorAll<HTMLElement>('[data-cls]').forEach((b) => {
+      const c = b.dataset.cls as HeroClass;
+      b.hidden = !open(c);
+      if (c === fresh) { b.classList.remove('fresh'); void b.offsetWidth; b.classList.add('fresh'); }
+    });
+  }
+
   /** Party buttons bottom-right: the class on the field is lit; `charge` is its staff counter badge ('' = none). */
   party(active: HeroClass, charge = '', color = '') {
     $('party').querySelectorAll<HTMLElement>('[data-cls]').forEach((b) => {

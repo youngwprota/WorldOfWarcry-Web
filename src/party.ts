@@ -33,6 +33,8 @@ export interface ClassDef {
    * missing = the faction's start weapon.
    */
   kit?: { hand: string; left?: string; bag?: string[] };
+  /** Gate id (src/island.ts GATES): the class joins the party once that gate is open; none = from the start. */
+  unlock?: string;
 }
 
 /** Order = order of the buttons, bottom-right of the HUD. */
@@ -45,6 +47,8 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
     name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
     model: { human: 'human_archer', orc: 'orc_archer' },
     weapons: ['bow'], off: [], offName: 'Питомец', pet: true, kit: { hand: 'bow' },
+    // the forest boss drops a bow and opens the gate to the cemetery
+    unlock: 'forest-cemetery',
   },
   mage: {
     name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
