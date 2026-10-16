@@ -10,6 +10,8 @@ import { FloatingText, Particles, Pickups } from './fx';
 import type { Input } from './input';
 import { STAT_ICON, art } from './art';
 import type { DialogueLine, UI } from './ui';
+import { Ambient } from './ambient';
+import { buildRitual } from './terrain';
 
 /** Power orbs picked up in the prologue; they carry over to the new hero. */
 export type Gains = Record<OrbKind, number>;
@@ -85,6 +87,11 @@ export class Prologue {
   private shake = 0;
   private hintT = 0;
   private sun: THREE.DirectionalLight;
+  /** Soul wisps in the air (src/ambient.ts), the ritual circle's clock. */
+  private ambient = new Ambient();
+  private timeU = { value: 0 };
+  /** Drawing-buffer height (set by main.ts: wisp sizes). */
+  viewH = 1600;
 
   constructor(private ui: UI, private input: Input, labels: HTMLElement, private onChoose: (gains: Gains) => void) {
     // Grey, cold world of the dead (GDD 7.1: «обесцвеченная поляна»).
@@ -102,6 +109,8 @@ export class Prologue {
     this.sun.shadow.normalBias = 0.03;
     this.scene.add(this.sun, this.sun.target);
     this.buildArena();
+    this.ambient.fixed = 'cemetery';
+    this.scene.add(this.ambient.points, buildRitual(LICH.x, LICH.z, 6.5, this.timeU));
 
     this.lich = new Character('undead_king', 'sword_undead_king', 1.9);
     this.lich.position.copy(LICH);
@@ -413,6 +422,8 @@ export class Prologue {
     for (const f of this.floaters) f.obj.position.y = f.y + 0.6 + Math.sin(this.time * 1.2 + f.ph) * 0.35;
     this.particles.update(dt);
     this.pickups.update(dt, this.hero.position);
+    this.timeU.value = this.time;
+    this.ambient.update(this.time, this.hero.position, this.viewH);
     if (this.stage === 'return' && this.ghostT < 0 && this.hero.position.distanceTo(LICH) < TURN_IN_DIST) this.turnInTalk();
     this.updateCamera(dt);
     this.updateLabels(dt);

@@ -756,6 +756,13 @@ export const STAT_SOURCE_NAME: Record<StatSource, string> = {
   base: 'База', weapon: 'Оружие', enemy: 'Враг', mini: 'Мини-босс', gear: 'Снаряжение', debug: 'Дебаг',
 };
 
+/**
+ * Look of the game view: the hero's and the enemies' visual size (collisions, reach and hitboxes stay the same) and the
+ * camera's vertical field of view, degrees. The debug panel tunes them live; ENV is the size of trees, buildings and
+ * props placed in the level (src/world.ts).
+ */
+export const VIEW = { heroScale: 1.4, mobScale: 1, fov: 59, env: 1.15 };
+
 export const HERO = {
   /**
    * All stats are whole numbers. power: flat damage added to the weapon's base (before its type
@@ -804,14 +811,15 @@ export interface ZoneDef {
 }
 
 export const ZONES: ZoneDef[] = [
-  { id: 'forest', name: 'Лесная опушка', ground: 0x45b236, ground2: 0x6ac43e, sky: 0x9ae6c8, fog: 0xbaf0d0, hemi: [0xfaffef, 0x5a8a3a], fogDensity: 0.008, mist: 0.15, mistColor: 0xf0fff4 },
-  { id: 'cemetery', name: 'Старое кладбище', ground: 0x625ea0, ground2: 0x746cb4, sky: 0x7c6ed0, fog: 0x9488d8, hemi: [0xf0e8ff, 0x4e4888], fogDensity: 0.012, mist: 0.4, mistColor: 0xddd4ff },
+  // hemi: [sky, ground bounce] — the sky colour is what the shadows get, so it is kept cool against the warm sun
+  { id: 'forest', name: 'Лесная опушка', ground: 0x509a3a, ground2: 0x76b246, sky: 0x9ad8c8, fog: 0xb2dfcc, hemi: [0xc4d8ff, 0x6b8a4a], fogDensity: 0.008, mist: 0.08, mistColor: 0xf0fff4 },
+  { id: 'cemetery', name: 'Старое кладбище', ground: 0x5a5698, ground2: 0x6c64aa, sky: 0x7c6ed0, fog: 0x9086d4, hemi: [0xbcb4ff, 0x4e4888], fogDensity: 0.012, mist: 0.3, mistColor: 0xddd4ff },
   // Placeholder locations around the forest (no content yet: ground, sky and fog only).
-  { id: 'peaks', name: 'Снежный перевал', ground: 0xdfe9f4, ground2: 0xf2f6fc, sky: 0xbfe2ff, fog: 0xe2f1ff, hemi: [0xffffff, 0x8a9ab0], fogDensity: 0.009, mist: 0.2, mistColor: 0xffffff },
-  { id: 'swamp', name: 'Гнилое болото', ground: 0x5f8a3c, ground2: 0x739a46, sky: 0x9cc8b0, fog: 0xa8d0b8, hemi: [0xf0fff0, 0x4a6a3a], fogDensity: 0.01, mist: 0.35, mistColor: 0xd8f0e0 },
-  { id: 'grove', name: 'Осенняя роща', ground: 0xd8902e, ground2: 0xe8a840, sky: 0xffd8a0, fog: 0xffe4c0, hemi: [0xfff4e0, 0x8a6a3a], fogDensity: 0.007, mist: 0.1, mistColor: 0xfff0e0 },
-  { id: 'dunes', name: 'Песчаные дюны', ground: 0xe6c674, ground2: 0xf0d68e, sky: 0xa8dcff, fog: 0xfff0d0, hemi: [0xffffff, 0xa08a5a], fogDensity: 0.006, mist: 0.05, mistColor: 0xffffff },
-  { id: 'hills', name: 'Скалистые холмы', ground: 0x9a9286, ground2: 0xaca496, sky: 0xb0c8e0, fog: 0xc8d4e0, hemi: [0xffffff, 0x6a6458], fogDensity: 0.008, mist: 0.1, mistColor: 0xeef0f4 },
+  { id: 'peaks', name: 'Снежный перевал', ground: 0xdfe9f4, ground2: 0xf2f6fc, sky: 0xbfe2ff, fog: 0xe2f1ff, hemi: [0xd2e2ff, 0x8a9ab0], fogDensity: 0.009, mist: 0.12, mistColor: 0xffffff },
+  { id: 'swamp', name: 'Гнилое болото', ground: 0x587f3a, ground2: 0x6c9044, sky: 0x9cc8b0, fog: 0xa4ccb4, hemi: [0xc4dcec, 0x4a6a3a], fogDensity: 0.01, mist: 0.25, mistColor: 0xd8f0e0 },
+  { id: 'grove', name: 'Осенняя роща', ground: 0xcc8a30, ground2: 0xdea244, sky: 0xffd8a0, fog: 0xffe0bc, hemi: [0xe8d8e8, 0x8a6a3a], fogDensity: 0.007, mist: 0.06, mistColor: 0xfff0e0 },
+  { id: 'dunes', name: 'Песчаные дюны', ground: 0xe6c674, ground2: 0xf0d68e, sky: 0xa8dcff, fog: 0xfff0d0, hemi: [0xd4e4ff, 0xa08a5a], fogDensity: 0.006, mist: 0.03, mistColor: 0xffffff },
+  { id: 'hills', name: 'Скалистые холмы', ground: 0x9a9286, ground2: 0xaca496, sky: 0xb0c8e0, fog: 0xc8d4e0, hemi: [0xccd8f0, 0x6a6458], fogDensity: 0.008, mist: 0.06, mistColor: 0xeef0f4 },
 ];
 
 /**

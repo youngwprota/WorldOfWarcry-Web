@@ -105,6 +105,8 @@ export class UI {
   private bannerT = 0;
   private hintT = 0;
   private lastHud = '';
+  /** Location clear bar: the location on it, its share (0..1), the number shown (counts up) and that count's frame. */
+  private clr = { zone: '', p: 0, shown: 0, raf: 0, bannerT: 0 };
   onSettings: () => void = () => {};
   onBag: () => void = () => {};
   onGacha: () => void = () => {};
@@ -285,6 +287,113 @@ export class UI {
     el.classList.add('show');
     clearTimeout(this.bannerT);
     this.bannerT = window.setTimeout(() => el.classList.remove('show'), 2600);
+  }
+
+  /**
+   * Top bar: how much of the location is cleared (`dead` of its `total` enemies). A gain fills it with a catch-up
+   * (a bright ghost jumps ahead, the fill springs after it), a counting-up number, a "+N%" pop, a shine sweep and
+   * the 25/50/75% ticks lighting up; reaching 100% plays the "cleared" banner and confetti. A new location sets the
+   * bar at once; respawns take it down quietly.
+   */
+  clearProgress(zone: string, name: string, dead: number, total: number) {
+    const el = $('clear');
+    el.classList.toggle('hidden', total === 0);
+    if (!total) return;
+    const c = this.clr;
+    const p = dead / total;
+    const fill = el.querySelector<HTMLElement>('.cl-fill')!;
+    const ghost = el.querySelector<HTMLElement>('.cl-ghost')!;
+    const pct = (v: number) => Math.round(v * 100);
+    if (zone !== c.zone) {
+      c.zone = zone;
+      c.p = p;
+      el.querySelector('.cl-zone')!.textContent = name;
+      el.querySelector('.cl-badge')!.innerHTML = art('skull', 30);
+      for (const b of [fill, ghost]) {
+        b.style.transition = 'none';
+        b.style.width = `${p * 100}%`;
+        void b.offsetWidth;
+        b.style.transition = '';
+      }
+      el.classList.toggle('done', p >= 1);
+      this.clearTicks(p, false);
+      this.countClear(pct(p), true);
+      return;
+    }
+    if (p === c.p) return;
+    const was = c.p;
+    c.p = p;
+    el.classList.toggle('down', p < was);
+    ghost.style.width = fill.style.width = `${p * 100}%`;
+    el.classList.toggle('done', p >= 1);
+    this.clearTicks(p, p > was);
+    if (p < was) { this.countClear(pct(p), true); return; }
+    this.countClear(pct(p), false);
+    // the hit: number pop, shine sweep and badge bounce restart; "+N%" rises from the end of the fill
+    el.classList.remove('hit');
+    void el.offsetWidth;
+    el.classList.add('hit');
+    const pop = document.createElement('div');
+    pop.className = 'cl-plus';
+    pop.textContent = `+${Math.max(1, pct(p) - pct(was))}%`;
+    pop.style.left = `${p * 100}%`;
+    pop.addEventListener('animationend', () => pop.remove());
+    el.querySelector('.cl-main')!.appendChild(pop);
+    sfx.clearTick(p);
+    if (p >= 1 && was < 1) this.clearedBanner(name);
+  }
+
+  /** The number on the clear bar: counts up to `n` (or jumps there). */
+  private countClear(n: number, instant: boolean) {
+    const c = this.clr;
+    const out = $('clear').querySelector<HTMLElement>('.cl-pct')!;
+    cancelAnimationFrame(c.raf);
+    if (instant) { c.shown = n; out.textContent = `${n}%`; return; }
+    const from = c.shown;
+    const t0 = performance.now();
+    const step = () => {
+      const k = Math.min(1, (performance.now() - t0) / 550);
+      c.shown = Math.round(from + (n - from) * (1 - (1 - k) ** 3));
+      out.textContent = `${c.shown}%`;
+      if (k < 1) c.raf = requestAnimationFrame(step);
+    };
+    step();
+  }
+
+  /** Milestone ticks at 25/50/75%: lit once passed, a flash for the ones just crossed. */
+  private clearTicks(p: number, flash: boolean) {
+    $('clear').querySelectorAll<HTMLElement>('.cl-ticks i').forEach((t, i) => {
+      const on = p >= (i + 1) * 0.25;
+      if (on && flash && !t.classList.contains('on')) {
+        t.classList.remove('flash');
+        void t.offsetWidth;
+        t.classList.add('flash');
+      }
+      t.classList.toggle('on', on);
+    });
+  }
+
+  /** 100%: the "location cleared" banner with rays, confetti from the bar and a fanfare. */
+  private clearedBanner(name: string) {
+    const b = $('clear-banner');
+    b.querySelector('.cb-sub')!.textContent = name;
+    b.classList.remove('show');
+    void b.offsetWidth;
+    b.classList.add('show');
+    clearTimeout(this.clr.bannerT);
+    this.clr.bannerT = window.setTimeout(() => b.classList.remove('show'), 3000);
+    const box = $('clear');
+    const colors = ['#ffe14a', '#ff8a30', '#7dff8e', '#6ad8ff', '#ff6aa8', '#ffffff'];
+    for (let i = 0; i < 26; i++) {
+      const f = document.createElement('i');
+      f.className = 'cl-confetti';
+      const a = (i / 26) * Math.PI * 2 + Math.random() * 0.3;
+      const d = 60 + Math.random() * 90;
+      f.style.cssText = `--dx:${Math.cos(a) * d}px;--dy:${Math.sin(a) * d * 0.7 + 30}px;--r:${Math.random() * 720 - 360}deg;--c:${colors[i % colors.length]};left:${30 + Math.random() * 40}%`;
+      f.addEventListener('animationend', () => f.remove());
+      box.appendChild(f);
+    }
+    sfx.cleared();
   }
 
   toast(text: string, ms = 3200) {

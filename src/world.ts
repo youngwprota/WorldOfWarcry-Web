@@ -2,15 +2,18 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
+import { FACTIONS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
   ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
   borderAway, borderRoom, pathAt, pathDist, progressAt, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
 } from './island';
 import type { Gate } from './island';
 import {
-  bakeGroundMaps, buildFlowers, buildGrass, buildGround, buildMist, buildOcean, buildPond, windTime, zoneTexture, type Pond,
+  GroundLayers, bakeGroundMaps, buildCobbles, buildGrassField, buildGround, buildRitual, buildMist, groundColorTexture, windTime, zoneTexture, type Pond,
 } from './terrain';
+import { buildOcean, buildPond, pondR } from './water';
+import { applyScenery, patchScenery, scenery, type SceneryLook } from './atmos';
+import { buildDecor } from './decor';
 import { BREAKABLES } from './config';
 export { BREAKABLES, type BreakableDef, type BreakEvent } from './config';
 
@@ -43,30 +46,46 @@ const bushMat = new THREE.MeshLambertMaterial({ color: 0x4c9a35, flatShading: tr
 export function makeBreakable(kind: string): THREE.Object3D {
   const d = BREAKABLES[kind];
   const g = new THREE.Group();
+  // (the level size goes on the parts: the game wobbles the group itself on hits)
   if (d.model) {
     const m = assets.clone(d.model);
-    m.scale.multiplyScalar(d.scale);
-    // Per-instance material clone so hit flashes stay local.
+    m.scale.multiplyScalar(d.scale * ENV);
+    // Per-instance material clone so hit flashes stay local; it gets the level look (clouds, contact shade, sway).
+    const look = lookOf(d.model);
     m.traverse((o) => {
       const mesh = o as THREE.Mesh;
-      if (mesh.isMesh) { mesh.material = (mesh.material as THREE.Material).clone(); mesh.castShadow = true; }
+      if (mesh.isMesh) { mesh.material = patchScenery((mesh.material as THREE.Material).clone(), look); mesh.castShadow = true; }
     });
     g.add(m);
   } else {
     const mat = bushMat.clone();
+    const bush = new THREE.Group();
+    bush.scale.setScalar(ENV);
     for (let i = 0; i < 3; i++) {
       const b = new THREE.Mesh(bushGeo, mat);
       b.position.set(Math.cos(i * 2.1) * 0.35, 0.45 + (i % 2) * 0.15, Math.sin(i * 2.1) * 0.35);
       b.scale.setScalar(0.9 + i * 0.15);
       b.castShadow = true;
-      g.add(b);
+      bush.add(b);
     }
+    g.add(bush);
   }
-  g.add(blobShadow(d.r * 2.6));
+  g.add(blobShadow(d.r * 2.6 * ENV));
   return g;
 }
 
-interface Inst { x: number; z: number; s: number; r?: number; y?: number; tint?: number; }
+/** An instanced copy: position, scale, turn, height override, tint and `k` = tint brightness (> 1 lightens a dark texture). */
+interface Inst { x: number; z: number; s: number; r?: number; y?: number; tint?: number; k?: number }
+
+/** Size of everything placed in the level (VIEW.env): trees, buildings, props, breakables. */
+const ENV = VIEW.env;
+/** Models whose size the layout depends on (the bone gate: its posts and the barrier are placed for it). */
+const FIXED_SIZE = new Set(['undead_tusk_gate']);
+
+/** Foliage models and how much they bend in the wind (SceneryLook.sway; the bend grows with height²). */
+const FOLIAGE: Record<string, number> = { elf_tree: 0.55, elf_foliage_small: 4, elf_foliage_mid: 6, elf_foliage_big: 2.5 };
+/** Level look of a model: foliage sways; everything gets contact shade at its base. */
+const lookOf = (name: string): SceneryLook => ({ sway: FOLIAGE[name] ?? 0, base: 1 });
 
 /** Foliage tints (multiply the elf texture) so groves are not all the same lime green. */
 const LEAF_TINTS = [0xffffff, 0xd4ecb0, 0xa8d488, 0x8fc47a, 0xc2e09a];
@@ -86,6 +105,54 @@ function trailExit(cx: number, cz: number, r: number, forward: boolean) {
   }
   return forward ? Math.PI : 0;
 }
+/** The outer locations' paths (LAND_TRAILS) sampled every metre, bucketed by 8 m cells: decor keeps off them. */
+const LAND_TRAIL_GRID = (() => {
+  const g = new Map<number, [number, number][]>();
+  for (const line of LAND_TRAILS) {
+    for (let i = 0; i < line.length - 1; i++) {
+      const [x0, z0] = line[i];
+      const [x1, z1] = line[i + 1];
+      const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0)));
+      for (let k = 0; k <= n; k++) {
+        const x = x0 + ((x1 - x0) * k) / n;
+        const z = z0 + ((z1 - z0) * k) / n;
+        const key = Math.floor(x / 8) * 1000 + Math.floor(z / 8);
+        if (!g.has(key)) g.set(key, []);
+        g.get(key)!.push([x, z]);
+      }
+    }
+  }
+  return g;
+})();
+/** Metres to the nearest outer-location path (up to ~16; 99 when none is near). */
+function landTrailDist(x: number, z: number) {
+  let best = 99;
+  const cx = Math.floor(x / 8);
+  const cz = Math.floor(z / 8);
+  for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
+    for (const [px, pz] of LAND_TRAIL_GRID.get((cx + i) * 1000 + cz + j) ?? []) best = Math.min(best, Math.hypot(px - x, pz - z));
+  }
+  return best;
+}
+
+/** Murky pools of the swamp: off its paths, its boss and mini spots and the passages, apart from each other. */
+function swampPonds(): Pond[] {
+  const r = rng(91);
+  const land = LAND_BOSSES.find((l) => l.zone === 'swamp')!;
+  const keep = [land.boss!, ...land.minis];
+  const out: Pond[] = [];
+  for (let i = 0; i < 4000 && out.length < 6; i++) {
+    const x = MAP_BOX.x + r() * MAP_BOX.size;
+    const z = MAP_BOX.z + r() * MAP_BOX.size;
+    const pr = 3.2 + r() * 2.8;
+    if (zoneIdAt(x, z) !== 'swamp' || !walkable(x, z, pr + 2) || landTrailDist(x, z) < pr + 4 || gateDist(x, z) < pr + 9) continue;
+    if (keep.some(([kx, kz]) => Math.hypot(kx - x, kz - z) < pr + 11)) continue;
+    if (out.some((p) => Math.hypot(p.x - x, p.z - z) < p.r + pr + 7)) continue;
+    out.push({ x, z, r: pr, murky: true });
+  }
+  return out;
+}
+
 const bandKey = (x: number, z: number) => Math.floor(x / 24) * 1000 + Math.floor(z / 24);
 function bands(items: Inst[]) {
   const b = new Map<number, Inst[]>();
@@ -118,18 +185,27 @@ export class World {
   private flames: THREE.Mesh[] = [];
   private time = { value: 0 };
   private mist: ReturnType<typeof buildMist>;
+  /** Grass, flowers and the rest of the knee-high clutter (hidden on low graphics). */
   private grass: THREE.Object3D[] = [];
+  private grassField: ReturnType<typeof buildGrassField>;
+  /** Contact shadows and grass holes under everything placed (painted while building, then uploaded). */
+  private layers: GroundLayers;
+  /** Trunk spots of every tree (mushrooms and ferns grow round them). */
+  private treeSpots: [number, number][] = [];
   private sizeCache = new Map<string, THREE.Vector3>();
   private packCenters: [number, number][] = [];
 
   constructor(public faction: FactionId) {
+    this.ponds.push(...swampPonds());
     const maps = bakeGroundMaps(this.ponds);
     this.mapCanvas = maps.map;
-    this.group.add(buildGround(maps.ground));
+    const colorMap = groundColorTexture(maps.ground);
+    this.layers = new GroundLayers(maps.grass);
+    this.group.add(buildGround(colorMap, this.layers));
     const zoneTex = zoneTexture();
-    this.group.add(buildOcean(this.time, maps.shoreTex));
+    this.group.add(buildOcean(maps.shoreTex));
     for (const p of this.ponds) {
-      this.group.add(buildPond(p, this.time));
+      this.group.add(buildPond(p));
       this.obstacles.push({ x: p.x, z: p.z, r: p.r * 0.85 });
     }
     this.buildCamp();
@@ -138,9 +214,11 @@ export class World {
     this.buildCemetery();
     this.buildOuterLands();
     this.buildRim();
-    const free = (x: number, z: number) => this.free(x, z, 0.2);
-    this.grass = [buildGrass(free, this.ponds), buildFlowers(free)];
-    this.group.add(...this.grass);
+    this.layers.commit(); // (no grass in the ponds: the bake follows their shores)
+    this.grassField = buildGrassField(colorMap, this.layers);
+    const clutter = [this.grassField.mesh, ...buildDecor((x, z, pad) => this.free(x, z, pad), this.treeSpots)];
+    this.grass.push(...clutter);
+    this.group.add(...clutter);
     this.mist = buildMist(this.time, zoneTex);
     this.group.add(this.mist.group);
     this.fog = new FogOfWar(this.time);
@@ -206,6 +284,10 @@ export class World {
   /** Cloned model with shadows; `collide: 'auto'` derives a circle from the footprint. */
   private place(name: string, x: number, z: number, scale = 1, rot = 0, collide: number | 'auto' = 'auto') {
     if (!assets.has(name)) { console.warn('level model not loaded:', name); return null; }
+    if (!FIXED_SIZE.has(name)) {
+      scale *= ENV;
+      if (collide !== 'auto') collide *= ENV;
+    }
     const m = assets.clone(name);
     m.scale.multiplyScalar(scale);
     // Some props are pivoted at the top (hanging lamps, drums): stand them on the ground.
@@ -216,10 +298,25 @@ export class World {
       const mesh = o as THREE.Mesh;
       if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true; }
     });
+    applyScenery(m, lookOf(name));
     this.group.add(m);
-    const r = collide === 'auto' ? Math.min(this.size(name).x, this.size(name).z) * scale * 0.45 : collide;
+    const sz = this.size(name);
+    this.groundUnder(name, x, z, sz.x * scale, sz.y * scale, sz.z * scale);
+    const r = collide === 'auto' ? Math.min(sz.x, sz.z) * scale * 0.45 : collide;
     if (r > 0) this.obstacles.push({ x, z, r });
     return m;
+  }
+
+  /** Contact shadow under a model (footprint sx × sz, height sy, already scaled) and no grass inside it; trees keep grass round the trunk. */
+  private groundUnder(name: string, x: number, z: number, sx: number, sy: number, sz: number) {
+    if (sy < 0.25) return; // flat bits (stepping stones) sit in the ground already
+    const fr = Math.max(sx, sz) * 0.5;
+    const k = Math.min(0.6, 0.18 + sy * 0.07);
+    this.layers.occlude(x, z, fr + 0.6, k * 0.65);
+    this.layers.occlude(x, z, Math.max(0.45, fr * 0.45), k);
+    const foliage = name in FOLIAGE;
+    this.layers.clear(x, z, foliage ? Math.min(0.5, fr * 0.25) : fr * 0.8);
+    if (foliage && sy > 2) this.treeSpots.push([x, z]);
   }
 
   /**
@@ -245,11 +342,11 @@ export class World {
    * Instanced copies of a model (trees, rocks, poles). Items are split into 24 m tiles so each tile
    * has its own bounding sphere and off-screen tiles are frustum-culled.
    */
-  private scatter(name: string, items: Inst[], shadow = true) {
-    for (const band of bands(items)) this.scatterBand(name, band, shadow);
+  private scatter(name: string, items: Inst[], shadow = true, look: SceneryLook = {}) {
+    for (const band of bands(items)) this.scatterBand(name, band, shadow, look);
   }
 
-  private scatterBand(name: string, items: Inst[], shadow: boolean) {
+  private scatterBand(name: string, items: Inst[], shadow: boolean, lookOver: SceneryLook) {
     if (!items.length) return;
     if (!assets.has(name)) { console.warn('level model not loaded:', name); return; }
     const src = assets.clone(name);
@@ -258,16 +355,21 @@ export class World {
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
     const col = new THREE.Color();
+    const look = { ...lookOf(name), ...lookOver };
+    const sz = this.size(name);
+    const k = FIXED_SIZE.has(name) ? 1 : ENV;
+    for (const t of items) this.groundUnder(name, t.x, t.z, sz.x * t.s * k, sz.y * t.s * k, sz.z * t.s * k);
     src.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
       const geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
-      const im = new THREE.InstancedMesh(geo, mesh.material as THREE.Material, items.length);
+      const mat = mesh.material as THREE.Material | THREE.Material[];
+      const im = new THREE.InstancedMesh(geo, Array.isArray(mat) ? mat.map((x) => scenery(x, look)) : scenery(mat, look), items.length);
       items.forEach((t, i) => {
         q.setFromAxisAngle(up, t.r ?? 0);
-        m.compose(new THREE.Vector3(t.x, t.y ?? heightAt(t.x, t.z), t.z), q, new THREE.Vector3(t.s, t.s, t.s));
+        m.compose(new THREE.Vector3(t.x, t.y ?? heightAt(t.x, t.z), t.z), q, new THREE.Vector3(t.s * k, t.s * k, t.s * k));
         im.setMatrixAt(i, m);
-        im.setColorAt(i, col.set(t.tint ?? 0xffffff));
+        im.setColorAt(i, col.set(t.tint ?? 0xffffff).multiplyScalar(t.k ?? 1));
       });
       im.castShadow = shadow;
       im.receiveShadow = true;
@@ -278,14 +380,20 @@ export class World {
 
   /** Cheap low-poly pines for the rim (~30 triangles each vs ~2000 for the elf trees). */
   private pines(items: Inst[]) {
+    items = items.map((t) => ({ ...t, s: t.s * ENV }));
     const trunk = new THREE.CylinderGeometry(0.15, 0.25, 1.4, 5).translate(0, 0.7, 0);
     const c1 = new THREE.ConeGeometry(1.4, 2.6, 7).translate(0, 2.4, 0);
     const c2 = new THREE.ConeGeometry(1.0, 2.0, 7).translate(0, 3.6, 0);
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x6b4a2f, flatShading: true });
-    const leafMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+    const trunkMat = scenery(new THREE.MeshLambertMaterial({ color: 0x6b4a2f, flatShading: true }), { sway: 0.5 });
+    const leafMat = scenery(new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), { sway: 0.5 });
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const col = new THREE.Color();
+    for (const t of items) {
+      this.layers.occlude(t.x, t.z, 2.2 * t.s, 0.4);
+      this.layers.occlude(t.x, t.z, 0.8 * t.s, 0.5);
+      this.treeSpots.push([t.x, t.z]);
+    }
     for (const band of bands(items)) {
       const meshes = [new THREE.InstancedMesh(trunk, trunkMat, band.length), new THREE.InstancedMesh(c1, leafMat, band.length), new THREE.InstancedMesh(c2, leafMat, band.length)];
       band.forEach((t, i) => {
@@ -300,14 +408,18 @@ export class World {
 
   /** Bare spooky trees: instanced trunk + three crooked branches. */
   private deadTrees(items: Inst[], color = 0x4a3f5a) {
-    for (const band of bands(items)) this.deadTreeBand(band, color);
+    for (const band of bands(items.map((t) => ({ ...t, s: t.s * ENV })))) this.deadTreeBand(band, color);
   }
 
   private deadTreeBand(items: Inst[], color: number) {
     if (!items.length) return;
     const trunk = new THREE.CylinderGeometry(0.12, 0.3, 2.6, 6).translate(0, 1.3, 0);
     const branch = new THREE.CylinderGeometry(0.04, 0.1, 1.5, 5).translate(0, 0.75, 0);
-    const mat = new THREE.MeshLambertMaterial({ color, flatShading: true });
+    const mat = scenery(new THREE.MeshLambertMaterial({ color, flatShading: true }));
+    for (const t of items) {
+      this.layers.occlude(t.x, t.z, 1.6 * t.s, 0.3);
+      this.layers.occlude(t.x, t.z, 0.6 * t.s, 0.45);
+    }
     const trunks = new THREE.InstancedMesh(trunk, mat, items.length);
     const branches = new THREE.InstancedMesh(branch, mat, items.length * 4);
     const m = new THREE.Matrix4();
@@ -488,6 +600,11 @@ export class World {
       this.place('spear', 9.9, cz - 6.2, 0.8, -Math.PI / 2, 0);
     }
     this.campfireDecor(-3.8, cz - 0.8); // decoration only
+    // cobbled square round the fire and the well, a cobbled road out of the gate (no grass on it)
+    const sq = { x: 0.2, z: cz + 0.8, r: 6.4 };
+    const road = { x: CAMP_EXIT.x + CAMP_EXIT.dirX * 1.2, z: CAMP_EXIT.z + CAMP_EXIT.dirZ * 1.2 };
+    this.group.add(buildCobbles(sq, road));
+    for (let t = 0; t <= 1; t += 0.05) this.layers.clear(sq.x + (road.x - sq.x) * t, sq.z + (road.z - sq.z) * t, 1.5);
     // breakable supply crates inside the camp, left and right of the spawn, clear of the walk to the exit
     const spots = [[6.5, -6], [8, -4.6], [6.6, 1.4], [7.9, 0.6], [-6, -4], [-7, -2.2], [-6.8, 2.6], [-6.2, 1.6]];
     PROP_SPAWNERS.camp.slice(0, spots.length).forEach((d, i) => {
@@ -514,9 +631,10 @@ export class World {
   /** The camp's fire: model and a flickering flame, no gameplay. */
   private campfireDecor(x: number, z: number) {
     this.place(FACTIONS[this.faction].campfire, x, z, 0.42, 0, 0.8);
+    // brighter than white in the HDR frame, so the post glow lights round it
     const flame = new THREE.Mesh(
       new THREE.ConeGeometry(0.35, 1, 6).translate(0, 0.5, 0),
-      new THREE.MeshBasicMaterial({ color: 0xffa020, transparent: true, opacity: 0.85 }),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffa020).multiplyScalar(2.4), transparent: true, opacity: 0.85 }),
     );
     flame.position.set(x, 0.15, z);
     this.group.add(flame);
@@ -940,6 +1058,7 @@ export class World {
       p = at(sx * 4, ARENA.r + 3);
       if (this.free(p.x, p.z, 0.5)) this.place('undead_obelisk', p.x, p.z, 0.8, r() * 6);
     }
+    this.group.add(buildRitual(ax, az, ARENA.r - 2.5, this.time));
     this.bosses.push({ mob: 'death', x: ax, z: az });
     this.packCenters.push([ax, az]);
     const nearArena = (x: number, z: number) => Math.hypot(x - ax, z - az) < ARENA.r + 1.5;
@@ -1052,6 +1171,164 @@ export class World {
     this.scatter('elf_rock_small', rocks, false);
     this.scatter('elf_rock_big', bigRocks);
     this.scatter('elf_log_pile', logs);
+    this.dressOuterLands(r);
+  }
+
+  /**
+   * The placeholder locations get a look of their own (decor only; trunks, rocks and logs collide): an autumn wood in
+   * the grove, murky pools with reeds and lily pads, swamp trees and snags in the swamp, bleached rocks, dry scrub
+   * and bones in the dunes, boulders and pines on the hills. Everything keeps off their paths, packs and passages.
+   */
+  private dressOuterLands(r: () => number) {
+    const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
+    const anywhere = () => ({ x: MAP_BOX.x + r() * MAP_BOX.size, z: MAP_BOX.z + r() * MAP_BOX.size });
+    const room = (zone: ZoneId, pad: number, gap = 3.5) => (x: number, z: number) => zoneIdAt(x, z) === zone && this.free(x, z, pad)
+      && !this.nearPack(x, z, 5) && gateDist(x, z) > 7 && landTrailDist(x, z) > gap;
+    const tree = (list: Inst[], x: number, z: number, tint: number) => {
+      list.push({ x, z, s: 0.55 + r() * 0.35, r: r() * 6, tint });
+      this.obstacles.push({ x, z, r: 0.5 });
+    };
+    const bush = (list: Inst[], x: number, z: number, tint?: number) => {
+      const s = 0.16 + r() * 0.12;
+      list.push({ x, z, s, r: r() * 6, y: 1.0 * s, tint });
+      this.obstacles.push({ x, z, r: 2.4 * s });
+    };
+    /** A boulder of scale s; `cr`: its collision radius, `k`: tint brightness. */
+    const rock = (list: Inst[], x: number, z: number, s: number, cr: number, tint?: number, k = 1) => {
+      list.push({ x, z, s, r: r() * 6, tint, k });
+      this.obstacles.push({ x, z, r: cr });
+    };
+
+    // Autumn grove: orange, red and gold crowns, leafy scrub, stumps and fallen logs
+    const AUTUMN = [0xff8a30, 0xffb040, 0xe85a28, 0xd8402a, 0xffd050, 0xc86a20];
+    const gTrees: Inst[] = [], gBush: Inst[] = [], stumps: Inst[] = [], logs: Inst[] = [];
+    for (const { x, z } of this.spread(90, 6, anywhere, room('grove', 1.2))) {
+      const k = r();
+      if (k < 0.62) tree(gTrees, x, z, pick(AUTUMN));
+      else if (k < 0.86) bush(gBush, x, z, pick(AUTUMN));
+      else if (k < 0.94) stumps.push({ x, z, s: 0.3 + r() * 0.2, r: r() * 6 });
+      else { logs.push({ x, z, s: 0.5 + r() * 0.2, r: r() * 6 }); this.obstacles.push({ x, z, r: 0.8 }); }
+    }
+    this.scatter('elf_tree', gTrees, true, { recolor: true });
+    this.scatter('elf_foliage_mid', gBush, true, { recolor: true });
+
+    // Swamp: pools with reeds and lily pads, olive trees, snags, mossy logs and stones
+    const MURK = [0x5e7030, 0x4e6229, 0x6a6e34, 0x445a26];
+    const sTrees: Inst[] = [], sBush: Inst[] = [], snags: Inst[] = [], sRocks: Inst[] = [];
+    for (const { x, z } of this.spread(70, 5.5, anywhere, room('swamp', 1.2))) {
+      const k = r();
+      if (k < 0.4) tree(sTrees, x, z, pick(MURK));
+      else if (k < 0.62) { snags.push({ x, z, s: 0.8 + r() * 0.5, r: r() * 6 }); this.obstacles.push({ x, z, r: 0.45 }); }
+      else if (k < 0.8) bush(sBush, x, z, pick(MURK));
+      else if (k < 0.9) { logs.push({ x, z, s: 0.5 + r() * 0.2, r: r() * 6 }); this.obstacles.push({ x, z, r: 0.8 }); }
+      else sRocks.push({ x, z, s: 0.4 + r() * 0.3, r: r() * 6, tint: 0x8a9a70 });
+    }
+    this.scatter('elf_tree', sTrees, true, { recolor: true });
+    this.scatter('elf_foliage_mid', sBush, true, { recolor: true });
+    this.deadTrees(snags, 0x4e5240);
+    this.scatter('elf_rock_small', sRocks, false);
+    const reeds: Inst[] = [];
+    const pads: Inst[] = [];
+    // (the forest pond gets a few too, greener)
+    for (const p of this.ponds) {
+      for (let k = 0; k < (p.murky ? 18 : 9); k++) {
+        const a = r() * Math.PI * 2;
+        const d = pondR(p, a) * (0.86 + r() * 0.24);
+        const x = p.x + Math.sin(a) * d;
+        const z = p.z + Math.cos(a) * d;
+        reeds.push({ x, z, s: 0.7 + r() * 0.6, r: r() * 6, tint: pick(p.murky ? [0x6a7a34, 0x7e8a3c, 0x8a7a40] : [0x5a8a34, 0x6a9a3c, 0x78903e]) });
+      }
+      for (let k = 0; k < (p.murky ? 9 : 4); k++) {
+        const a = r() * Math.PI * 2;
+        const d = Math.sqrt(r()) * pondR(p, a) * 0.7;
+        pads.push({ x: p.x + Math.sin(a) * d, z: p.z + Math.cos(a) * d, s: 0.7 + r() * 0.6, r: r() * 6, y: 0.055, tint: pick([0x4e8a36, 0x5e9a3e, 0x6aa040]) });
+      }
+    }
+    this.reeds(reeds);
+    this.lilyPads(pads);
+
+    // Dunes: sun-bleached boulders and stones, dry scrub, white snags and old bones
+    const SAND_ROCK = [0xe8d0a0, 0xd8c090, 0xf0dcb0];
+    const dRocks: Inst[] = [], dSmall: Inst[] = [], scrub: Inst[] = [], bleached: Inst[] = [], bones: Inst[] = [];
+    for (const { x, z } of this.spread(70, 6, anywhere, room('dunes', 1.2))) {
+      const k = r();
+      if (k < 0.3) { const s = 0.45 + r() * 0.35; rock(dRocks, x, z, s, 1.6 * s, pick(SAND_ROCK), 2.1); }
+      else if (k < 0.5) dSmall.push({ x, z, s: 0.5 + r() * 0.5, r: r() * 6, tint: pick(SAND_ROCK), k: 1.8 });
+      else if (k < 0.75) bush(scrub, x, z, pick([0xc8a048, 0xb89040, 0xd8b860]));
+      else if (k < 0.88) { bleached.push({ x, z, s: 0.7 + r() * 0.4, r: r() * 6 }); this.obstacles.push({ x, z, r: 0.45 }); }
+      else bones.push({ x, z, s: 0.35 + r() * 0.2, r: r() * 6 });
+    }
+    this.scatter('elf_rock_big', dRocks);
+    this.scatter('elf_rock_small', dSmall, false);
+    this.scatter('elf_foliage_small', scrub, true, { recolor: true });
+    this.deadTrees(bleached, 0xb8a888);
+    this.scatter('undead_bones_remains', bones, false);
+
+    // Rocky hills: boulders, pines, loose stones
+    const PINE = [0x3f7a32, 0x4f8a3c, 0x5c9a40, 0x37702e];
+    const hRocks: Inst[] = [], hPines: Inst[] = [], hSmall: Inst[] = [];
+    for (const { x, z } of this.spread(80, 6, anywhere, room('hills', 1.2))) {
+      const k = r();
+      if (k < 0.4) { const s = 0.45 + r() * 0.45; rock(hRocks, x, z, s * 2.6, 1.1 * s, pick([0xc8c0b4, 0xb0a89c, 0xd8d0c4])); }
+      else if (k < 0.75) { hPines.push({ x, z, s: 0.9 + r() * 0.4, r: r() * 6, tint: pick(PINE) }); this.obstacles.push({ x, z, r: 0.5 }); }
+      else hSmall.push({ x, z, s: 0.5 + r() * 0.5, r: r() * 6 });
+    }
+    this.scatter('orc_stone_big', hRocks);
+    this.pines(hPines);
+    this.scatter('elf_rock_small', hSmall, false);
+    this.scatter('elf_tree_root_1', stumps, false);
+    this.scatter('orc_log', logs);
+  }
+
+  /** Reed clumps round the swamp pools: tall thin blades swaying in the wind. */
+  private reeds(items: Inst[]) {
+    if (!items.length) return;
+    const pos: number[] = [];
+    for (let k = 0; k < 7; k++) {
+      const a = k * 2.4;
+      const bx = Math.cos(a) * 0.12 * (k % 3);
+      const bz = Math.sin(a) * 0.12 * (k % 3);
+      const h = 0.75 + (k % 4) * 0.12;
+      const lx = Math.cos(a) * 0.12;
+      const lz = Math.sin(a) * 0.12;
+      pos.push(bx - 0.03, 0, bz, bx + 0.03, 0, bz, bx + lx, h, bz + lz);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+    const mat = scenery(new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), { sway: 9, base: 0 });
+    this.instances(geo, mat, items, false);
+  }
+
+  /** Lily pads floating on the swamp pools: notched discs, a pale flower on some. */
+  private lilyPads(items: Inst[]) {
+    if (!items.length) return;
+    const geo = new THREE.CircleGeometry(0.32, 9, 0.35, Math.PI * 2 - 0.7).rotateX(-Math.PI / 2);
+    this.instances(geo, scenery(new THREE.MeshLambertMaterial({ color: 0xffffff }), { base: 0 }), items, false);
+    const flowers = items.filter((_, i) => i % 3 === 0).map((p) => ({ ...p, y: 0.09, tint: 0xffd8ec }));
+    const fgeo = new THREE.IcosahedronGeometry(0.08, 0).scale(1, 0.6, 1);
+    this.instances(fgeo, scenery(new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), { base: 0 }), flowers, false);
+  }
+
+  /** Plain instanced copies of a geometry (tinted per item), in culling bands. */
+  private instances(geo: THREE.BufferGeometry, mat: THREE.Material, items: Inst[], shadow: boolean) {
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const col = new THREE.Color();
+    for (const band of bands(items)) {
+      const im = new THREE.InstancedMesh(geo, mat, band.length);
+      band.forEach((t, i) => {
+        q.setFromAxisAngle(up, t.r ?? 0);
+        im.setMatrixAt(i, m.compose(new THREE.Vector3(t.x, t.y ?? heightAt(t.x, t.z), t.z), q, new THREE.Vector3(t.s, t.s, t.s)));
+        im.setColorAt(i, col.set(t.tint ?? 0xffffff));
+      });
+      im.castShadow = shadow;
+      im.receiveShadow = true;
+      im.computeBoundingSphere();
+      this.grass.push(im);
+      this.group.add(im);
+    }
   }
 
   /** Stone elf buildings round the Snow Pass boss, frosted (pale blue-white tint). */
@@ -1136,7 +1413,7 @@ export class World {
     this.scatter('orc_log', logs, false);
   }
 
-  /** Low graphics: no ground mist, grass or flowers. */
+  /** Low graphics: no ground mist, grass or ground clutter. */
   setLowDetail(low: boolean) {
     this.mist.group.visible = !low;
     for (const g of this.grass) g.visible = !low;
@@ -1162,6 +1439,7 @@ export class World {
     this.time.value = time;
     windTime.value = time;
     this.mist.setCamera(camTarget);
+    this.grassField.follow(camTarget);
     for (const g of this.gates) {
       if (!g.open || !g.mesh.visible) continue;
       const a = (g.mat.uniforms.a.value -= dt * 0.8);

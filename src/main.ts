@@ -23,6 +23,7 @@ import { UI } from './ui';
 import { DragScroll } from './dragscroll';
 import { BREAKABLES } from './world';
 import { CLASSES } from './party';
+import { Post } from './post';
 
 const ui = new UI();
 const app = ui.app;
@@ -47,11 +48,14 @@ renderer.domElement.addEventListener('webglcontextrestored', () => {
 });
 const input = new Input(app);
 const labels = document.getElementById('labels')!;
+/** Glow, grade and vignette over the game view (src/post.ts); null on low graphics. */
+let post: Post | null = new Post(renderer);
 
 function resize() {
   const w = app.clientWidth;
   const h = app.clientHeight;
   renderer.setSize(w, h, false);
+  post?.resize();
   ui.fit();
   return { w, h };
 }
@@ -95,7 +99,7 @@ for (const [m] of FORGE3D.decor) models.add(m);
   'orc_head_lantern', 'orc_flag_red', 'orc_drum_big', 'orc_altar', 'orc_horned_skull', 'cauldron', 'box_large_2',
   'elf_log_pile', 'saw', 'wood_pile_small', 'bucket', 'elf_stone_big', 'mine_enterance', 'minecart',
   'mine_rail_piece', 'box_small_2', 'orc_throne', 'tower_Lv2', 'throne_Lv1', 'banner', 'elf_rock_small', 'elf_tree',
-  'elf_foliage_small', 'elf_foliage_mid', 'elf_tree_root_1', 'undead_tusk_gate', 'undead_house_tower', 'undead_tower_small',
+  'elf_foliage_small', 'elf_foliage_mid', 'elf_tree_root_1', 'elf_rock_big', 'undead_tusk_gate', 'undead_house_tower', 'undead_tower_small',
   'undead_smithy_house', 'undead_building', 'undead_tower', 'undead_wheel_of_pain', 'undead_cauldron', 'undead_flag',
   'undead_windmill', 'undead_tower_Lv2', 'undead_throne_Lv1', 'undead_throne', 'undead_floating_stone',
   'undead_floating_coffin', 'undead_column_2', 'undead_tomb_stone_5', 'undead_tomb_stone_6', 'undead_ground_bone_1',
@@ -115,6 +119,7 @@ let game: Game | null = null;
 function applyGfx(low: boolean) {
   renderer.shadowMap.enabled = !low;
   renderer.setPixelRatio(low ? 1 : Math.min(devicePixelRatio, 2));
+  if (low) { post?.dispose(); post = null; } else post ??= new Post(renderer);
   resize();
   game?.setLowGfx(low);
 }
@@ -190,8 +195,10 @@ function prologue() {
     const dt = clock.getDelta();
     p.camera.aspect = app.clientWidth / app.clientHeight;
     p.camera.updateProjectionMatrix();
+    p.viewH = renderer.domElement.height;
     p.update(dt);
-    renderer.render(p.scene, p.camera);
+    if (post) post.render(p.scene, p.camera);
+    else renderer.render(p.scene, p.camera);
   });
 }
 
@@ -249,7 +256,8 @@ function factionScreen(gains: Gains) {
     lich.update(dt, false);
     cam.aspect = app.clientWidth / app.clientHeight;
     cam.updateProjectionMatrix();
-    renderer.render(scene, cam);
+    if (post) post.render(scene, cam);
+    else renderer.render(scene, cam);
     requestAnimationFrame(loop);
   };
   ui.hideLoading();
@@ -277,8 +285,11 @@ function run() {
     if (!game) return;
     const { w, h } = { w: app.clientWidth, h: app.clientHeight };
     if (game.camera.aspect !== w / h) { game.camera.aspect = w / h; game.camera.updateProjectionMatrix(); resize(); }
+    game.viewH = renderer.domElement.height;
     game.update(dt);
-    if (!game.offscreen) renderer.render(game.scene, game.camera);
+    if (game.offscreen) return;
+    if (post) post.render(game.scene, game.camera);
+    else renderer.render(game.scene, game.camera);
   });
 }
 
@@ -306,6 +317,14 @@ if (import.meta.env.DEV) {
   // Level-design overview: __view(x, z, height, back) / __view() to return to the game camera.
   Object.assign(window, {
     __renderer: renderer,
+    __post: () => post,
+    /** Look-dev: drop the hero at (x, z), immortal, the fog of war cleared. */
+    __goto: (x: number, z: number) => {
+      if (!game) return;
+      game.debugFog(true);
+      game.god = true;
+      game.hero.position.set(x, 0, z);
+    },
     __view: (x?: number, z = 0, h = 30, back = 22) => {
       if (!game) return;
       const wide = x !== undefined;

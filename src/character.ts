@@ -38,6 +38,27 @@ const outlineMat = (() => {
   return m;
 })();
 
+/**
+ * Rim light on the player hero: an additive fresnel pass over the same (skinned) meshes, so the silhouette catches
+ * a warm edge of light and reads against busy ground. Black diffuse: only the rim (emissive) is added.
+ */
+const rimMat = (() => {
+  const m = new THREE.MeshLambertMaterial({
+    color: 0x000000, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  });
+  m.onBeforeCompile = (shader) => {
+    patchFloat(shader);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      `#include <emissivemap_fragment>
+      float rim = 1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
+      totalEmissiveRadiance += vec3(1.0, 0.9, 0.72) * pow(rim, 2.2) * 0.5;`,
+    );
+  };
+  return m;
+})();
+
 /** A material's colour as authored, kept on first sight (tints multiply it instead of replacing it). */
 function ownColor(m: THREE.MeshLambertMaterial) {
   return (m.userData.ownColor ??= m.color.clone()) as THREE.Color;
@@ -202,7 +223,7 @@ export class Character {
     this.root.add(this.orb);
   }
 
-  /** Player hero: a bit bigger and with a dark outline (no extra brightness: it washed the textures out). */
+  /** Player hero: a bit bigger, with a dark outline and a warm rim light (no flat extra brightness: it washed the textures out). */
   setHighlight(on: boolean) {
     this.highlighted = on;
     this.model.scale.multiplyScalar(on ? 1.12 : 1 / 1.12);
@@ -223,25 +244,27 @@ export class Character {
     const meshes: THREE.Mesh[] = [];
     this.model.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh && m.visible && m.material !== outlineMat) meshes.push(m);
+      if (m.isMesh && m.visible && m.material !== outlineMat && m.material !== rimMat) meshes.push(m);
     });
     for (const m of meshes) {
-      let o: THREE.Mesh;
-      if ((m as THREE.SkinnedMesh).isSkinnedMesh) {
-        const sm = m as THREE.SkinnedMesh;
-        const so = new THREE.SkinnedMesh(sm.geometry, outlineMat);
-        so.bind(sm.skeleton, sm.bindMatrix);
-        o = so;
-      } else {
-        o = new THREE.Mesh(m.geometry, outlineMat); // weapon: same cm space, same push
-        o.scale.copy(m.scale);
+      for (const mat of [outlineMat, rimMat]) {
+        let o: THREE.Mesh;
+        if ((m as THREE.SkinnedMesh).isSkinnedMesh) {
+          const sm = m as THREE.SkinnedMesh;
+          const so = new THREE.SkinnedMesh(sm.geometry, mat);
+          so.bind(sm.skeleton, sm.bindMatrix);
+          o = so;
+        } else {
+          o = new THREE.Mesh(m.geometry, mat); // weapon: same cm space, same push
+          o.scale.copy(m.scale);
+        }
+        o.position.copy(m.position);
+        o.quaternion.copy(m.quaternion);
+        o.frustumCulled = false;
+        o.castShadow = false;
+        m.parent!.add(o);
+        this.outlines.push(o);
       }
-      o.position.copy(m.position);
-      o.quaternion.copy(m.quaternion);
-      o.frustumCulled = false;
-      o.castShadow = false;
-      m.parent!.add(o);
-      this.outlines.push(o);
     }
   }
 

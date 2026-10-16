@@ -92,4 +92,17 @@ export const sfx = {
     if (rarity >= 3) { noise(0.8, 0.5, 500, 0.4); tone(65, 1, 'sine', 0.35, 0.6); }
   },
   barrier() { [392, 523, 659, 784].forEach((f, i) => tone(f, 0.5, 'sine', 0.2, 1, i * 0.12)); },
+  /** Location clear bar went up: a soft chime, higher the fuller the bar (p = 0..1). */
+  clearTick(p: number) {
+    if (!gate('clear', 80)) return;
+    const f = 520 * 2 ** (p * 1.2);
+    tone(f, 0.16, 'sine', 0.13, 1.02);
+    tone(f * 1.5, 0.22, 'triangle', 0.05, 1, 0.04);
+  },
+  /** The whole location is cleared: a bright fanfare. */
+  cleared() {
+    [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, 0.3, 'triangle', 0.16, 1, i * 0.08));
+    [1046, 1568].forEach((f, i) => tone(f, 0.9, 'sine', 0.08, 1, 0.42 + i * 0.05));
+    noise(0.6, 0.12, 6000, 0.7);
+  },
 };

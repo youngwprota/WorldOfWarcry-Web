@@ -6,7 +6,7 @@ import { StaticBody } from './staticbody';
 import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
-  ATTACK_HIT, COMBOS, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS, casterModel,
+  ATTACK_HIT, COMBOS, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS, casterModel,
   mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
 import { ArenaFog, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, Telegraphs, type Bolt, type PickupKind } from './fx';
@@ -23,6 +23,7 @@ import { Arrows } from './arrows';
 import { PET_SEEK, Pet } from './pet';
 import { GATE, ISLAND, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
+import { Ambient } from './ambient';
 import { UI, type MapMark } from './ui';
 import { fmtK, lootHtml, resistIcons } from './icons';
 import { heroDeaths, logFight, logSnap } from './balancelog';
@@ -322,6 +323,11 @@ export class Game {
   private units: Unit[] = [];
   private mobs: Mob[] = [];
   private props: Prop[] = [];
+  /**
+   * Units that count toward clearing each location (the top bar): its spawner mobs (static ones like the forest
+   * trees too), elites, mini-bosses and main boss; not grave risers or boss summons (no spawner, no boss).
+   */
+  private clearOf = new Map<ZoneId, Mob[]>();
   private fx: FloatingText;
   private particles: Particles;
   private arrows: Arrows;
@@ -338,6 +344,10 @@ export class Game {
   /** Wind orbs in flight (pooled: `it` null = free): where they land, seconds left, the staff that threw them. */
   private gusts: { at: THREE.Vector3; t: number; it: Item | null }[] = [];
   private puffs: FogPuffs;
+  /** Pollen, wisps, snow, fireflies… in the air round the hero (src/ambient.ts). */
+  private ambient = new Ambient();
+  /** Drawing-buffer height in pixels (set by main.ts; ambient point sizes). */
+  viewH = 1600;
   /** Fog ring around each Death-like boss's arena (BossDef.souls), shown while it fights. */
   private arenas = new Map<Mob, ArenaFog>();
   /** Attack state per hand (save.weapons[0] right, [1] left). */
@@ -387,10 +397,11 @@ export class Game {
 
   constructor(public save: SaveData, private input: Input, public ui: UI, labels: HTMLElement) {
     this.labels = labels;
-    this.camera = new THREE.PerspectiveCamera(54, 9 / 16, 0.5, 90);
+    this.camera = new THREE.PerspectiveCamera(VIEW.fov, 9 / 16, 0.5, 90);
     this.scene.fog = new THREE.FogExp2(0xbfe0f5, 0.015);
-    this.hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 2.0);
-    this.sun = new THREE.DirectionalLight(0xfff2d0, 2.6);
+    // A cool sky fill and a strong warm sun: shadows read as blue-ish shade, lit sides glow (zone colours: ZONES.hemi).
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 1.45);
+    this.sun = new THREE.DirectionalLight(0xffe6c0, 3.3);
     this.sun.position.set(-6, 12, 5);
     // Real-time shadows in a box that follows the camera.
     this.sun.castShadow = true;
@@ -410,6 +421,7 @@ export class Game {
     this.wearKit(kitOf(this.heroClass));
     this.wearGear(this.heroClass);
     this.hero = new Character(this.heroModel(), null, 1);
+    this.hero.root.scale.setScalar(this.heroScale);
     this.equipVisual();
     this.hero.setOutfit(this.outfit());
     this.hero.setHighlight(true);
@@ -443,6 +455,13 @@ export class Game {
       }
     }
 
+    for (const m of this.mobs) {
+      if (!m.spawner && !m.def.boss) continue;
+      const zone = m.spawner?.zone ?? this.world.zoneAt(m.spawn.x, m.spawn.z).id;
+      if (!this.clearOf.has(zone)) this.clearOf.set(zone, []);
+      this.clearOf.get(zone)!.push(m);
+    }
+
     this.fx = new FloatingText(labels, this.camera);
     const hb = document.createElement('div');
     hb.className = 'herohp';
@@ -458,6 +477,7 @@ export class Game {
     this.spells = new Spells(this.scene);
     this.syncPet();
     this.puffs = new FogPuffs(this.scene);
+    this.scene.add(this.ambient.points);
     // (no camp NPC by the gate for now: src/npc.ts CampNpc is kept for later)
     this.camPos.copy(this.hero.position);
     this.refreshHud(true);
@@ -659,6 +679,7 @@ export class Game {
     this.puffs.update(dt);
     for (const a of this.arenas.values()) a.update(dt, this.time);
     this.world.update(dt, this.time, this.hero.position);
+    this.ambient.update(this.time, this.hero.position, this.viewH);
     this.render(dt);
     this.saveT += dt;
     if (this.saveT > 5) { this.saveT = 0; this.persist(); }
@@ -703,7 +724,8 @@ export class Game {
     fog.color.copy(this.env.fog);
     fog.density = this.env.density;
     this.sun.target.position.set(this.camPos.x, 0, this.camPos.z - 3);
-    this.sun.position.set(this.camPos.x - 16, 30, this.camPos.z + 8);
+    // lowish afternoon sun from the front left: longer shadows give the scene depth, faces toward the camera stay lit
+    this.sun.position.set(this.camPos.x - 15, 25, this.camPos.z + 9);
     this.scene.background = this.env.sky;
     this.hemi.color.copy(this.env.hemiSky);
     this.hemi.groundColor.copy(this.env.hemiGround);
@@ -2246,6 +2268,10 @@ export class Game {
       })),
     });
     this.ui.tickGains(this.time);
+    // location clear bar: the share of its enemies lying dead right now (respawns take it down again)
+    const zone = this.zone ?? this.world.zoneAt(this.hero.position.x, this.hero.position.z);
+    const foes = this.clearOf.get(zone.id) ?? [];
+    this.ui.clearProgress(zone.id, zone.name, foes.filter((m) => !m.alive).length, foes.length);
     if (full) {
       this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it), this.save.equip, this.petDef);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
@@ -2259,6 +2285,7 @@ export class Game {
   setLowGfx(low: boolean) {
     this.sun.castShadow = !low;
     this.world.setLowDetail(low);
+    this.ambient.points.visible = !low;
   }
 
   // ---------- debug menu (src/debug.ts) ----------
@@ -2401,8 +2428,8 @@ export class Game {
     this.hp = Math.max(1, this.maxHp * frac);
   }
 
-  /** Visual size of the hero (debug tuning; collisions and range stay the same). */
-  heroScale = 1;
+  /** Visual size of the hero (VIEW.heroScale, tuned live in debug; collisions and range stay the same). */
+  heroScale = VIEW.heroScale;
   debugSetHeroScale(s: number) {
     this.heroScale = THREE.MathUtils.clamp(Math.round(s * 100) / 100, 0.5, 3);
     this.hero.root.scale.setScalar(this.heroScale);
@@ -2413,8 +2440,8 @@ export class Game {
     this.camera.updateProjectionMatrix();
   }
 
-  /** Visual size of all enemies, bosses included (debug tuning; hitboxes stay the same). */
-  mobScale = 1;
+  /** Visual size of all enemies, bosses included (VIEW.mobScale, tuned live in debug; hitboxes stay the same). */
+  mobScale = VIEW.mobScale;
   debugSetMobScale(s: number) {
     this.mobScale = THREE.MathUtils.clamp(Math.round(s * 100) / 100, 0.5, 3);
     for (const m of this.mobs) m.ch.root.scale.setScalar(this.mobScale);
