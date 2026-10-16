@@ -5,7 +5,7 @@ import { Creature } from './creature';
 import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
-  ATTACK_HIT, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
+  ATTACK_HIT, FACTIONS, PETS, PET_RARITY, tokenChance, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
   mobRank, zoneResist, ZONE_FOES, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
 import { ArenaFog, FloatingText, FogPuffs, Particles, Shockwaves, Spells, Telegraphs, type Bolt } from './fx';
@@ -439,7 +439,7 @@ export class Game {
     const m = (it: Item | null) => (it ? itemModel(r >= 0 ? { ...it, rarity: r } : it, this.faction) : null);
     // the mage's orb is not held: it floats over the shoulder (Character.setOrb)
     const left = this.save.weapons[1];
-    return [m(this.save.weapons[0]), left && WEAPONS[left.def].orb ? null : m(left)];
+    return [m(this.save.weapons[0]), left && (WEAPONS[left.def].orb || WEAPONS[left.def].pet) ? null : m(left)];
   }
 
   /** Weapon models as the hero holds them, [right hand, left hand]: the bow goes into the left hand while that one is free. */
@@ -1010,14 +1010,18 @@ export class Game {
   }
 
   /** The pet in the class's second slot (the hunter's), or null. */
-  get petDef(): PetDef | null { return CLASSES[this.heroClass].pet ? PETS[this.save.pet ?? START_PET] : null; }
+  get petDef(): PetDef | null { const p = this.petItem; return p ? PETS[WEAPONS[p.def].pet!] : null; }
+  /** The pet item in the class slot, or null. */
+  get petItem(): Item | null { const it = this.save.weapons[1]; return it && WEAPONS[it.def].pet ? it : null; }
 
   /** Puts the class's pet on the field (or takes it away). */
   private syncPet() {
     const def = this.petDef;
-    if (this.pet?.def === def) return;
+    const rarity = this.petItem?.rarity ?? 0;
+    if (this.pet && this.pet.def === def && this.pet.rarity === rarity) { this.pet.haste = this.stats.haste; return; }
     this.pet?.dispose();
-    this.pet = def ? new Pet(def, this.scene) : null;
+    this.pet = def ? new Pet(def, rarity, this.scene) : null;
+    if (this.pet) this.pet.haste = this.stats.haste;
     this.pet?.place(this.hero.position, this.hero.facing);
   }
 
@@ -1041,7 +1045,7 @@ export class Game {
       const m = foe as Mob;
       const it = this.weaponItem;
       const tier = m.def.resist[pet.def.type] ?? 'normal';
-      const dmg = Math.max(1, Math.round(this.itemDamage(it) * pet.def.dmg * RESIST_MULT[tier] * (0.9 + Math.random() * 0.2)));
+      const dmg = Math.max(1, Math.round(this.itemDamage(it) * pet.def.dmg * PET_RARITY.dmg[pet.rarity] * RESIST_MULT[tier] * (0.9 + Math.random() * 0.2)));
       this.fightOf(m).hits++;
       // only extra damage: mobs never turn on the pet, the bite does not wake or shove them
       this.damageMob(m, dmg, tier, 0, '', false);
@@ -2177,6 +2181,7 @@ export class Game {
   private afterGearChange() {
     const hpFrac = this.hp / this.maxHp;
     this.dressHero();
+    this.syncPet();
     this.hp = Math.min(this.maxHp, Math.max(1, hpFrac * this.maxHp));
     this.resetHands();
     sfx.click();
@@ -2249,7 +2254,7 @@ export class Game {
     const foes = this.clearOf.get(zone.id) ?? [];
     this.ui.clearProgress(zone.id, zone.name, foes.filter((m) => !m.alive).length, foes.length);
     if (full) {
-      this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it), this.save.equip, this.wearer, this.petDef);
+      this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it), this.save.equip, this.wearer);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
       this.ui.gachaBadge(this.save.pulls ?? 0);
       this.showCharge();

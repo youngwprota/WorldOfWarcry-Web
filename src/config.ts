@@ -67,6 +67,8 @@ export interface WeaponDef {
   anim: WeaponAnim;
   model: Record<FactionId, string>;
   icon: string;
+  /** Hunter's pet (config PETS id): the item only puts that creature beside the hero, it never swings. */
+  pet?: string;
   stun?: number; // chance
   /** Plain swings hit only the current target (the combo finisher still hits an area). */
   single?: boolean;
@@ -231,12 +233,30 @@ export interface PetDef {
   range: number;
   /** Run speed, m/s: a bit above the hero's so it keeps up. */
   speed: number;
+  /** Every bite also hits all other foes within this many metres of the target (the bear's paw). */
+  cleave?: number;
+  /** Leaps at a target this far away (m) instead of running, the bite on landing deals × `mult` (the lion). */
+  pounce?: { range: number; mult: number; cd: number };
 }
+// Each pet differs by damage type (mob resists) and manner (docs/features/gacha-gear/concept.md). Placeholder numbers.
 export const PETS: Record<string, PetDef> = {
   boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, type: 'crush', dmg: 0.6, aps: 0.9, range: 1.3, speed: 6.5 },
+  wolf: { id: 'wolf', name: 'Лютоволк', icon: 'boar', model: 'wild_direwolf', scale: 0.45, type: 'slash', dmg: 0.3, aps: 1.8, range: 1.2, speed: 7.5 },
+  bear: { id: 'bear', name: 'Медведь', icon: 'boar', model: 'wild_bear', scale: 0.55, type: 'chop', dmg: 1.0, aps: 0.55, range: 1.5, speed: 6.0, cleave: 2 },
+  lion: { id: 'lion', name: 'Лев', icon: 'boar', model: 'wild_lion', scale: 0.55, type: 'pierce', dmg: 0.55, aps: 0.85, range: 1.3, speed: 6.8, pounce: { range: 6, mult: 2.5, cd: 6 } },
+  bone_boar: { id: 'bone_boar', name: 'Костяной вепрь', icon: 'boar', model: 'undead_boar', scale: 1.0, type: 'magic', dmg: 0.55, aps: 0.9, range: 1.3, speed: 6.5 },
 };
-/** Pet the hunter starts with. */
+/** Pet the hunter starts with (its item: `pet_<id>` in WEAPONS). */
 export const START_PET = 'boar';
+/** Pet bite damage and size by item quality (RARITY index). */
+export const PET_RARITY = { dmg: [1, 1.15, 1.35, 1.6, 1.9, 2.3], scale: [1, 1.04, 1.08, 1.12, 1.17, 1.22] };
+// every pet is also a weapon-slot item: the hunter's class item (src/party.ts), in the bag, the gacha and copies
+for (const p of Object.values(PETS)) {
+  WEAPONS[`pet_${p.id}`] = {
+    id: `pet_${p.id}`, name: p.name, type: p.type, dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
+    anim: 'SwordAttack', model: { human: p.model, orc: p.model }, icon: '🐾', pet: p.id,
+  };
+}
 
 export const SHARPEN = { max: 10, perLevel: 0.08, cost: (lvl: number) => 40 + lvl * lvl * 25 };
 

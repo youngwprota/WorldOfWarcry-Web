@@ -1,5 +1,5 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
-import { DAMAGE_TYPE_NAME, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type PetDef, type StatId, type WeaponDef } from './config';
+import { DAMAGE_TYPE_NAME, PETS, PET_RARITY, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type StatId, type WeaponDef } from './config';
 import { DAMAGE_TYPE_ICON, icon } from './icons';
 import { art, hasPng } from './art';
 import { CLASSES, weaponClass, type HeroClass } from './party';
@@ -230,11 +230,6 @@ export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = 
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }
 
-/** The hunter's pet in his second weapon slot (config PETS). */
-export function petCellHtml(pet: PetDef, attrs = '', cls = '', extra = '') {
-  return `<button class="cell pet ${cls}" ${attrs}>${art(pet.icon, 34, 'ic')}${extra}</button>`;
-}
-
 export function scrapValue(it: Item) {
   return Math.round((25 * (it.rarity + 1) * (it.rarity + 1) + it.sharpen * 20) * lvlMult(it.lvl));
 }
@@ -251,6 +246,13 @@ export function itemLines(it: Item): [string, string][] {
       return out;
     }
     if (w.orb) return [orbLine(w.orb)];
+    if (w.pet) {
+      const p = PETS[w.pet];
+      const out: [string, string][] = [['Укус', `×${(p.dmg * PET_RARITY.dmg[it.rarity]).toFixed(2)} от лука`], ['Тип', DAMAGE_TYPE_NAME[p.type]], ['Укусов/с', String(p.aps)]];
+      if (p.cleave) out.push(['Удар лапой', `все в ${p.cleave} м`]);
+      if (p.pounce) out.push(['Прыжок', `до ${p.pounce.range} м, ×${p.pounce.mult}`]);
+      return out;
+    }
     return [
       ['Урон', String(Math.round(weaponDamage(it)))],
       ['Тип', DAMAGE_TYPE_NAME[w.type]],

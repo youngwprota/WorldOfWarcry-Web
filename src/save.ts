@@ -1,4 +1,4 @@
-import { FACTIONS, HERO, PETS, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
+import { FACTIONS, HERO, PETS, START_PET, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
 import { BASE_STATS, type PctPoints, type StatPoints } from './balance';
 import { ARMOR, BAG_SIZE, makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
 import { CLASSES, classSlot, kitOf, type HeroClass } from './party';
@@ -61,7 +61,7 @@ export interface SaveData {
   gear?: Partial<Record<HeroClass, Partial<Record<ArmorSlot, Item>>>>;
   /** Whose armour is in `equip`; missing = the warrior's (saves from before the party wore one set for all). */
   gearOf?: HeroClass;
-  /** The hunter's pet (config PETS id) in his second weapon slot; missing = START_PET. */
+  /** Old saves: the hunter's pet (config PETS id); now the pet item `pet_<id>` sits in his class slot (givePet). */
   pet?: string;
 }
 
@@ -119,7 +119,6 @@ export function loadSave(): SaveData | null {
     if (d.kit && !CLASSES[d.kit]) delete d.kit;
     // saves of the mage branch kept `kits` without `kit`: the hands in play were the class on the field's
     if (!d.kit && d.kits) d.kit = kitOf(d.cls);
-    if (d.pet && !PETS[d.pet]) delete d.pet;
     if (d.gearOf && !CLASSES[d.gearOf]) delete d.gearOf;
     for (const set of Object.values(d.gear ?? {})) {
       for (const k of Object.keys(set) as ArmorSlot[]) {
@@ -131,6 +130,7 @@ export function loadSave(): SaveData | null {
     d.weapons = fitHands(d, d.kit ?? 'warrior', d.weapons);
     for (const k of Object.keys(d.kits ?? {}) as HeroClass[]) d.kits![k] = fitHands(d, k, d.kits![k]!);
     giveOrbs(d);
+    givePet(d);
     return d;
   } catch {
     return null;
@@ -158,6 +158,14 @@ function fitHands(d: SaveData, owner: HeroClass, hands: (Item | null)[]): SaveDa
 function giveOrbs(d: SaveData) {
   const hands = (d.kit ?? 'warrior') === 'mage' ? d.weapons : d.kits?.mage;
   if (hands && !hands[1] && !d.bag.some((it) => it.kind === 'weapon' && WEAPONS[it.def]?.orb)) hands[1] = makeItem('weapon', CLASSES.mage.kit!.left!, 0, 1);
+}
+
+/** Saves from before pet items: the hunter's pet (`pet`, else the start one) becomes the item in his empty class slot. */
+function givePet(d: SaveData) {
+  const hands = (d.kit ?? 'warrior') === 'hunter' ? d.weapons : d.kits?.hunter;
+  const id = d.pet && PETS[d.pet] ? d.pet : START_PET;
+  delete d.pet;
+  if (hands && !hands[1] && !d.bag.some((it) => it.kind === 'weapon' && WEAPONS[it.def]?.pet)) hands[1] = makeItem('weapon', `pet_${id}`, 0, 1);
 }
 
 /** Gear of a class taking the field for the first time (ClassDef.kit); its extra start items go into the bag. */

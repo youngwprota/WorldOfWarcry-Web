@@ -2,11 +2,15 @@
 Дописывать после каждого шага. Это переживает автокомпакт.
 
 ## Сейчас
-Шаг: 1 готов · Дальше: шаг 2 (питомец-предмет)
+Шаг: 2 готов · Дальше: шаг 3 (cleave медведя, pounce льва)
 
 ## Решения по ходу
 - Новые id: gloves_power/crit/haste, ring_shadow/blood, amulet_heart/ward (`GACHA_GEAR` в items.ts). Любой `*_arms` в сейве → gloves_power.
 - `haste`/`leech` — кривые в STAT_CURVE; haste множит aps всех рук (heroDps тоже), leech — `Game.leech()` в damageMob и burnMob.
+
+- Питомец = запись WEAPONS `pet_<id>` с полем `pet` (генерится из PETS в config), kind 'weapon', лежит в weapons[1] охотника (CLASSES.hunter.off). Не новый ItemKind — так сумка/копии/гача работают без правок. `petCellHtml` удалён.
+- Сейв: `save.pet` → предмет в пустой слот охотника (`givePet` в save.ts). Урон/размер по качеству — PET_RARITY.
+- Иконки питомцев пока SVG вепря (алиасы `pet_*` в art.ts) — заменить в шаге 6.
 
 ## Грабли и что не сработало
 

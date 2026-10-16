@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import {
   FACTIONS, fmtOrb, UI_REF, WEAPONS, ZONE_FOES,
-  type FactionId, type OrbKind, type PetDef, type ZoneDef,
+  type FactionId, type OrbKind, type ZoneDef,
 } from './config';
-import { ARMOR_SLOTS, EQUIP_BAR, cellHtml, petCellHtml, type ArmorSlot, type Item } from './items';
+import { ARMOR_SLOTS, EQUIP_BAR, cellHtml, type ArmorSlot, type Item } from './items';
 import { CLASS_DAMAGE_ICON, fmtK, hasIcon, icon, iconImage, resistIcons, rewardChips } from './icons';
 import { STAT_ICON, art, hasPng, mini, tintedArt, whiteArt } from './art';
 import type { MobDef } from './config';
@@ -348,12 +348,11 @@ export class UI {
    * Bottom "equipped" bar: armour left, the weapon and the class item (shield, or the hunter's `pet`) in the centre,
    * gloves and jewellery right.
    */
-  weapons(items: (Item | null)[], dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>, w: Wearer, pet: PetDef | null = null) {
+  weapons(items: (Item | null)[], dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>, w: Wearer) {
     const box = $('weapons');
     box.innerHTML = [0, 1].map((i) => {
-      if (i === 1 && pet) return petCellHtml(pet, `data-pet title="Питомец: ${pet.name}"`, 'wslot active');
       const it = items[i];
-      const title = !it ? '' : WEAPONS[it.def].guard ? `title="${WEAPONS[it.def].name}"` : `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"`;
+      const title = !it ? '' : !WEAPONS[it.def].dmgMul ? `title="${WEAPONS[it.def].name}"` : `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"`;
       return cellHtml(it, `data-w="${i}" ${title}`, i ? 'shield' : 'sword', '', it ? 'wslot active' : 'wslot', w);
     }).join('');
     const side = (ids: ArmorSlot[]) => ids.map((id) => {

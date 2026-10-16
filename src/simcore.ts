@@ -4,7 +4,7 @@
 import * as CONFIG from './config';
 import {
   ATTACK_HIT, BREAKABLES, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
-  PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, START_PET, STAVES, WEAPONS, depthMul, mobImpact, packUnits, mobRank, tokenChance as zoneTokenChance,
+  PETS, PET_RARITY, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, START_PET, STAVES, WEAPONS, depthMul, mobImpact, packUnits, mobRank, tokenChance as zoneTokenChance,
   type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
 import { addStat, heroDps, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, heroStats, type HeroBuild } from './balance';
@@ -229,7 +229,9 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1 }));
   // class extras (game.ts staffHit / iceHit / throwGust / updatePet), single target: the hunter's pet bites what he
   // shoots; the fire staff burns (+vulnerability), the ice staff freezes every Nth hit, the wind staff throws an orb
-  const pet = CLASSES[h.cls].pet ? PETS[START_PET] : null;
+  const petIt = h.weapons[1] && WEAPONS[h.weapons[1].def].pet ? h.weapons[1] : null;
+  const pet = petIt ? PETS[WEAPONS[petIt.def].pet!] : CLASSES[h.cls].pet ? PETS[START_PET] : null;
+  const petMul = PET_RARITY.dmg[petIt?.rarity ?? 0];
   let petCd = 0.6;
   const B = STAVES.fire.burn;
   let burn = 0, burnTick = 0, burnDps = 0, iceN = 0, windN = 0;
@@ -291,10 +293,10 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     for (const hd of hands) {
       if (!hd.it) continue;
       const w = WEAPONS[hd.it.def];
-      if (w.guard || w.orb) continue; // shields and mage orbs never swing
+      if (w.guard || w.orb || w.pet) continue; // shields, mage orbs and pets never swing
       hd.cd -= DT;
       if (hd.cd > 0 || busy > 0) continue;
-      const per = 1 / w.aps;
+      const per = 1 / (w.aps * st.haste);
       // uptime: the hero spends part of the fight repositioning — swings come later
       hd.cd = per / OPT.uptime;
       swings++;
@@ -304,8 +306,8 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     if (pet && h.weapons[0]) {
       petCd -= DT;
       if (petCd <= 0) {
-        petCd += 1 / pet.aps;
-        mhp -= weaponDamage(h.weapons[0], st.power, st.powerMul) * pet.dmg * RESIST_MULT[d.resist[pet.type] ?? 'normal'] * roll() * vuln();
+        petCd += 1 / (pet.aps * st.haste);
+        mhp -= weaponDamage(h.weapons[0], st.power, st.powerMul) * pet.dmg * petMul * RESIST_MULT[d.resist[pet.type] ?? 'normal'] * roll() * vuln();
       }
     }
     if (burn > 0) {

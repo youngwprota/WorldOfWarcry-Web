@@ -2,11 +2,11 @@ import * as THREE from 'three';
 import { Character } from './character';
 import { Creature } from './creature';
 import {
-  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, RARITY, STAT_CURVE, STAT_SOURCE_NAME, STAVES, WEAPONS, isPctStat, type PetDef, type StatId,
+  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, PET_RARITY, RARITY, STAT_CURVE, STAT_SOURCE_NAME, STAVES, WEAPONS, isPctStat, type PetDef, type StatId,
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, orbLine, petCellHtml, slotOf, weaponBase,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, orbLine, slotOf, weaponBase,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -50,6 +50,7 @@ class HeroPreview {
   private stage = new THREE.Group();
   private ch: Character;
   private pet: Creature | null = null;
+  private petKey = '';
   private clock = new THREE.Clock();
   private raf = 0;
   yaw = 0.4;
@@ -73,12 +74,7 @@ class HeroPreview {
     this.stage.add(floor);
     this.ch = new Character(model, null, 1);
     this.stage.add(this.ch.root);
-    if (pet) {
-      this.pet = new Creature(pet.model, pet.scale);
-      this.pet.position.copy(PET_AT);
-      this.stage.add(this.pet.root);
-      this.ch.position.copy(HERO_AT_WITH_PET);
-    }
+    if (pet) this.ch.position.copy(HERO_AT_WITH_PET);
     this.scene.add(this.stage);
     // with a pet: further back and a bit lower, so both fit
     if (pet) {
@@ -112,6 +108,18 @@ class HeroPreview {
     this.ch.setOrb(orb);
     this.ch.setOutfit(outfit);
     this.ch.setTrims(trims);
+  }
+
+  /** The hunter's pet beside him (sized by its item quality), or none. */
+  setPet(pet: PetDef | null, rarity = 0) {
+    const key = pet ? `${pet.id}:${rarity}` : '';
+    if (key === this.petKey) return;
+    this.petKey = key;
+    this.pet?.root.removeFromParent();
+    this.pet = pet ? new Creature(pet.model, pet.scale * PET_RARITY.scale[rarity]) : null;
+    if (!this.pet) return;
+    this.pet.position.copy(PET_AT);
+    this.stage.add(this.pet.root);
   }
 
   nudge(dir: number) { this.vel = dir * 5; }
@@ -329,9 +337,7 @@ export class Inventory {
       const x = ARMOR_SLOTS.find((a) => a.id === id)!;
       return this.cell(s.equip[id], `data-armor="${id}" title="${x.name}"`, x.icon);
     }).join('');
-    const pet = g.petDef;
     const weapons = ([0, 1] as const).map((i) => {
-      if (i === 1 && pet) return petCellHtml(pet, `title="Питомец: ${pet.name}"`, 'active', '<span class="wtag on">питомец</span>');
       const tag = `<span class="wtag ${s.weapons[i] ? 'on' : ''}">${g.slotName(i).toLowerCase()}</span>`;
       return this.cell(s.weapons[i], `data-weapon="${i}"`, i ? 'shield' : 'sword', tag, s.weapons[i] ? 'active' : '');
     }).join('');
@@ -340,6 +346,7 @@ export class Inventory {
     q('#i-eq-w').innerHTML = weapons;
     q('#i-eq-r').innerHTML = armor(EQUIP_BAR.right);
     this.preview?.setGear(...g.heldModels(), g.outfit(), g.staffInHand(), g.orbModel(), g.trims());
+    this.preview?.setPet(g.petDef, g.petItem?.rarity ?? 0);
     g.newItems = 0;
   }
 

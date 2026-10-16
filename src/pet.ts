@@ -2,7 +2,7 @@
 // picks the foe and deals the damage through `onBite`.
 import * as THREE from 'three';
 import { Creature } from './creature';
-import type { PetDef } from './config';
+import { PET_RARITY, type PetDef } from './config';
 
 export interface PetFoe { pos: THREE.Vector3; radius: number; hittable: boolean }
 
@@ -19,11 +19,14 @@ export class Pet {
   readonly ch: Creature;
   private target: PetFoe | null = null;
   private atkCd = 0.5;
+  /** The hero's attack speed multiplier (stat `haste`): the pet bites faster too. */
+  haste = 1;
   /** Seconds until the bite lands (−1: not biting). */
   private impact = -1;
 
-  constructor(readonly def: PetDef, scene: THREE.Scene) {
-    this.ch = new Creature(def.model, def.scale);
+  /** `rarity`: the pet item's quality (bigger and harder-biting, config PET_RARITY). */
+  constructor(readonly def: PetDef, readonly rarity: number, scene: THREE.Scene) {
+    this.ch = new Creature(def.model, def.scale * PET_RARITY.scale[rarity]);
     scene.add(this.ch.root);
   }
 
@@ -61,7 +64,7 @@ export class Pet {
     this.ch.facing += diff * Math.min(1, dt * (t || moving ? 12 : 4));
     this.atkCd -= dt;
     if (t && d < t.radius + this.def.range && this.atkCd <= 0 && this.impact < 0) {
-      const period = 1 / this.def.aps;
+      const period = 1 / (this.def.aps * this.haste);
       const impactAt = Math.min(0.35, period * 0.45);
       this.ch.attack('AxeAttack', period, impactAt);
       this.impact = impactAt;

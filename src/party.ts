@@ -3,7 +3,7 @@
  * Each class has two gear slots: a weapon (save.weapons[0]) and its own class item (save.weapons[1]: the warrior's
  * shield, the hunter's pet, the mage's orb); each keeps its own pair (SaveData.kits).
  */
-import { RARITY_IDS, type FactionId } from './config';
+import { PETS, RARITY_IDS, type FactionId } from './config';
 import type { VisualPart } from './items';
 
 export type HeroClass = 'warrior' | 'hunter' | 'mage';
@@ -24,7 +24,7 @@ export interface ClassDef {
   off: string[];
   /** Name of slot 2. */
   offName: string;
-  /** Slot 2 holds a pet (config PETS) instead of an item. */
+  /** Slot 2 holds a pet item (WeaponDef.pet → config PETS): it runs beside the hero instead of being held. */
   pet?: boolean;
   /** Slot 2 always holds the kit's `left` item: it never drops and is never swapped or taken off. */
   fixedOff?: boolean;
@@ -49,7 +49,7 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
   hunter: {
     name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
     model: { human: 'human_archer', orc: 'orc_archer' },
-    weapons: ['bow'], off: [], offName: 'Питомец', pet: true, kit: { hand: 'bow' }, locked: true,
+    weapons: ['bow'], off: Object.keys(PETS).map((p) => `pet_${p}`), offName: 'Питомец', pet: true, kit: { hand: 'bow', left: 'pet_boar' }, locked: true,
   },
   mage: {
     name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
