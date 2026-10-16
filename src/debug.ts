@@ -63,7 +63,10 @@ function locationRows(): [string, Action[]][] {
     [zoneName('forest'), [['Лагерь', (g) => g.debugTeleport('camp')], ['Мини', teleport, '', 'fmini'], ['Босс', teleport, '', 'fort'], ['Баланс+ТП', balanceTp, '', 'forest fort']]],
   ];
   const seen = new Set<ZoneId>();
-  for (const gt of GATES) {
+  // the Snow Pass right under the cemetery, the rest in map order
+  const first: ZoneId[] = ['cemetery', 'peaks'];
+  const rank = (z: ZoneId) => (first.indexOf(z) + 3) % 3;
+  for (const gt of [...GATES].sort((a, b) => rank(a.to) - rank(b.to))) {
     if (seen.has(gt.to)) continue;
     seen.add(gt.to);
     const row: Action[] = [['Вход', teleport, '', `door:${gt.id}`]];

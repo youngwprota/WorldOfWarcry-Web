@@ -319,6 +319,8 @@ export interface MobDef {
    * point, never moves or attacks, and is hit, resists, drops and respawns like any mob.
    */
   static?: boolean;
+  /** Static unit recolour: multiplies its materials. */
+  tint?: number;
   /** Recolour: body textures are swapped by the table SKINS[skin] (src/assets.ts). */
   skin?: string;
   /** Speed (m/s) the hit shoves the hero back with. */
@@ -331,6 +333,8 @@ export interface MobDef {
   /** Fixed power orbs dropped on death (shown above the HP bar) — one stat only. */
   reward: OrbReward;
   respawn: number; // seconds
+  /** Below this HP fraction it throws a smoke bomb once per fight and a second one of it steps out (Game.callTwin). */
+  twin?: number;
   boss?: BossDef;
 }
 
@@ -648,8 +652,8 @@ export const MOBS: Record<string, MobDef> = {
   elf_assassin: {
     id: 'elf_assassin', name: 'Эльф-убийца',
     model: { human: ['elf_assassin', 'dagger'], orc: ['elf_assassin', 'dagger'] },
-    anim: 'SwordAttack', hp: 650, dmg: 18, aps: 1.2, range: 1.5, speed: 4.0, aggro: 5.5, regen: 0.03, scale: 1.05,
-    ...foes('peaks'), reward: { speed: 3 }, respawn: 60,
+    anim: 'SwordAttack', hp: 650, dmg: 18, aps: 1.2, range: 1.5, speed: 4.5, aggro: 11, regen: 0.03, scale: 1.05,
+    ...foes('peaks'), reward: { speed: 3 }, respawn: 60, twin: 0.9,
   },
   elf_queen: {
     id: 'elf_queen', name: 'Королева перевала',
@@ -725,6 +729,26 @@ export const MOBS: Record<string, MobDef> = {
     },
   },
 };
+// Snow Pass look variants: the stats of the mob they copy on another elf body
+const elf = (base: string, id: string, name: string, body: string, weapon: string): MobDef =>
+  ({ ...MOBS[base], ...foes('peaks'), id, name, model: { human: [body, weapon], orc: [body, weapon] } });
+MOBS.elf_swordsman = elf('elf_sentinel', 'elf_swordsman', 'Эльф-мечник', 'elf_worker', 'sword_elf_warrior');
+MOBS.elf_cutthroat = elf('elf_assassin', 'elf_cutthroat', 'Эльф-головорез', 'elf_worker', 'dagger');
+MOBS.elf_gate_guard = elf('gate_guard', 'elf_gate_guard', 'Эльф-привратник', 'elf_warrior', 'sword_elf_warrior');
+// Snow Pass elites: each drops an uncommon (green) piece of the warrior's kit
+const elfElite = (id: string, name: string, body: string, weapon: string, scale: number, reward: OrbReward, drop: ItemDrop): MobDef => ({
+  id, name, rank: 'elite', model: { human: [body, weapon], orc: [body, weapon] },
+  anim: 'SwordAttack', hp: 1600, dmg: 14, aps: 0.8, range: 1.8, speed: 3.3, aggro: 5.5, regen: 0.03, scale,
+  ...foes('peaks'), reward, respawn: 600, drop,
+});
+MOBS.elf_glovemaster = elfElite('elf_glovemaster', 'Эльф-кулачник', 'elf_assassin', 'sword_elf_warrior', 1.3, { power: 4 }, { kind: 'armor', def: 'plate_arms', rarity: 1 });
+MOBS.elf_champion = elfElite('elf_champion', 'Эльф-латник', 'elf_warrior', 'sword_elf_warrior', 1.4, { hp: 6 }, { kind: 'armor', def: 'plate_chest', rarity: 1 });
+MOBS.elf_bladesmith = elfElite('elf_bladesmith', 'Эльф-оружейник', 'elf_worker', 'sword_elf_warrior', 1.35, { power: 4 }, { kind: 'weapon', def: 'sword', rarity: 1 });
+MOBS.elf_warden = elfElite('elf_warden', 'Эльф-хранитель', 'elf_priestess', 'glaive_elf_queen', 1.3, { regen: 2 }, { kind: 'weapon', def: 'shield_spiked', rarity: 1 });
+/** Faded grey-green crowns of the Snow Pass trees (multiply the elf tree texture: low green mutes it). */
+export const WITHERED = [0xd9c4cc, 0xccbcc4, 0xe0ccd2, 0xc4b4bc];
+MOBS.snow_tree_young = { ...MOBS.tree_young, id: 'snow_tree_young', name: 'Увядшее дерево', tint: WITHERED[0] };
+MOBS.snow_tree_birch = { ...MOBS.tree_birch, id: 'snow_tree_birch', name: 'Увядшая берёза', tint: WITHERED[1] };
 // Local mini-bosses of the outer lands: each carries a small version of its location boss's mechanic (src/bosses).
 MOBS.frost_warden = {
   ...MOBS.bandit_warlord, ...foes('peaks'), id: 'frost_warden', name: 'Ледяной страж', drop: undefined,
@@ -929,10 +953,6 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
     'skeleton_worker', 'ghost', 'gravedigger', 'skeleton_warrior', 'undead_boar', 'skeleton_worker', 'shade', 'skeleton_warrior',
     'skeleton_warrior', 'undead_boar',
   ]).map((id) => spawner(id)),
-  peaks: ([
-    'elf_lumberjack', 'elf_sentinel', 'elf_lumberjack', 'elf_assassin', 'elf_sentinel', 'elf_lumberjack',
-    'elf_assassin', 'elf_sentinel', 'elf_lumberjack', 'elf_assassin', 'elf_sentinel', 'elf_assassin',
-  ]).map((id) => spawner(id)),
   hills: ([
     'orc_laborer', 'orc_axeman', 'orc_laborer', 'orc_blademaster', 'orc_axeman', 'orc_laborer',
     'orc_blademaster', 'orc_axeman', 'orc_laborer', 'orc_blademaster', 'orc_axeman', 'orc_blademaster',
@@ -941,6 +961,28 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
     'elf_lumberjack', 'elf_assassin', 'elf_lumberjack', 'elf_sentinel', 'elf_assassin', 'elf_lumberjack',
     'elf_sentinel', 'elf_assassin', 'elf_lumberjack', 'elf_sentinel', 'elf_assassin', 'elf_sentinel',
   ]).map((id) => spawner(id)),
+};
+/** Snow Pass (world.snowMobs): sword packs on and beside its roads, lone assassins in the woods, guards past the hub gate. */
+export const PEAKS_SPAWNERS = {
+  packs: [
+    ['elf_sentinel', 'elf_swordsman'], ['elf_swordsman', 'elf_lumberjack', 'elf_sentinel'], ['elf_sentinel', 'elf_swordsman', 'elf_swordsman'],
+    ['elf_lumberjack', 'elf_sentinel'], ['elf_swordsman', 'elf_sentinel', 'elf_lumberjack'], ['elf_sentinel', 'elf_swordsman'],
+    ['elf_swordsman', 'elf_sentinel', 'elf_sentinel'],
+  ].map((pack) => pack.map((id) => spawner(id))),
+  assassins: ['elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin']
+    .map((id) => spawner(id)),
+  guards: [spawner('elf_gate_guard'), spawner('elf_gate_guard')],
+  /** Elites at hand-picked spots (map drawing; slid onto walkable land). */
+  elites: ([['elf_glovemaster', -14, -135], ['elf_champion', 59.5, -148], ['elf_bladesmith', 13, -115.5], ['elf_warden', 54.5, -92]] as const)
+    .map(([id, x, z]) => ({ def: spawner(id), x, z })),
+  /** Wolves and bears wandering alone through the empty woods. */
+  beasts: ['wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_bear', 'wild_direwolf']
+    .map((id) => spawner(id)),
+  /** Bears by the west mini-boss (LAND_BOSSES peaks minis[1]). */
+  bears: ['wild_bear', 'wild_bear', 'wild_bear'].map((id) => spawner(id)),
+  /** Attackable trees, one at a time a road's width off the roads. */
+  trees: ['snow_tree_young', 'snow_tree_birch', 'snow_tree_young', 'snow_tree_young', 'snow_tree_birch', 'snow_tree_young', 'snow_tree_birch', 'snow_tree_young']
+    .map((id) => spawner(id)),
 };
 /** «Свирепый вожак» mini-bosses of the cemetery and the outer lands. */
 export const MINI_SPAWNER = spawner('bandit_warlord');

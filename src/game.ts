@@ -33,6 +33,8 @@ import { addPct, addStat, armorMul, critAvg, critChance, critMul, dodgeChance, g
 /** Death's effects (souls, the ritual, the reap, its blows), teal like its skin, and the fog around them. */
 const SOUL_GREEN = 0x4fe3c4;
 const SOUL_FOG = 0x3fb89a;
+/** Assassins' smoke bomb (MobDef.twin). */
+const SMOKE = 0x3a3d48;
 const SOUL_BARKS = ['Восстаньте, души!', 'Служите мне вечно!', 'Ваши кости — мои!'];
 const releaseHold = (m: Mob, anim: BossAnim, impactIn: number) => { if (m.ch instanceof Character) m.ch.release(anim, impactIn); };
 /** Debris colour of hits and kills: bone dust for skeletons and spirits, blood for the rest. */
@@ -172,6 +174,9 @@ export class Mob extends Unit {
   cycle = 0;
   /** Reinforcement of this boss: removed when the fight resets, pays no gacha pull. */
   owner: Mob | null = null;
+  /** MobDef.twin: the shadow twin was called this fight; on the twin: the mob that called it. */
+  twinned = false;
+  twinOf: Mob | null = null;
   /** Death's soul: the hero walks through it. */
   passable = false;
   /** Death: seconds since the last soul rose, and seconds left of the summoning flight (untargetable meanwhile). */
@@ -212,7 +217,7 @@ export class Mob extends Unit {
     this.reward = reward;
     const [model, weapon] = def.model[faction];
     const scale = def.scale * mul.scale;
-    this.ch = def.static ? new StaticBody(model, scale)
+    this.ch = def.static ? new StaticBody(model, scale, def.tint === undefined ? undefined : new THREE.Color(def.tint))
       : def.creature ? new Creature(model, scale) : new Character(model, weapon, scale, def.skin);
     this.dmg = def.dmg * mul.dmg;
     this.ch.position.copy(spawn);
@@ -249,6 +254,7 @@ export class Mob extends Unit {
     this.hp = this.maxHp;
     this.phase2 = false;
     this.adds = 0;
+    this.twinned = false;
     this.soulT = 0;
     this.ritual = 0;
     this.burstDue = false;
@@ -1244,6 +1250,7 @@ export class Game {
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
     m.hp -= dmg;
     m.hurtAt = this.time;
+    if (m.def.twin && !m.twinned && !m.twinOf && m.hp > 0 && m.hp < m.maxHp * m.def.twin) this.callTwin(m);
     m.ch.hit();
     if (aggro) m.state = m.state === 'return' ? 'return' : 'chase';
     if (aggro && (!m.def.boss || this.kitOf(m)?.knockable) && !m.passive) m.knock.set(m.pos.x - this.hero.position.x, 0, m.pos.z - this.hero.position.z).normalize().multiplyScalar(knock);
@@ -1517,6 +1524,7 @@ export class Game {
             this.endFight(m, 'reset');
             if (def.boss) { m.adds = 0; m.soulT = 0; m.ritual = 0; m.pos.y = 0; releaseHold(m, def.boss.souls?.anim ?? 'MeleeHigh', 0.3); m.burstDue = false; m.animDelay = -1; this.despawnMinions(m, true); }
             else if (this.kitOf(m)) this.despawnMinions(m);
+            if (def.twin) { this.dropTwins(m); if (m.removed) { removed = true; continue; } }
             this.kitOf(m)?.reset?.();
           } else {
             const reach = def.range + m.radius * 0.5 + HERO.radius;
@@ -1842,6 +1850,36 @@ export class Game {
     this.waves.add(at, 1.1, SOUL_GREEN, 1.3);
     this.particles.burst(v1.copy(at).setY(0.2), SOUL_GREEN, 10, 0.12, 4, 0.9);
     this.puffs.cloud(at, 1, SOUL_FOG, 4);
+  }
+
+  /** MobDef.twin: a smoke bomb bursts on the hero's far side and a second one of the same mob steps out of it. */
+  private callTwin(m: Mob) {
+    m.twinned = true;
+    const hp = this.hero.position;
+    v1.set(hp.x - m.pos.x, 0, hp.z - m.pos.z).normalize();
+    const at = new THREE.Vector3(hp.x + v1.x * 2, 0, hp.z + v1.z * 2);
+    this.world.collide(at, 0.45);
+    this.puffs.cloud(at, 1.2, SMOKE, 14, 1.8);
+    this.particles.burst(v1.copy(at).setY(0.6), SMOKE, 12, 0.14, 5, 0.6);
+    sfx.break();
+    const t = this.addMob(m.def, at, this.labels);
+    t.temp = true;
+    t.twinOf = m;
+    t.state = 'chase';
+    t.atkCd = 0.5;
+    t.ch.facing = Math.atan2(hp.x - at.x, hp.z - at.z);
+  }
+
+  /** The fight of a twin pair reset: the twins fade back into smoke, the caster may call again next fight. */
+  private dropTwins(m: Mob) {
+    const caster = m.twinOf ?? m;
+    caster.twinned = false;
+    for (const t of this.mobs) {
+      if (t.twinOf !== caster || t.removed) continue;
+      this.puffs.cloud(t.pos, 1, SMOKE, 8);
+      if (this.target === t) this.target = null;
+      this.removeMob(t);
+    }
   }
 
   /** Up to 3–4 mobs from the pool (a fort pack: different kinds) run in and go for the hero. */
