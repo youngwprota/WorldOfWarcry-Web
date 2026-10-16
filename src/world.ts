@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PEAKS_SPAWNERS, PROP_SPAWNERS, SPAWNERS, WITHERED, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
+import { FACTIONS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, MID_SPAWNERS, CEMETERY_AREAS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PEAKS_SPAWNERS, PROP_SPAWNERS, SPAWNERS, WITHERED, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
   ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, OLD_TRAIL, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
   borderAway, borderRoom, pathAt, pathDist, progressAt, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
@@ -91,6 +91,25 @@ type ScatterLook = SceneryLook & { snow?: boolean };
 
 /** Snow Pass roads as polylines (World.snowRoadDist). */
 const SNOW_ROADS: [number, number][][] = [LAND_TRAILS[4], LAND_TRAILS[8], OLD_TRAIL.x.map((x, i): [number, number] => [x, OLD_TRAIL.z[i]])];
+
+/** Abandoned-village look (World.abandonedVillage): the model's materials darkened and greyed, cached per material. */
+const RUIN_TINT = new THREE.Color(0x8c8496);
+const ruinMats = new Map<THREE.Material, THREE.Material>();
+function ruinLook(root: THREE.Object3D) {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh || Array.isArray(mesh.material)) return;
+    let m = ruinMats.get(mesh.material);
+    if (!m) {
+      const c = mesh.material.clone() as THREE.MeshStandardMaterial;
+      c.color?.multiply(RUIN_TINT);
+      c.onBeforeCompile = mesh.material.onBeforeCompile;
+      c.customProgramCacheKey = mesh.material.customProgramCacheKey;
+      ruinMats.set(mesh.material, (m = c));
+    }
+    mesh.material = m;
+  });
+}
 
 const snowMats = new Map<THREE.Material, THREE.Material>();
 function snowMat(src: THREE.Material) {
@@ -211,6 +230,10 @@ export class World {
   private treeSpots: [number, number][] = [];
   private sizeCache = new Map<string, THREE.Vector3>();
   private packCenters: [number, number][] = [];
+  /** Circles [x, z, r] trail mobs never stand in (cemetery village and chapel). */
+  private keepOut: [number, number, number][] = [];
+  /** Named areas of the cemetery (config CEMETERY_AREAS + Death's arena): the game shows the name on stepping in. */
+  readonly areas: { name: string; x: number; z: number; r: number }[] = [];
 
   constructor(public faction: FactionId) {
     this.ponds.push(...swampPonds());
@@ -509,7 +532,8 @@ export class World {
   /** mobsAlong() for any curve: `at(d)` gives the point and unit tangent at distance d of `total`. */
   private mobsOnCurve(total: number, at: (d: number) => { x: number; z: number; tx: number; tz: number }, mobs: SpawnerDef[], zone: ZoneId, r: () => number, pins: Record<string, [number, number]> = {}) {
     const ok = (q: { x: number; z: number }) => walkable(q.x, q.z, 3) && zoneIdAt(q.x, q.z) === zone && pathDist(q.x, q.z) > 4 && !inCamp(q.x, q.z, 4)
-      && !this.packCenters.some(([x, z]) => Math.hypot(x - q.x, z - q.z) < 9);
+      && !this.packCenters.some(([x, z]) => Math.hypot(x - q.x, z - q.z) < 9)
+      && !this.keepOut.some(([x, z, kr]) => Math.hypot(x - q.x, z - q.z) < kr);
     mobs.forEach((def, i) => {
       const pin = pins[def.id];
       if (pin) {
@@ -1004,10 +1028,22 @@ export class World {
     const sArena = progressAt(ARENA.x, ARENA.z);
     const s0 = GATE.s + 12;
     const s1 = sArena - ARENA.r - 3;
-    this.mobsAlong([[s0, s1]], SPAWNERS.cemetery ?? [], 'cemetery', r);
+    const pol = (deg: number, d: number) => ({ x: ISLAND.cx + Math.sin((deg * Math.PI) / 180) * d, z: ISLAND.cz + Math.cos((deg * Math.PI) / 180) * d });
+    // Areas: the village and the chapel are built first and kept clear of trail mobs; their specials stand pinned in the centre
+    const pins: Record<string, [number, number]> = {};
+    const area: Record<string, { x: number; z: number }> = {};
+    for (const a of CEMETERY_AREAS) {
+      const p = (area[a.id] = pol(a.deg, a.d));
+      this.areas.push({ name: a.name, x: p.x, z: p.z, r: a.r });
+      if (a.pin) pins[a.pin] = [p.x, p.z];
+      if (a.id !== 'field') this.keepOut.push([p.x, p.z, a.r]);
+    }
+    this.areas.push({ name: 'Арена Смерти', x: ARENA.x, z: ARENA.z, r: ARENA.r });
+    this.abandonedVillage(area.village.x, area.village.z, r);
+    this.chapelRuins(area.chapel.x, area.chapel.z, r);
+    this.mobsAlong([[s0, s1]], SPAWNERS.cemetery ?? [], 'cemetery', r, pins);
 
     // Mausoleums, crypts and ruins, by angle (deg) and radius in the cemetery sector (slid inside the shore if needed)
-    const pol = (deg: number, d: number) => ({ x: ISLAND.cx + Math.sin((deg * Math.PI) / 180) * d, z: ISLAND.cz + Math.cos((deg * Math.PI) / 180) * d });
     const ins = (name: string, deg: number, d: number, scale: number, rot: number, pad = 3, collide: number | 'auto' = 'auto') => {
       const p = pol(deg, d);
       this.placeInside(name, p.x, p.z, scale, rot, pad, collide);
@@ -1021,7 +1057,6 @@ export class World {
     ins('undead_cauldron', 62, 74, 0.55, 0, 2, 0.8);
     ins('undead_flag', 87, 76, 0.6, 0, 2, 0.3);
     ins('undead_ruins_01', 110, 64, 0.45, r() * 6);
-    ins('undead_ruins_02', 70, 100, 0.45, r() * 6);
     ins('undead_column_1', 78, 66, 0.5, r() * 6);
     ins('undead_column_1', 118, 92, 0.5, r() * 6);
     // Windmill and a tower on the eastern cliffs
@@ -1096,6 +1131,20 @@ export class World {
     };
     graves('cemetery', besideTrail);
     graves('cemeteryField', () => pol(100 + r() * 20, 64 + r() * 22));
+    // Old grave field (the gravedigger's): a broken fence round it, a big bone and his wood pile
+    const F = area.field;
+    for (let i = 0; i < 16; i++) {
+      if (r() < 0.35) continue;
+      const a = (i / 16) * Math.PI * 2;
+      const x = F.x + Math.sin(a) * 11;
+      const z = F.z + Math.cos(a) * 11;
+      if (inCem(x, z) && walkable(x, z, 0.5) && pathDist(x, z) > 3 && !nearArena(x, z)) {
+        const f = this.place('undead_fence', x, z, 0.55, a + Math.PI / 2, 0);
+        if (f) f.rotation.z = (r() - 0.5) * 0.4;
+      }
+    }
+    this.place('undead_wood_pile', F.x - 3, F.z + 2.5, 0.5, r() * 6, 0.6);
+    if (this.free(F.x + 4, F.z - 3, 1)) this.place('undead_big_bone', F.x + 4, F.z - 3, 0.45, r() * 6, 0.5);
     // Decorative old graves, bones and dead trees, evenly spread
     const old: Inst[] = [];
     const bones: Inst[] = [];
@@ -1121,6 +1170,68 @@ export class World {
     this.scatter('undead_ground_bone_2', bones.filter((_, i) => i % 3 === 1), false);
     this.scatter('undead_ground_bone_3', bones.filter((_, i) => i % 3 === 2), false);
     this.deadTrees(deadTrees);
+  }
+
+  /**
+   * Abandoned human village at the cemetery's entrance (CEMETERY_AREAS.village): dark, greyed houses round a square
+   * with a well, broken fences and dead lanterns; the square (its centre) is left for the looter elite.
+   */
+  private abandonedVillage(cx: number, cz: number, r: () => number) {
+    const houses: [string, number, number][] = [
+      ['human_house_small', 0.2, 8.5], ['house_Lv1', 1.5, 9], ['human_house_mid', 2.9, 8.5], ['human_house_small', 4.1, 8], ['house_Lv1', 5.3, 9],
+    ];
+    for (const [name, a, d] of houses) {
+      // each house faces the square
+      const m = this.place(name, cx + Math.sin(a) * d, cz + Math.cos(a) * d, 0.5, a + Math.PI + (r() - 0.5) * 0.3);
+      if (m) ruinLook(m);
+    }
+    const w = this.place('elf_well', cx + 3.5, cz - 2, 0.36, 0.4, 1.1);
+    if (w) ruinLook(w);
+    this.place('undead_wood_pile', cx - 3.8, cz + 3.2, 0.5, 0.8, 0.6);
+    // broken fence: pieces of a ring with gaps, some tilted
+    for (let i = 0; i < 14; i++) {
+      if (r() < 0.4) continue;
+      const a = (i / 14) * Math.PI * 2;
+      const x = cx + Math.sin(a) * 12.5;
+      const z = cz + Math.cos(a) * 12.5;
+      if (!walkable(x, z, 0.5) || pathDist(x, z) < 3) continue;
+      const f = this.place('undead_fence', x, z, 0.55, a + Math.PI / 2, 0);
+      if (f) f.rotation.z = (r() - 0.5) * 0.5;
+    }
+    for (const a of [1.0, 3.6]) {
+      const m = this.place('lantern_street', cx + Math.sin(a) * 5.5, cz + Math.cos(a) * 5.5, 0.6, a, 0.3);
+      if (m) { ruinLook(m); m.rotation.x = (r() - 0.5) * 0.25; }
+    }
+  }
+
+  /** Chapel ruins (CEMETERY_AREAS.chapel): the oracle behind, ruined walls at the sides, a ring of columns and bones. */
+  private chapelRuins(cx: number, cz: number, r: () => number) {
+    // face the trail
+    const p = pathAt(progressAt(cx, cz));
+    const a = Math.atan2(p.x - cx, p.z - cz);
+    const at = (side: number, fwd: number) => local(cx, cz, a, side, fwd);
+    let q = at(0, -6);
+    this.place('undead_oracle_Lv1', q.x, q.z, 0.5, a);
+    for (const s of [-1, 1]) {
+      q = at(s * 6, -2);
+      this.place(s < 0 ? 'undead_ruins_01' : 'undead_ruins_02', q.x, q.z, 0.45, a + s * 1.2);
+    }
+    for (let i = 0; i < 6; i++) {
+      const b = (i / 6) * Math.PI * 2 + Math.PI / 6;
+      if (Math.cos(b) > 0.7) continue; // opening toward the trail
+      q = at(Math.sin(b) * 8.5, Math.cos(b) * 8.5);
+      if (r() < 0.25) continue; // fallen
+      this.place('undead_column_1', q.x, q.z, 0.5, r() * 6);
+    }
+    q = at(0, 3.5);
+    this.place('undead_obelisk', q.x, q.z, 0.6, a);
+    const bones: Inst[] = [];
+    for (let i = 0; i < 10; i++) {
+      const b = r() * Math.PI * 2;
+      const d = 2 + r() * 6;
+      bones.push({ x: cx + Math.sin(b) * d, z: cz + Math.cos(b) * d, s: 0.3 + r() * 0.2, r: r() * 6 });
+    }
+    this.scatter('undead_bones_remains', bones, false);
   }
 
   // ---------- outer locations: mobs along their paths, a main boss, «Свирепый вожак» mini-bosses, Snow Pass trees ----------

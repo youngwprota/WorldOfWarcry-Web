@@ -1048,6 +1048,15 @@ export const PROP_SPAWNERS: Record<'camp' | 'forest' | 'cemetery' | 'cemeteryFie
   cemetery: props(GRAVES, 18),
   cemeteryField: props(GRAVES, 6),
 };
+/**
+ * Areas of the Old Cemetery (world.buildCemetery): centre by angle (deg) and distance from the island centre, like its
+ * buildings; `r` — radius, m (stepping in shows the name). `pin` — the special mob standing in the centre.
+ */
+export const CEMETERY_AREAS: { id: 'village' | 'chapel' | 'field'; name: string; deg: number; d: number; r: number; pin?: string }[] = [
+  { id: 'village', name: 'Заброшенная деревня', deg: 90, d: 72, r: 12, pin: 'grave_looter' },
+  { id: 'chapel', name: 'Руины часовни', deg: 70, d: 99, r: 10, pin: 'cursed_archer' },
+  { id: 'field', name: 'Старое поле могил', deg: 113, d: 72, r: 11, pin: 'gravedigger' },
+];
 export const LEASH = 15;
 
 /**

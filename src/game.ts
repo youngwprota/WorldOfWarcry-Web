@@ -380,6 +380,8 @@ export class Game {
   onOpenGacha: () => void = () => {};
   /** After the party member on the field changes (src/party.ts): the classes hook in here later. */
   onClassChange: (c: HeroClass) => void = () => {};
+  /** Index of the named area (World.areas) the hero is in, -1 none. */
+  private area = -1;
   /** Game time of the last class switch (SWITCH_COOLDOWN). */
   private classT = -Infinity;
   private time = 0;
@@ -898,6 +900,16 @@ export class Game {
     if (zone !== this.zone) {
       this.zone = zone;
       this.ui.zoneBanner(zone);
+    }
+    // named areas inside a location (cemetery village, chapel…): the name on stepping in
+    let area = -1;
+    for (let i = 0; i < this.world.areas.length; i++) {
+      const A = this.world.areas[i];
+      if ((A.x - p.x) ** 2 + (A.z - p.z) ** 2 < A.r * A.r) { area = i; break; }
+    }
+    if (area !== this.area) {
+      this.area = area;
+      if (area >= 0) this.ui.toast(this.world.areas[area].name, 1800);
     }
 
     ch.update(dt, moving);
