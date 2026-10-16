@@ -734,6 +734,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .mloot .lt { display: inline-flex; align-items: center; gap: 3px; font-size: 22px; font-weight: 900; line-height: 1; color: #fff; text-shadow: var(--stroke); white-space: nowrap; }
 .mloot .lt .svgi { width: 26px; height: 26px; filter: drop-shadow(0 2px 0 var(--ink)); }
 .mloot .lt.item .svgi { filter: drop-shadow(0 0 4px var(--rc)) drop-shadow(0 2px 0 var(--ink)); }
+/* a random weapon of the class (items.ts dropAny) */
+.mloot .lt.item { position: relative; }
+.mloot .lt.item .any { position: absolute; right: -4px; bottom: -4px; font-size: 16px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); }
 .mobui.boss .mloot .lt { font-size: 26px; }
 /* the bar stays centred under the loot; weakness / resistance icons hang to the right of it */
 .mrow { position: relative; }
@@ -948,3 +951,10 @@ body::before, body::after { content: ''; position: fixed; left: 0; right: 0; hei
 body::before { top: 0; transform: translateY(-100%); }
 body::after { bottom: 0; transform: translateY(100%); }
 body.cutscene::before, body.cutscene::after { transform: none; }
+
+/* loot reveal (Game.revealLoot): the item's icon over the corpse, glowing in its quality colour */
+.ftext.loot-pop .lootpop { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--rc) 70%, transparent) 0%, transparent 68%);
+  animation: lootpop-glow 0.5s ease-in-out infinite alternate; }
+.ftext.loot-pop .lootpop .svgi { filter: drop-shadow(0 0 4px var(--rc)) drop-shadow(0 2px 0 var(--ink)); }
+@keyframes lootpop-glow { from { box-shadow: 0 0 10px color-mix(in srgb, var(--rc) 40%, transparent); } to { box-shadow: 0 0 22px var(--rc); } }

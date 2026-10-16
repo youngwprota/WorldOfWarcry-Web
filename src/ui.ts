@@ -53,16 +53,18 @@ export interface MapMark {
   icon: string;
   /** The class the elite's drop is for: its badge at the tile's corner. */
   cls?: HeroClass;
+  /** The elite drops a random weapon of the class (items.ts dropAny): a «?» on its tile. */
+  any?: boolean;
   name: string;
   respawnIn: number;
   /** Dead: how far its respawn has come, 0..1 (the ring loader around the faded mark). */
   respawnP: number;
   /** A main boss's drop: a small framed item badge at the skull's corner. */
-  drop?: { icon: string; color: string; cls?: HeroClass };
+  drop?: { icon: string; color: string; cls?: HeroClass; any?: boolean };
 }
 
 /** An item icon on a tile of its quality colour (elites and bosses' drops on the maps); `cls`: whose item, a badge at the corner. */
-function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number, id: string, color: string, s: number, cls?: HeroClass) {
+function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number, id: string, color: string, s: number, cls?: HeroClass, any = false) {
   // the tile is filled with the quality colour (thin dark edge), the item's own icon on it in white
   g.fillStyle = color;
   g.strokeStyle = '#000';
@@ -77,6 +79,15 @@ function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number
   const h = r * 0.8;
   if (img && (!(img instanceof HTMLImageElement) || img.complete)) g.drawImage(img, x - h, y - h, h * 2, h * 2);
   if (cls) classBadge(g, x + r * 0.85, y - r * 0.85, r * 0.55, cls, s);
+  if (any) {
+    // a random weapon of the class: «?» at the bottom-right corner
+    g.font = `900 ${Math.round(r * 1.1)}px Rubik, sans-serif`;
+    g.lineWidth = 3 * s;
+    g.strokeStyle = '#000';
+    g.fillStyle = '#fff';
+    g.strokeText('?', x + r * 0.7, y + r * 0.6);
+    g.fillText('?', x + r * 0.7, y + r * 0.6);
+  }
 }
 
 /** Respawn loader on the map: a dark ring, filled clockwise from the top by `p` (0..1); no numbers. */
@@ -124,12 +135,12 @@ export function drawMarks(g: CanvasRenderingContext2D, marks: MapMark[], X: (x: 
     const r = (m.kind === 'boss' ? 19 : 13) * s;
     // dead: the mark stays at the spawn point, faded, inside a ring that fills up until the respawn
     g.globalAlpha = m.alive ? 1 : 0.45;
-    if (m.kind === 'elite') framedItem(g, x, y, r, m.icon, m.color, s, m.cls);
+    if (m.kind === 'elite') framedItem(g, x, y, r, m.icon, m.color, s, m.cls, m.any);
     else {
       // the main boss: the horned skull in red; a micro-boss: the round skull in orange
       const img = tintedArt(m.kind === 'boss' ? 'boss' : 'skull', m.color);
       if (img) g.drawImage(img, x - r, y - r, r * 2, r * 2);
-      if (m.drop) framedItem(g, x + r * 0.8, y + r * 0.7, 8 * s, m.drop.icon, m.drop.color, s * 0.7, m.drop.cls);
+      if (m.drop) framedItem(g, x + r * 0.8, y + r * 0.7, 8 * s, m.drop.icon, m.drop.color, s * 0.7, m.drop.cls, m.drop.any);
     }
     g.globalAlpha = 1;
     if (!m.alive) respawnRing(g, x, y, r * 1.35, m.respawnP, s);

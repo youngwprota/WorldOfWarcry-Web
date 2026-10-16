@@ -440,6 +440,8 @@ export class Inventory {
       const c = COMBOS[it.def];
       ability = !c ? '' : `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
       const w = WEAPONS[it.def];
+      const pl = w.shot?.pellets;
+      if (pl) ability = `<div class="ab-title">Дробь</div><p>Стреляет реже лука: <b>${pl.n}</b> дробинок веером <b>${pl.spread}°</b> на <b>${w.range} м</b>, каждая — <b>×${pl.mul}</b> урона.</p>` + ability;
       if (w.staff === 'fire') {
         const f = STAVES.fire;
         ability = `<div class="ab-title">Поджог</div><p>Бьёт на <b>${w.range} м</b>. Враги в <b>${f.splash.radius} м</b> от цели получают <b>×${f.splash.mul}</b> урона. Задетые горят <b>${f.burn.time} с</b> и получают <b>+${Math.round(f.burn.vuln * 100)}%</b> урона от всего.</p>` + ability;

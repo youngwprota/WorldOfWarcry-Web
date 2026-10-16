@@ -45,6 +45,8 @@ export const WEAPON_GRIPS: Record<string, {
   sword: { scale: 0.6, grip: 0.1 },
   hammer: { scale: 0.75, grip: 0.16 },
   polearm: { scale: 1.0, grip: 0.22, tilt: 0.15, out: 0.3 },
+  // the stand-in gun (src/mocks.ts), held in the bow hand: the barrels along the forearm, pointing where the arm aims
+  gun_mock: { scale: 0.7, grip: 0.3, tilt: -Math.PI / 2, out: 0 },
 };
 
 /** Shields (`shield_<type>_<quality>`): authored with the grip at the origin, face toward +Z, up +Y (cm). */

@@ -1,6 +1,6 @@
 // Combat and hero-stat formulas without three/DOM: the game and the balance simulator (tools/sim.ts) share them.
 import {
-  DEFENSE_CAP, HERO, RESIST_MULT, STAT_CURVE, STAT_SOURCES, WEAPONS,
+  DEFENSE_CAP, HERO, RESIST_MULT, STAT_CURVE, STAT_SOURCES, WEAPONS, attackMul,
   type DamageType, type FactionId, type PctStat, type ResistTier, type SavedSource, type StatId, type StatSource,
 } from './config';
 import { armorStats, weaponDamage, type ArmorSlot, type Item } from './items';
@@ -132,7 +132,7 @@ export function heroDps(weapons: HeroBuild['weapons'], power: number, powerMul: 
     const w = WEAPONS[it.def];
     if (w.orb || (w.guard && weapons.some((x) => x && !WEAPONS[x.def].guard))) continue;
     const r = resist ? RESIST_MULT[resist[w.type] ?? 'normal'] : 1;
-    dps += weaponDamage(it, power, powerMul) * w.aps * r;
+    dps += weaponDamage(it, power, powerMul) * w.aps * attackMul(w) * r;
   }
   return dps * crit;
 }

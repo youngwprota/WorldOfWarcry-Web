@@ -208,6 +208,8 @@ export class Pickups {
   private orbGeo = new THREE.IcosahedronGeometry(0.2, 1);
   private mats: Record<PickupKind, THREE.Material>;
   onCollect: (kind: PickupKind) => void = () => {};
+  /** Called now and then for every orb in flight (a glowing trail). */
+  onTrail: (pos: THREE.Vector3, kind: PickupKind) => void = () => {};
 
   constructor(private scene: THREE.Scene) {
     this.mats = {
@@ -216,13 +218,15 @@ export class Pickups {
   }
 
   private orbMat(k: OrbKind) {
-    return new THREE.MeshBasicMaterial({ color: ORBS[k].color });
+    // a little above white: the post glow haloes them
+    return new THREE.MeshBasicMaterial({ color: new THREE.Color(ORBS[k].color).multiplyScalar(1.4) });
   }
 
+  /** False when the pool is full (the caller pays the orb at once). */
   spawn(pos: THREE.Vector3, kind: PickupKind) {
     let p = this.pool.find((x) => !x.active);
     if (!p) {
-      if (this.pool.length > 220) return;
+      if (this.pool.length > 220) return false;
       const mesh = new THREE.Mesh(this.orbGeo, this.mats.power);
       this.scene.add(mesh);
       p = { mesh, kind, vel: new THREE.Vector3(), t: 0, active: false };
@@ -238,6 +242,7 @@ export class Pickups {
     const a = Math.random() * Math.PI * 2;
     const s = 2 + Math.random() * 3;
     p.vel.set(Math.cos(a) * s, 5 + Math.random() * 3, Math.sin(a) * s);
+    return true;
   }
 
   update(dt: number, hero: THREE.Vector3) {
@@ -246,6 +251,7 @@ export class Pickups {
       p.t += dt;
       const m = p.mesh;
       m.rotation.y += dt * 4;
+      if (Math.random() < dt * 25) this.onTrail(m.position, p.kind);
       if (p.t < 0.45) {
         p.vel.y -= 20 * dt;
         m.position.addScaledVector(p.vel, dt);

@@ -76,7 +76,7 @@ export class Mob extends Unit {
   frozen = 0;
   chill = 0;
   constructor(public def: MobDef, spawn: THREE.Vector3, faction: 'human' | 'orc', layer: HTMLElement,
-    mul = { hp: 1, dmg: 1, reward: 1, scale: 1 }, slot?: Partial<MobBehavior>, item: { icon: string; color: string }[] = []) {
+    mul = { hp: 1, dmg: 1, reward: 1, scale: 1 }, slot?: Partial<MobBehavior>, item: { icon: string; color: string; any?: boolean }[] = []) {
     // Bosses, micro-bosses and elites get a bigger HP bar with their name: a boss's is coloured by difficulty,
     // a micro-boss's is orange, an elite's has its drop's quality colour. Over the bar: the loot (lootHtml);
     // right of it: weaknesses and resistances.

@@ -23,9 +23,14 @@ import { UI } from './ui';
 import { DragScroll } from './dragscroll';
 import { BREAKABLES } from './world';
 import { CLASSES } from './party';
+import { registerMocks } from './mocks';
+import { startArtWave, startLoadingFx } from './loadfx';
 import { Post } from './post';
 
 const ui = new UI();
+// the loading art comes alive: its background sways, sparks fly
+startArtWave(document.getElementById('loading')!, `${import.meta.env.BASE_URL}assets/ui/loading.jpg`);
+startLoadingFx(document.getElementById('loading')!);
 const app = ui.app;
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -105,8 +110,10 @@ for (const [m] of FORGE3D.decor) models.add(m);
   'undead_ground_bone_2', 'undead_ground_bone_3', 'orc_bucket', 'orc_box_large_2', 'shield', 'spear',
   'orc_wood_pile_small', 'orc_beam_pile', 'undead_wood_pile', 'undead_oracle_Lv1', 'house_Lv1', 'lantern_street', 'elf_mine_Lv1', 'elf_oracle_Lv1', 'elf_throne_Lv1', 'elf_fountain'].forEach((m) => models.add(m));
 
+registerMocks(); // stand-in models built in code (the gun): not loaded from files
 await Promise.all([
-  assets.loadAll([...models], (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`)),
+  // per-quality GLB gear (sword_common…) comes from loadGear, not as FBX
+  assets.loadAll([...models].filter((m) => !assets.has(m) && !GEAR_MODELS.includes(m)), (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`)),
   assets.loadCreatures([...creatures]),
   assets.loadGear(GEAR_MODELS),
   assets.loadProps([...props]),

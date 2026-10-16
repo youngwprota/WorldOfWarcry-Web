@@ -270,7 +270,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   /** One swing of a hand (counters too). */
   const strike = (it: Item) => {
     const w = WEAPONS[it.def];
-    const dmg = hit(it, 1);
+    const dmg = hit(it, CONFIG.attackMul(w)); // a gun's volley: its pellets that hit (PELLET_HIT)
     if (w.staff === 'fire' && dmg > 0) { if (burn <= 0) burnTick = B.tick; burn = B.time; burnDps = dmg * B.dps; }
     if (w.staff === 'ice' && dmg > 0) {
       const f = STAVES.ice.freeze;

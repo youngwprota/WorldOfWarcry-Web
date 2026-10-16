@@ -151,6 +151,11 @@ const ART: Record<string, string> = {
     ${P(rect(45, 27, 10, 10, 3), LEATHER_D)}${P(rect(29, 2, 6, 6, 2), GOLD)}${P(rect(29, 56, 6, 6, 2), GOLD)}</g>
     ${P(rect(10, 30, 40, 4, 2), WOOD, ' transform="rotate(-45 32 32)"')}
     ${P('M50 7L58 6L57 14L52 12Z', STEEL, ' transform="translate(-1 1)"')}${P('M8 50L15 49L15 56L9 56Z', RED)}`,
+  // the hunter's gun (a stand-in until the art exists): a double-barrelled shotgun, barrels up-right
+  gun: `<g transform="rotate(-40 32 32)">
+    ${P('M4 30L22 27L24 37L8 44C5 45 3 43 3 40Z', WOOD)}${N('M5 40L23 34L24 37L8 44C5 45 3 43 4 40Z', WOOD_D)}
+    ${P(rect(21, 26, 12, 9, 2), STEEL_DD)}${P(rect(31, 24, 30, 5, 2), STEEL)}${P(rect(31, 29, 30, 4, 2), STEEL_D)}
+    ${P(rect(33, 33, 18, 4, 2), WOOD)}${P('M24 35C24 41 30 41 30 35', 'none', ' stroke-width="2.5"')}</g>`,
   staff: staffArt('#8f6cff', '#6747d6', '#e6dcff'),
   // mage staves (config STAVES): the same staff, the orb in the element's colours
   staff_fire: staffArt('#ff7a2a', '#d8401c', '#ffe08a'),

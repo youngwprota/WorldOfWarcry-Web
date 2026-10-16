@@ -68,12 +68,12 @@ export interface SaveData {
 const KEY = 'warcry-save-v1';
 
 export function newSave(faction: FactionId): SaveData {
-  return {
+  const d: SaveData = {
     v: 1,
     faction,
     src: {},
     pct: {},
-    weapons: [makeItem('weapon', FACTIONS[faction].startWeapon, 0, 1), null],
+    weapons: [null, null],
     kits: {},
     active: 0,
     equip: {},
@@ -87,6 +87,9 @@ export function newSave(faction: FactionId): SaveData {
     muted: false,
     cls: 'warrior',
   };
+  // the warrior is open from the start: his three weapons (sword in hand, axe and hammer in the bag)
+  d.weapons = classKit(d, 'warrior');
+  return d;
 }
 
 export function loadSave(): SaveData | null {
@@ -131,6 +134,7 @@ export function loadSave(): SaveData | null {
     d.weapons = fitHands(d, d.kit ?? 'warrior', d.weapons);
     for (const k of Object.keys(d.kits ?? {}) as HeroClass[]) d.kits![k] = fitHands(d, k, d.kits![k]!);
     giveOrbs(d);
+    giveStartWeapons(d);
     return d;
   } catch {
     return null;
@@ -160,12 +164,30 @@ function giveOrbs(d: SaveData) {
   if (hands && !hands[1] && !d.bag.some((it) => it.kind === 'weapon' && WEAPONS[it.def]?.orb)) hands[1] = makeItem('weapon', CLASSES.mage.kit!.left!, 0, 1);
 }
 
-/** Gear of a class taking the field for the first time (ClassDef.kit); its extra start items go into the bag. */
+/**
+ * Start gear of a class that opens (ClassDef.kit): its hands; the rest of its weapons go into the bag unless the
+ * hero has that weapon already (any quality).
+ */
 export function classKit(d: SaveData, c: HeroClass): SaveData['weapons'] {
   const kit = CLASSES[c].kit;
   if (!kit) return [makeItem('weapon', FACTIONS[d.faction].startWeapon, 0, 1), null];
-  for (const def of kit.bag ?? []) if (d.bag.length < BAG_SIZE) d.bag.push(makeItem('weapon', def, 0, 1));
+  for (const def of kit.bag ?? []) if (!owns(d, def) && d.bag.length < BAG_SIZE) d.bag.push(makeItem('weapon', def, 0, 1));
   return [makeItem('weapon', kit.hand, 0, 1), kit.left ? makeItem('weapon', kit.left, 0, 1) : null];
+}
+
+/** The hero has a weapon of def `def` anywhere: in hand, in another class's hands or in the bag. */
+function owns(d: SaveData, def: string) {
+  const all = [...d.weapons, ...Object.values(d.kits ?? {}).flat(), ...d.bag];
+  return all.some((it) => it?.kind === 'weapon' && it.def === def);
+}
+
+/** Saves from before the weapon sets: every open class gets the common weapons of its set it does not have. */
+function giveStartWeapons(d: SaveData) {
+  const open = (c: HeroClass) => !CLASSES[c].locked || !!d.classes?.includes(c);
+  for (const c of Object.keys(CLASSES) as HeroClass[]) {
+    if (!open(c)) continue;
+    for (const def of CLASSES[c].weapons) if (!owns(d, def) && d.bag.length < BAG_SIZE) d.bag.push(makeItem('weapon', def, 0, 1));
+  }
 }
 
 /** The item if its def still exists, else null. */

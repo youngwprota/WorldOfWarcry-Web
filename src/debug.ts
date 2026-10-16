@@ -114,6 +114,7 @@ const SECTIONS: [string, Action[]][] = [
     // a set's 4 pieces + ring + amulet; pressing the same set again raises the quality (common → mythic → common)
     ['Сет класса', (g) => g.debugGiveArmor(CLASS_SET[g.heroClass]), 'wide'],
     ['Выдать все', (g) => g.debugGiveAll(), 'wide'],
+    ['Открыть все классы', (g) => g.debugOpenClasses(), 'wide'],
     ['Сменить расу', (g) => g.debugSwitchFaction(), 'wide'],
   ]],
   ['Статы (+очки)', [

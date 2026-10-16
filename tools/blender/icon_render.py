@@ -1,4 +1,4 @@
-"""Item icon: blender -b --factory-startup -P icon_render.py -- in.glb out.png [contrast=1.15] [glass_darken=0] [roll=40]
+"""Item icon: blender -b --factory-startup -P icon_render.py -- in.glb out.png [contrast=1.15] [glass_darken=0] [roll=40] [spin=0]
 Writes a 512px PNG (+ .raw.png); icon_shrink.py then boxes it down to 128px."""
 import bpy, sys, math, zlib, struct, numpy as np
 from mathutils import Vector
@@ -7,6 +7,7 @@ glb, out = args[:2]
 CONTRAST = float(args[2]) if len(args) > 2 else 1.15
 DARKEN = float(args[3]) if len(args) > 3 else 0.0  # glass darkening towards the centre (orbs)
 ROLL = float(args[4]) if len(args) > 4 else 40.0  # in-plane tilt of the item (orbs with horns: 0)
+SPIN = float(args[5]) if len(args) > 5 else 0.0  # turn about the item's long axis first (weapons whose blade faces the camera: 90)
 S = 512
 K = 3  # supersample: render at S*K, outline at full res, then box-downsample
 N = S * K
@@ -15,8 +16,11 @@ bpy.ops.import_scene.gltf(filepath=glb)
 sc = bpy.context.scene
 objs = [o for o in sc.objects if o.type == 'MESH']
 root = bpy.data.objects.new('root', None); sc.collection.objects.link(root)
+spin = bpy.data.objects.new('spin', None); sc.collection.objects.link(spin)
 for o in sc.objects:
-    if o.parent is None and o is not root: o.parent = root
+    if o.parent is None and o not in (root, spin): o.parent = spin
+spin.parent = root
+spin.rotation_euler = (0, 0, math.radians(SPIN))  # about the long axis (Z up after the glTF import)
 root.rotation_euler = (0, math.radians(ROLL), 0)  # diagonal, head top-right
 bpy.context.view_layer.update()
 pts = [o.matrix_world @ v.co for o in objs for v in o.data.vertices]
