@@ -355,7 +355,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
 }
 
 // ---------- loot and gear ----------
-const VALUE: Record<StatId, number> = { power: 1, hp: 0.35, regen: 1.5, speed: 0.2, defense: 1, dodge: 2, crit: 1.5, critDmg: 1 };
+const VALUE: Record<StatId, number> = { power: 1, hp: 0.35, regen: 1.5, speed: 0.2, defense: 1, dodge: 2, crit: 1.5, critDmg: 1, haste: 1.5, leech: 1.5 };
 const rewardOf = (u: Unit): OrbReward => {
   if (u.kind === 'prop') return BREAKABLES[u.def].reward as OrbReward;
   const d = MOBS[u.def];

@@ -866,7 +866,7 @@ export const ORBS: Record<OrbKind, { color: number; css: string; label: string; 
 export const fmtOrb = (k: OrbKind, n = 1) => `+${Math.round(ORBS[k].value * n)}`;
 
 /** Every stat of the hero (and of mobs: crit, critDmg, dodge in MobDef). All are whole points. */
-export type StatId = OrbKind | 'defense' | 'dodge' | 'crit' | 'critDmg';
+export type StatId = OrbKind | 'defense' | 'dodge' | 'crit' | 'critDmg' | 'haste' | 'leech';
 /** Stats that also take percent bonuses: value = (sum of the flat parts) × (1 + sum of the percents / 100). */
 export type PctStat = 'hp' | 'regen' | 'power';
 export const PCT_STATS: readonly PctStat[] = ['hp', 'regen', 'power'];
@@ -922,6 +922,10 @@ export const STAT_CURVE = {
   crit: { base: 0, max: 0.6, k: 100 },
   /** Damage multiplier of a critical hit. */
   critDmg: { base: 1.5, max: 1.5, k: 100 },
+  /** Attack speed multiplier (gloves): every weapon swings this much faster. */
+  haste: { base: 1, max: 0.5, k: 100 },
+  /** Share of the damage the hero deals that comes back as HP (rings). */
+  leech: { base: 0, max: 0.2, k: 100 },
 };
 /** Defense: incoming damage × 100 / (100 + defense), at most this share is taken off. */
 export const DEFENSE_CAP = 0.75;

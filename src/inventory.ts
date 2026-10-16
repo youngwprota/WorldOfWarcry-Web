@@ -31,6 +31,8 @@ const STAT_UI: Record<StatId, { name: string; icon: string; note: string }> = {
   crit: { name: 'Шанс крита', icon: 'crit', note: `предел ${pct(STAT_CURVE.crit.base + STAT_CURVE.crit.max)}` },
   critDmg: { name: 'Урон крита', icon: 'critdmg', note: `предел ${pct(STAT_CURVE.critDmg.base + STAT_CURVE.critDmg.max)}` },
   dodge: { name: 'Уклонение', icon: 'dodge', note: `от любых ударов, предел ${pct(STAT_CURVE.dodge.max)}` },
+  haste: { name: 'Скорость атаки', icon: 'fist', note: `все удары и укусы питомца, предел +${pct(STAT_CURVE.haste.max)}` },
+  leech: { name: 'Вампиризм', icon: 'heart', note: `доля нанесённого урона в здоровье, предел ${pct(STAT_CURVE.leech.max)}` },
 };
 
 /** Where the pet stands beside the hero on the preview stage (hero-local, m); the hero steps aside for it. */
@@ -245,6 +247,8 @@ export class Inventory {
       crit: pct1(s.crit),
       critDmg: pct1(s.critMul),
       dodge: pct1(s.dodge),
+      haste: `×${s.haste.toFixed(2)}`,
+      leech: pct1(s.leech),
     };
     const total = isPctStat(k)
       ? `${fmtK(b.sum)} × ${b.mult.toFixed(2)} = <b>${fmtK(k === 'hp' ? Math.round(b.value) : b.value)}${k === 'regen' ? ' хп/с' : ''}</b>`
@@ -273,6 +277,8 @@ export class Inventory {
       stat('crit', pct1(s.crit), `${s.critPts} очков`),
       stat('critDmg', pct1(s.critMul), `${s.critDmgPts} очков`),
       stat('dodge', pct1(s.dodge), `${s.dodgePts} очков`),
+      stat('haste', `×${s.haste.toFixed(2)}`, `${s.hastePts} очков`),
+      stat('leech', pct1(s.leech), `${s.leechPts} очков`),
     ].join('');
     this.showWin('Характеристики', `${f.name} · ${w.name}`, rows, () => this.statWrap.classList.add('hidden'));
   }

@@ -81,6 +81,7 @@ export const PART_PREFIXES: Record<VisualPart, string[]> = {
 export const BONUS_NAME: Record<BonusStat, string> = {
   hp: 'Здоровье', regen: 'Реген, хп/с', power: 'Урон', speed: 'Скорость',
   defense: 'Защита', dodge: 'Уклонение', crit: 'Шанс крита', critDmg: 'Урон крита',
+  haste: 'Скорость атаки', leech: 'Вампиризм',
 };
 
 export interface ArmorDef {
@@ -108,10 +109,10 @@ const SETS: { id: string; cls: HeroClass; of: Record<FactionId, string>; src?: R
 ];
 /** The class's armour set id (`<set>_<slot>`). */
 export const CLASS_SET = Object.fromEntries(SETS.map((s) => [s.cls, s.id])) as Record<HeroClass, string>;
+// (gloves are not part of a set: they come from the gacha, see GACHA_GEAR below)
 const PIECES: { slot: VisualPart; noun: string; defense: number; bonus: { stat: BonusStat; value: number } }[] = [
   { slot: 'head', noun: 'Шлем', defense: 5, bonus: { stat: 'regen', value: 1 } },
   { slot: 'chest', noun: 'Нагрудник', defense: 9, bonus: { stat: 'hp', value: 18 } },
-  { slot: 'arms', noun: 'Перчатки', defense: 3, bonus: { stat: 'power', value: 4 } },
   { slot: 'legs', noun: 'Сапоги', defense: 6, bonus: { stat: 'speed', value: 3 } },
 ];
 
@@ -127,8 +128,29 @@ for (const s of SETS) {
     };
   }
 }
-ARMOR.ring_swift = { id: 'ring_swift', slot: 'ring', name: { human: 'Кольцо ветра', orc: 'Кольцо следопыта' }, defense: 0, bonus: { stat: 'speed', value: 4 }, alwaysBonus: true };
-ARMOR.amulet_spring = { id: 'amulet_spring', slot: 'amulet', name: { human: 'Амулет родника', orc: 'Тотем крови' }, defense: 2, bonus: { stat: 'regen', value: 1 }, alwaysBonus: true };
+/**
+ * Gacha gear (docs/features/gacha-gear/concept.md): gloves — how the hero hits, rings — how he moves / a special
+ * effect, amulets — how he survives. Anyone wears them. Gloves look like the gloves of the wearer's class set
+ * (the warrior's: the plate's, hence `source` / `trim`). Numbers are placeholders until the balance pass.
+ */
+const PLATE = SETS[0];
+const gloves = (id: string, human: string, orc: string, stat: BonusStat, value: number): ArmorDef =>
+  ({ id, slot: 'arms', name: { human, orc }, source: PLATE.src, trim: PLATE.trim, defense: 4, bonus: { stat, value }, alwaysBonus: true });
+const jewel = (id: string, slot: 'ring' | 'amulet', human: string, orc: string, defense: number, stat: BonusStat, value: number): ArmorDef =>
+  ({ id, slot, name: { human, orc }, defense, bonus: { stat, value }, alwaysBonus: true });
+for (const d of [
+  gloves('gloves_power', 'Рукавицы силы', 'Кулаки вождя', 'power', 5),
+  gloves('gloves_crit', 'Перчатки меткости', 'Хватка следопыта', 'crit', 6),
+  gloves('gloves_haste', 'Перчатки проворства', 'Лапы ловкача', 'haste', 6),
+  jewel('ring_swift', 'ring', 'Кольцо ветра', 'Кольцо следопыта', 0, 'speed', 4),
+  jewel('ring_shadow', 'ring', 'Кольцо тени', 'Кольцо сумрака', 0, 'dodge', 5),
+  jewel('ring_blood', 'ring', 'Кольцо крови', 'Клык крови', 0, 'leech', 4),
+  jewel('amulet_spring', 'amulet', 'Амулет родника', 'Тотем крови', 2, 'regen', 1),
+  jewel('amulet_heart', 'amulet', 'Сердце льва', 'Сердце вепря', 2, 'hp', 20),
+  jewel('amulet_ward', 'amulet', 'Оберег', 'Костяной оберег', 6, 'defense', 4),
+]) ARMOR[d.id] = d;
+/** Armour the gacha gives (and nothing else drops these). */
+export const GACHA_GEAR = ['gloves_power', 'gloves_crit', 'gloves_haste', 'ring_swift', 'ring_shadow', 'ring_blood', 'amulet_spring', 'amulet_heart', 'amulet_ward'];
 
 export const BAG_SIZE = 128;
 
@@ -275,9 +297,9 @@ const RENAMED: Record<string, string> = {
 };
 
 export function normalizeItem(it: Partial<Item> & { def: string }): Item {
-  // the old peasant, guard, knight and lord sets became the one warrior plate
+  // the old peasant, guard, knight and lord sets became the one warrior plate; set gloves became gacha gloves
   const old = /^(peasant|guard|knight|lord)_(head|chest|arms|legs)$/.exec(it.def);
-  const def = old ? `plate_${old[2]}` : RENAMED[it.def] ?? it.def;
+  const def = /^[a-z]+_arms$/.test(it.def) ? 'gloves_power' : old ? `plate_${old[2]}` : RENAMED[it.def] ?? it.def;
   const kind = it.kind ?? 'weapon';
   return { uid: it.uid ?? newUid(), kind, def, rarity: fixedRarity(kind, def) ?? it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
 }

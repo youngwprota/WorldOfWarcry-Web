@@ -429,7 +429,7 @@ export class Game {
   /** Both hands together, crits on average; `resist` applies each hand's own damage type. */
   heroDps(resist?: Partial<Record<DamageType, ResistTier>>) {
     const s = this.stats;
-    return heroDps(this.save.weapons, s.power, s.powerMul, critAvg(s.critPts, s.critDmgPts), resist);
+    return heroDps(this.save.weapons, s.power, s.powerMul, critAvg(s.critPts, s.critDmgPts), resist, s.haste);
   }
 
   /** Model names of the right / left hand weapons. */
@@ -753,12 +753,12 @@ export class Game {
     // the shield never swings, it only answers blows (shieldAnswer); the mage's orb never swings either
     if (w.guard || w.orb) { h.combo = 0; return; }
     h.atkCd -= dt;
-    const period = 1 / w.aps;
     // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
     // up to 1 m further for facing, and swinging there was a whiff into thin air.
     const t = this.target;
     const inReach = !!t && this.inStrike(t, w.range);
     if (inReach && h.atkCd <= 0) {
+      const period = 1 / (w.aps * this.stats.haste);
       h.combo++;
       h.lastSwing = this.time;
       // the cast clip's release is late (1.13 s), so staves aren't capped: a cap would play it 3-5x too fast
@@ -961,9 +961,16 @@ export class Game {
     m.setChill(m.frozen > 0 ? 2 : m.slow > 0 ? 1 : 0);
   }
 
+  /** Rings of blood (stat `leech`): a share of the damage dealt comes back as HP. */
+  private leech(dealt: number) {
+    const k = this.stats.leech;
+    if (k > 0) this.hp = Math.min(this.maxHp, this.hp + dealt * k);
+  }
+
   /** A burn tick: no flash, no knockback, a small orange number. */
   private burnMob(m: Mob, dmg: number) {
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
+    this.leech(Math.min(dmg, m.hp));
     m.hp -= dmg;
     m.hurtAt = this.time;
     this.fx.spawn(this.unitTextAt(m), `-${fmtK(dmg)}`, 'dmg small', 0.6, { lift: m.uiEl.offsetHeight, color: '#ff9a4a' });
@@ -1057,6 +1064,7 @@ export class Game {
       if (dmg <= 0) { m.state = m.state === 'return' ? 'return' : 'chase'; return; }
     }
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
+    this.leech(Math.min(dmg, m.hp));
     m.hp -= dmg;
     m.hurtAt = this.time;
     if (m.def.twin && !m.twinned && !m.twinOf && m.hp > 0 && m.hp < m.maxHp * m.def.twin) this.callTwin(m);
@@ -2346,7 +2354,7 @@ export class Game {
     stash(this.save.weapons[0]);
     stash(this.save.weapons[1]);
     this.save.weapons = [best, null];
-    const pieces = ['head', 'chest', 'arms', 'legs'].map((p) => `${CLASS_SET[this.heroClass]}_${p}`);
+    const pieces = [...['head', 'chest', 'legs'].map((p) => `${CLASS_SET[this.heroClass]}_${p}`), 'gloves_power'];
     if (gear.jewels) pieces.push('ring_swift', 'amulet_spring');
     for (const def of pieces) {
       const slot = ARMOR[def].slot;
@@ -2418,7 +2426,7 @@ export class Game {
     const head = this.save.equip.head;
     const rarity = head?.def === `${set}_head` ? (head.rarity + 1) % 6 : 1;
     const defs: [ArmorSlot, string][] = [
-      ['head', `${set}_head`], ['chest', `${set}_chest`], ['arms', `${set}_arms`], ['legs', `${set}_legs`],
+      ['head', `${set}_head`], ['chest', `${set}_chest`], ['arms', 'gloves_power'], ['legs', `${set}_legs`],
       ['ring', 'ring_swift'], ['amulet', 'amulet_spring'],
     ];
     for (const [slot, def] of defs) this.save.equip[slot] = dropItem({ kind: 'armor', def, rarity });
