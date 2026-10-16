@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import { ORBS, RARITY, type OrbKind } from './config';
-import type { Item } from './items';
+import { ORBS, type OrbKind } from './config';
 
 const tmp = new THREE.Vector3();
 
@@ -200,22 +199,18 @@ export class Telegraphs {
   }
 }
 
-export type PickupKind = OrbKind | 'item';
-interface Pickup { mesh: THREE.Mesh; kind: PickupKind; vel: THREE.Vector3; t: number; active: boolean; item?: Item; }
+export type PickupKind = OrbKind;
+interface Pickup { mesh: THREE.Mesh; kind: PickupKind; vel: THREE.Vector3; t: number; active: boolean; }
 
 /** Stat orbs: burst out, then home in on the hero (GDD 4: "сами притягиваются"). */
 export class Pickups {
   private pool: Pickup[] = [];
   private orbGeo = new THREE.IcosahedronGeometry(0.2, 1);
   private mats: Record<PickupKind, THREE.Material>;
-  onCollect: (kind: PickupKind, item?: Item) => void = () => {};
-  private items: Pickup[] = [];
-  private itemGeo = new THREE.OctahedronGeometry(0.32, 0);
-  private beamGeo = new THREE.CylinderGeometry(0.08, 0.08, 3, 6, 1, true).translate(0, 1.5, 0);
+  onCollect: (kind: PickupKind) => void = () => {};
 
   constructor(private scene: THREE.Scene) {
     this.mats = {
-      item: new THREE.MeshBasicMaterial({ color: 0xffffff }),
       power: this.orbMat('power'), hp: this.orbMat('hp'), regen: this.orbMat('regen'), speed: this.orbMat('speed'),
     };
   }
@@ -245,41 +240,7 @@ export class Pickups {
     p.vel.set(Math.cos(a) * s, 5 + Math.random() * 3, Math.sin(a) * s);
   }
 
-  /** Equipment drop: a gem with a light beam in the rarity colour; flies to the hero like orbs. */
-  spawnItem(pos: THREE.Vector3, item: Item) {
-    const color = new THREE.Color(RARITY[item.rarity].color);
-    const mesh = new THREE.Mesh(this.itemGeo, new THREE.MeshBasicMaterial({ color }));
-    const beam = new THREE.Mesh(this.beamGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false }));
-    beam.position.y = -0.5;
-    mesh.add(beam);
-    mesh.position.copy(pos).setY(0.8);
-    this.scene.add(mesh);
-    const a = Math.random() * Math.PI * 2;
-    this.items.push({ mesh, kind: 'item', vel: new THREE.Vector3(Math.cos(a) * 2, 6, Math.sin(a) * 2), t: 0, active: true, item });
-  }
-
   update(dt: number, hero: THREE.Vector3) {
-    for (let i = this.items.length - 1; i >= 0; i--) {
-      const p = this.items[i];
-      const m = p.mesh;
-      p.t += dt;
-      m.rotation.y += dt * 2.5;
-      if (p.t < 0.6) {
-        p.vel.y -= 20 * dt;
-        m.position.addScaledVector(p.vel, dt);
-        if (m.position.y < 0.6) { m.position.y = 0.6; p.vel.set(0, 0, 0); }
-        continue;
-      }
-      m.position.y = 0.7 + Math.sin(p.t * 3) * 0.12;
-      tmp.set(hero.x, 0.9, hero.z).sub(m.position);
-      const d = tmp.length();
-      m.position.addScaledVector(tmp.normalize(), Math.min(d, (8 + p.t * 10) * dt));
-      if (d < 0.6) {
-        this.scene.remove(m);
-        this.items.splice(i, 1);
-        this.onCollect('item', p.item);
-      }
-    }
     for (const p of this.pool) {
       if (!p.active) continue;
       p.t += dt;

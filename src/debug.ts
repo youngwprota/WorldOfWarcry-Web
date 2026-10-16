@@ -4,6 +4,8 @@ import { ZONES } from './config';
 import type { ZoneId } from './config';
 import { ARENA, FOREST_MINI, FORT, GATES, ISLAND, LAND_BOSSES } from './island';
 import type { Game } from './game';
+import { CLASSES, CLASS_IDS, type HeroClass } from './party';
+import { CLASS_SET } from './items';
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
@@ -35,15 +37,15 @@ function teleport(g: Game, arg: string) {
   g.debugTeleportTo(at[0] + (dx / l) * 5, at[1] + (dz / l) * 5, kind === 'fort' || kind === 'arena' || kind === 'fmini' ? undefined : gate?.id);
 }
 
-/** Gear a player plausibly has by each boss: armour set + rarity, weapon rarity, ring and amulet. */
-const BOSS_GEAR: Partial<Record<ZoneId, { set: string; rarity: number; weapon: number; jewels: boolean }>> = {
-  forest: { set: 'guard', rarity: 0, weapon: 0, jewels: false },
-  cemetery: { set: 'guard', rarity: 1, weapon: 1, jewels: true },
-  peaks: { set: 'knight', rarity: 1, weapon: 2, jewels: true },
-  hills: { set: 'knight', rarity: 2, weapon: 2, jewels: true },
-  grove: { set: 'lord', rarity: 2, weapon: 3, jewels: true },
-  swamp: { set: 'lord', rarity: 3, weapon: 4, jewels: true },
-  dunes: { set: 'lord', rarity: 4, weapon: 4, jewels: true },
+/** Gear a player plausibly has by each boss: armour rarity (the class set), weapon rarity, ring and amulet. */
+const BOSS_GEAR: Partial<Record<ZoneId, { rarity: number; weapon: number; jewels: boolean }>> = {
+  forest: { rarity: 0, weapon: 0, jewels: false },
+  cemetery: { rarity: 1, weapon: 1, jewels: true },
+  peaks: { rarity: 1, weapon: 2, jewels: true },
+  hills: { rarity: 2, weapon: 2, jewels: true },
+  grove: { rarity: 2, weapon: 3, jewels: true },
+  swamp: { rarity: 3, weapon: 4, jewels: true },
+  dunes: { rarity: 4, weapon: 4, jewels: true },
 };
 
 /** `arg`: '<zone> <teleport arg>'; equips BOSS_GEAR, teleports to the boss, then balances the hero against it (Game.debugBalanceBoss). */
@@ -61,7 +63,10 @@ function locationRows(): [string, Action[]][] {
     [zoneName('forest'), [['Лагерь', (g) => g.debugTeleport('camp')], ['Мини', teleport, '', 'fmini'], ['Босс', teleport, '', 'fort'], ['Баланс+ТП', balanceTp, '', 'forest fort']]],
   ];
   const seen = new Set<ZoneId>();
-  for (const gt of GATES) {
+  // the Snow Pass right under the cemetery, the rest in map order
+  const first: ZoneId[] = ['cemetery', 'peaks'];
+  const rank = (z: ZoneId) => (first.indexOf(z) + 3) % 3;
+  for (const gt of [...GATES].sort((a, b) => rank(a.to) - rank(b.to))) {
     if (seen.has(gt.to)) continue;
     seen.add(gt.to);
     const row: Action[] = [['Вход', teleport, '', `door:${gt.id}`]];
@@ -71,6 +76,17 @@ function locationRows(): [string, Action[]][] {
     if (boss) row.push(['Босс', teleport, '', boss], ['Баланс+ТП', balanceTp, '', `${gt.to} ${boss}`]);
     rows.push([zoneName(gt.to), row]);
   }
+  return rows;
+}
+
+/** Class looks by quality (Game.debugSet; models load on the first pick); "База" = the equipped armour. */
+function setRows(): [string, Action[]][] {
+  const rows = (['warrior', 'hunter', 'mage'] as HeroClass[]).map((c): [string, Action[]] => [`Сет: ${CLASSES[c].name.toLowerCase()}`,
+    ['База', 'Об', 'Необ', 'Ред', 'Эпик', 'Лег', 'Миф'].map((label, i): Action => [label, (g) => g.debugSet(c, i - 1), `set ${c} r${i - 1}`])]);
+  rows.splice(2, 0, ['Лук охотника (от необычного)', [
+    ['Новый', (g) => g.debugSet('hunter', g.debugLooks.hunter, false), 'bowv new'],
+    ['Похожий на базовый', (g) => g.debugSet('hunter', g.debugLooks.hunter, true), 'bowv v1 wide2'],
+  ]]);
   return rows;
 }
 
@@ -89,10 +105,15 @@ const SECTIONS: [string, Action[]][] = [
     ['Древковое', (g) => g.debugGiveWeapon('polearm')],
   ]],
   ['Щит', [
-    ['Башенный', (g) => g.debugGiveWeapon('shield_tower', 1)],
-    ['Баклер', (g) => g.debugGiveWeapon('shield_buckler', 1)],
     ['Шипастый', (g) => g.debugGiveWeapon('shield_spiked', 1)],
     ['Пусто', (g) => g.debugClearLeft(), 'wide'],
+  ]],
+  // a set's 4 pieces + ring + amulet; pressing the same set again raises the quality (common → mythic → common)
+  ['Броня', [
+    ['Сет класса', (g) => g.debugGiveArmor(CLASS_SET[g.heroClass]), 'wide'],
+  ]],
+  ['Предметы', [
+    ['Выдать все', (g) => g.debugGiveAll(), 'wide'],
   ]],
   ['Статы (+очки)', [
     ['+10 урон', (g) => g.debugAddStat('power', 10)],
@@ -108,17 +129,10 @@ const SECTIONS: [string, Action[]][] = [
     ['+10% реген', (g) => g.debugAddStat('regen', 10, true)],
     ['Сбросить дебаг-статы', (g) => g.debugClearStats(), 'wide'],
   ]],
-  // hunter look by quality (models load on the first pick); "Базовый" = the archer as imported
-  ['Сет лучника', [
-    ['Базовый', (g) => g.debugArcherSet(-1), 'arch r-1'],
-    ...['Обычный', 'Необычный', 'Редкий', 'Эпический', 'Легендарный', 'Мифический'].map(
-      (label, r): Action => [label, (g) => g.debugArcherSet(r), `arch r${r}`],
-    ),
+  ['Раса', [
+    ['Сменить расу (человек ⇄ орк)', (g) => g.debugSwitchFaction(), 'wide'],
   ]],
-  ['Лук лучника (от необычного)', [
-    ['Новый', (g) => g.debugArcherSet(g.archerLook.rarity, false), 'bowv new'],
-    ['Похожий на базовый', (g) => g.debugArcherSet(g.archerLook.rarity, true), 'bowv v1 wide2'],
-  ]],
+  ...setRows(),
   ['Горнило', [
     ['+5 круток', (g) => g.debugAddPulls(5), 'wide'],
   ]],
@@ -223,9 +237,10 @@ export class DebugPanel {
   private render() {
     const d = this.game.debugInfo();
     this.el.querySelector('.god')?.classList.toggle('on', d.god);
-    const look = this.game.archerLook;
-    this.el.querySelectorAll('.arch').forEach((b) => b.classList.toggle('on', b.classList.contains(`r${look.rarity}`)));
-    this.el.querySelectorAll('.bowv').forEach((b) => b.classList.toggle('on', b.classList.contains(look.bowV1 ? 'v1' : 'new')));
+    const looks = this.game.debugLooks;
+    this.el.querySelectorAll<HTMLElement>('.set').forEach((b) =>
+      b.classList.toggle('on', CLASS_IDS.some((c) => b.classList.contains(c) && b.classList.contains(`r${looks[c]}`))));
+    this.el.querySelectorAll('.bowv').forEach((b) => b.classList.toggle('on', b.classList.contains(this.game.bowV1 ? 'v1' : 'new')));
     this.info.textContent = [
       `ХП ${d.hp}/${d.maxHp}${d.god ? '  [бессмертие]' : ''}`,
       `Крит ${pct(d.crit)} ×${d.critMul.toFixed(2)}  уклон ${pct(d.dodge)}  ${d.speed.toFixed(2)} м/с`,

@@ -7,7 +7,7 @@ import './grade';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { CASTER_MODELS, FACTIONS, FORGE3D, MOBS, ORBS, PETS, WEAPONS, type FactionId, type OrbKind } from './config';
+import { FACTIONS, FORGE3D, MOBS, ORBS, PETS, WEAPONS, type FactionId, type OrbKind } from './config';
 import { GEAR_MODELS } from './items';
 import { Game } from './game';
 import { Input } from './input';
@@ -77,7 +77,6 @@ for (const w of Object.values(WEAPONS)) {
   if (w.shot) Object.values(w.shot.arrow).forEach((m) => models.add(m));
 }
 for (const c of Object.values(CLASSES)) Object.values(c.model ?? {}).forEach((m) => models.add(m));
-CASTER_MODELS.forEach((m) => models.add(m)); // mage armour skins
 models.add('sword_undead_king'); // the Lich King's sword: prologue and the faction choice scene
 const props = new Set<string>();
 for (const w of Object.values(WEAPONS)) w.tiers?.forEach((m) => props.add(m));

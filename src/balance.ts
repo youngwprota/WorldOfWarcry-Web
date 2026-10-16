@@ -99,13 +99,13 @@ export function heroStats(b: HeroBuild) {
   return {
     power: power.sum,
     powerMul: power.mult * orb.power,
-    defense: p('defense'),
+    defense: p('defense') * orb.defense,
     maxHp: Math.round(statBreakdown(b, 'hp', g).value),
     /** HP per second (percents may make it fractional). */
     regen: statBreakdown(b, 'regen', g).value * orb.regen,
     speedStat,
     /** Running speed, m/s. */
-    speed: runSpeed(speedStat),
+    speed: runSpeed(speedStat) * orb.speed,
     dodgePts: p('dodge'),
     critPts: p('crit'),
     critDmgPts: p('critDmg'),
@@ -118,7 +118,7 @@ export function heroStats(b: HeroBuild) {
 /** Passive multipliers of the equipped mage orb (1 without one). */
 export function orbMul(weapons: HeroBuild['weapons']) {
   const o = weapons[1] && WEAPONS[weapons[1].def].orb;
-  return { regen: 1 + (o?.regen ?? 0), power: 1 + (o?.power ?? 0) };
+  return { regen: 1 + (o?.regen ?? 0), power: 1 + (o?.power ?? 0), speed: 1 + (o?.speed ?? 0), defense: 1 + (o?.defense ?? 0) };
 }
 
 /**

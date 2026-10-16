@@ -1,7 +1,7 @@
 // Gacha forge logic (docs/features/ludka): rarity roll with a hard pity; a legendary is always the banner weapon.
 import { GACHA, WEAPONS } from './config';
 import { ARMOR, makeItem, type Item } from './items';
-import { weaponClass } from './party';
+import { droppable } from './party';
 
 export interface PullResult { item: Item; pity: number }
 
@@ -31,7 +31,7 @@ export function pull(pity: number, lvl: number): PullResult {
   const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
   const item = Math.random() < 0.4
     // any class's weapon or class item (the inventory shows each to its class)
-    ? makeItem('weapon', pick(Object.keys(WEAPONS).filter((k) => weaponClass(k))), rarity, lvl)
+    ? makeItem('weapon', pick(Object.keys(WEAPONS).filter(droppable)), rarity, lvl)
     : makeItem('armor', pick(Object.keys(ARMOR)), rarity, lvl);
   return { item, pity: pity + 1 };
 }

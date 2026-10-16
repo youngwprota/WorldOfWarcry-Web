@@ -1,7 +1,7 @@
 """Exports the 12 skinned caster armour FBX files for the three.js game.
 
 Run:  blender -b "Art/Source/caster_armor_rigged.blend" -P caster_armor_export.py
-Output: public/assets/models/caster_<human|orc>_<rarity>.fbx  (armature + head_/chest_/arms_/legs_ meshes of one tier)
+Output: public/assets/models/casters/<human|orc>_caster_<rarity>.fbx  (armature + head_/chest_/arms_/legs_ meshes of one tier)
 
 FBX settings reproduce the original mage.fbx / orc_shaman.fbx exactly (verified by re-import and by FBXLoader bind
 matrices): Y up, -Z forward, FBX_SCALE_NONE + unit scale (cm geometry, bind matrix = identity), no leaf bones, no anim.
@@ -82,7 +82,7 @@ def main():
                 o.select_set(True)
             bpy.context.view_layer.objects.active = arm
             arm.name = 'Armature'
-            path = f'{MODELS}/caster_{fac}_{r}.fbx'
+            path = f'{MODELS}/casters/{fac}_caster_{r}.fbx'
             bpy.ops.export_scene.fbx(
                 filepath=path, use_selection=True, object_types={'ARMATURE', 'MESH'},
                 axis_forward='-Z', axis_up='Y', apply_scale_options='FBX_SCALE_NONE', global_scale=1.0,

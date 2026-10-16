@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PROP_SPAWNERS, SPAWNERS, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
+import { FACTIONS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PEAKS_SPAWNERS, PROP_SPAWNERS, SPAWNERS, WITHERED, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
-  ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
+  ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, OLD_TRAIL, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
   borderAway, borderRoom, pathAt, pathDist, progressAt, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
 } from './island';
 import type { Gate } from './island';
@@ -86,6 +86,23 @@ const FIXED_SIZE = new Set(['undead_tusk_gate']);
 const FOLIAGE: Record<string, number> = { elf_tree: 0.55, elf_foliage_small: 4, elf_foliage_mid: 6, elf_foliage_big: 2.5 };
 /** Level look of a model: foliage sways; everything gets contact shade at its base. */
 const lookOf = (name: string): SceneryLook => ({ sway: FOLIAGE[name] ?? 0, base: 1 });
+/** World.scatter options: the level look, and `snow` (flat white instead of the model's textures). */
+type ScatterLook = SceneryLook & { snow?: boolean };
+
+/** Snow Pass roads as polylines (World.snowRoadDist). */
+const SNOW_ROADS: [number, number][][] = [LAND_TRAILS[4], LAND_TRAILS[8], OLD_TRAIL.x.map((x, i): [number, number] => [x, OLD_TRAIL.z[i]])];
+
+const snowMats = new Map<THREE.Material, THREE.Material>();
+function snowMat(src: THREE.Material) {
+  let m = snowMats.get(src);
+  if (!m) {
+    const c = src.clone() as THREE.MeshLambertMaterial;
+    c.map = null;
+    c.color.set(0xffffff);
+    snowMats.set(src, m = c);
+  }
+  return m;
+}
 
 /** Foliage tints (multiply the elf texture) so groves are not all the same lime green. */
 const LEAF_TINTS = [0xffffff, 0xd4ecb0, 0xa8d488, 0x8fc47a, 0xc2e09a];
@@ -342,11 +359,12 @@ export class World {
    * Instanced copies of a model (trees, rocks, poles). Items are split into 24 m tiles so each tile
    * has its own bounding sphere and off-screen tiles are frustum-culled.
    */
-  private scatter(name: string, items: Inst[], shadow = true, look: SceneryLook = {}) {
+  /** `look`: the level look over the model's own (src/atmos.ts); `snow`: its textures are dropped for a flat white (tint still applies). */
+  private scatter(name: string, items: Inst[], shadow = true, look: ScatterLook = {}) {
     for (const band of bands(items)) this.scatterBand(name, band, shadow, look);
   }
 
-  private scatterBand(name: string, items: Inst[], shadow: boolean, lookOver: SceneryLook) {
+  private scatterBand(name: string, items: Inst[], shadow: boolean, { snow, ...lookOver }: ScatterLook) {
     if (!items.length) return;
     if (!assets.has(name)) { console.warn('level model not loaded:', name); return; }
     const src = assets.clone(name);
@@ -364,7 +382,8 @@ export class World {
       if (!mesh.isMesh) return;
       const geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
       const mat = mesh.material as THREE.Material | THREE.Material[];
-      const im = new THREE.InstancedMesh(geo, Array.isArray(mat) ? mat.map((x) => scenery(x, look)) : scenery(mat, look), items.length);
+      const patch = (x: THREE.Material) => scenery(snow ? snowMat(x) : x, look);
+      const im = new THREE.InstancedMesh(geo, Array.isArray(mat) ? mat.map(patch) : patch(mat), items.length);
       items.forEach((t, i) => {
         q.setFromAxisAngle(up, t.r ?? 0);
         m.compose(new THREE.Vector3(t.x, t.y ?? heightAt(t.x, t.z), t.z), q, new THREE.Vector3(t.s * k, t.s * k, t.s * k));
@@ -1107,9 +1126,9 @@ export class World {
   // ---------- outer locations: mobs along their paths, a main boss, «Свирепый вожак» mini-bosses, Snow Pass trees ----------
   private buildOuterLands() {
     const r = rng(61);
-    const PATH_OF: Partial<Record<ZoneId, number>> = { hills: 0, grove: 1, swamp: 2, dunes: 3, peaks: 4 };
+    const PATH_OF: Partial<Record<ZoneId, number>> = { hills: 0, grove: 1, swamp: 2, dunes: 3 };
     const BOSS_OF: Partial<Record<ZoneId, string>> = { peaks: 'elf_queen', hills: 'orc_shaman', grove: 'elf_priestess', swamp: 'murloc_king', dunes: 'sand_boar' };
-    for (const zone of ['peaks', 'hills', 'grove'] as const) {
+    for (const zone of ['hills', 'grove'] as const) {
       const line = LAND_TRAILS[PATH_OF[zone]!];
       const seg = line.slice(1).map((p, i) => Math.hypot(p[0] - line[i][0], p[1] - line[i][1]));
       const total = seg.reduce((a, b) => a + b, 0);
@@ -1136,8 +1155,139 @@ export class World {
         this.addSpawn(`mini:${land.zone}:${i}`, MINI_SPAWNER_OF[land.zone] ?? MINI_SPAWNER, p.x, p.z, land.zone, 0, 0);
       });
     }
-    // Snow Pass: grey frosted trees, pines, bare trees, stumps, rocks and log piles
+    this.snowMobs(r);
+    this.snowProps(r);
+    this.snowBeasts(r);
+    this.dressOuterLands(r);
+  }
+
+  /** Distance to the Snow Pass roads (its trail, the side branch and the abandoned path from the arena). */
+  private snowRoadDist(x: number, z: number) {
+    let best = Infinity;
+    for (const line of SNOW_ROADS) {
+      for (let i = 0; i < line.length - 1; i++) {
+        const [ax, az] = line[i];
+        const dx = line[i + 1][0] - ax;
+        const dz = line[i + 1][1] - az;
+        const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+        best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
+      }
+    }
+    return best;
+  }
+
+  /** Snow Pass mobs (config PEAKS_SPAWNERS): guards past the hub gate, sword packs on and beside the trail, lone assassins in the woods. */
+  private snowMobs(r: () => number) {
+    const g = GATES.find((t) => t.id === 'forest-peaks')!;
+    PEAKS_SPAWNERS.guards.forEach((d, i) => {
+      const side = i % 2 ? 1 : -1;
+      const x = g.x + g.tx * 7 + g.tz * side * 2.6;
+      const z = g.z + g.tz * 7 - g.tx * side * 2.6;
+      this.packCenters.push([x, z]);
+      this.taken.push([x, z]);
+      this.addSpawn(`peaks:guard:${i}`, d, x, z, 'peaks', 0, 0);
+    });
+    PEAKS_SPAWNERS.elites.forEach((e, i) => {
+      const p = this.spotIn('peaks', e.x, e.z, 3);
+      this.packCenters.push([p.x, p.z]);
+      this.taken.push([p.x, p.z]);
+      this.addSpawn(`peaks:elite:${i}`, e.def, p.x, p.z, 'peaks', 0, 0);
+    });
+    const line = LAND_TRAILS[4];
+    const seg = line.slice(1).map((p, i) => Math.hypot(p[0] - line[i][0], p[1] - line[i][1]));
+    const total = seg.reduce((a, b) => a + b, 0);
+    const at = (d: number) => {
+      let i = 0;
+      while (i < seg.length - 1 && d > seg[i]) d -= seg[i++];
+      const k = Math.min(1, d / seg[i]);
+      const [x0, z0] = line[i];
+      const [x1, z1] = line[i + 1];
+      return { x: x0 + (x1 - x0) * k, z: z0 + (z1 - z0) * k, tx: (x1 - x0) / seg[i], tz: (z1 - z0) / seg[i] };
+    };
+    const okPack = (x: number, z: number) => zoneIdAt(x, z) === 'peaks' && walkable(x, z, 2) && gateDist(x, z) > 9 && !this.nearPack(x, z, 12);
+    const packs = PEAKS_SPAWNERS.packs;
+    packs.forEach((pack, i) => {
+      // odd packs stand on the trail, even ones just beside it
+      let c: { x: number; z: number } | null = null;
+      for (const ds of [0, 5, -5, 10, -10]) {
+        const p = at(Math.min(total, Math.max(0, ((i + 0.3 + r() * 0.4) / packs.length) * total + ds)));
+        const off = i % 2 ? 0 : (r() < 0.5 ? -1 : 1) * (3 + r() * 2);
+        const q = { x: p.x + p.tz * off, z: p.z - p.tx * off };
+        if (okPack(q.x, q.z)) { c = q; break; }
+      }
+      if (!c) return;
+      this.packCenters.push([c.x, c.z]);
+      this.taken.push([c.x, c.z]);
+      const a0 = r() * Math.PI * 2;
+      pack.forEach((d, j) => {
+        const a = a0 + (j / pack.length) * Math.PI * 2 + (r() - 0.5) * 0.8;
+        const rr = 1.4 + r() * 1.2;
+        this.addSpawn(`peaks:pack:${i}:${j}`, d, c.x + Math.sin(a) * rr, c.z + Math.cos(a) * rr, 'peaks', 0, 0);
+      });
+    });
+    const inPass = () => ({ x: MAP_BOX.x + r() * MAP_BOX.size, z: MAP_BOX.z + r() * MAP_BOX.size });
+    const okLone = (x: number, z: number) => {
+      const d = this.snowRoadDist(x, z);
+      return zoneIdAt(x, z) === 'peaks' && walkable(x, z, 2) && d > 7 && d < 16 && gateDist(x, z) > 10 && !this.nearPack(x, z, 14);
+    };
+    this.spread(PEAKS_SPAWNERS.assassins.length, 16, inPass, okLone, true).forEach(({ x, z }, i) => {
+      // not a pack centre: trees may grow close round them
+      this.obstacles.push({ x, z, r: 1.2 });
+      this.addSpawn(`peaks:lone:${i}`, PEAKS_SPAWNERS.assassins[i], x, z, 'peaks', 0, 0);
+    });
+    // the bear trio a few metres off the west mini-boss
+    const [mx, mz] = LAND_BOSSES.find((b) => b.zone === 'peaks')!.minis[1];
+    const mini = this.spotIn('peaks', mx, mz, 3);
+    for (let t = 0; t < 24; t++) {
+      const a = r() * Math.PI * 2;
+      const x = mini.x + Math.sin(a) * 8;
+      const z = mini.z + Math.cos(a) * 8;
+      if (zoneIdAt(x, z) !== 'peaks' || !walkable(x, z, 2.5) || this.snowRoadDist(x, z) < 3) continue;
+      this.packCenters.push([x, z]);
+      this.taken.push([x, z]);
+      PEAKS_SPAWNERS.bears.forEach((d, j) => {
+        const b = a + (j / 3) * Math.PI * 2;
+        this.addSpawn(`peaks:bears:${j}`, d, x + Math.sin(b) * 1.8, z + Math.cos(b) * 1.8, 'peaks', 0, 0);
+      });
+      break;
+    }
+    // attackable trees: one at a time along the trail, alternating sides, about a road's width off it
+    const n = PEAKS_SPAWNERS.trees.length;
+    PEAKS_SPAWNERS.trees.forEach((d, i) => {
+      for (const ds of [0, 4, -4, 8, -8]) {
+        const p = at(Math.min(total, Math.max(0, ((i + 0.5) / n) * total + ds + (r() - 0.5) * 6)));
+        const side = i % 2 ? 1 : -1;
+        const x = p.x + p.tz * side * 2.6;
+        const z = p.z - p.tx * side * 2.6;
+        if (zoneIdAt(x, z) !== 'peaks' || !this.free(x, z, 1) || this.nearPack(x, z, 6) || gateDist(x, z) < 8) continue;
+        this.obstacles.push({ x, z, r: 0.8 });
+        this.taken.push([x, z]);
+        this.addSpawn(`peaks:tree:${i}`, d, x, z, 'peaks', 0, r() * 6);
+        return;
+      }
+    });
+  }
+
+  /** Lone wolves and bears in the woods the props left empty. */
+  private snowBeasts(r: () => number) {
+    const inPass = () => ({ x: MAP_BOX.x + r() * MAP_BOX.size, z: MAP_BOX.z + r() * MAP_BOX.size });
+    const ok = (x: number, z: number) => zoneIdAt(x, z) === 'peaks' && this.free(x, z, 2.5) && this.snowRoadDist(x, z) > 6
+      && gateDist(x, z) > 10 && !this.nearPack(x, z, 12);
+    this.spread(PEAKS_SPAWNERS.beasts.length, 14, inPass, ok, true).forEach(({ x, z }, i) => {
+      this.packCenters.push([x, z]);
+      this.addSpawn(`peaks:beast:${i}`, PEAKS_SPAWNERS.beasts[i], x, z, 'peaks', 0, 0);
+    });
+  }
+
+  /**
+   * Snow Pass props in clumps of uneven size and spacing (trees 1–4, rocks and stumps 1–3, snowy bushes 2–3),
+   * kept off the roads by more than a road's width.
+   */
+  private snowProps(r: () => number) {
     const GREYS = [0xb4b8bd, 0xc6c9cc, 0xa3a8ae, 0xd3d5d7];
+    const SNOW = [0xc9d0d6, 0xbcc4cb, 0xd2d7dc];
+    const grey = () => GREYS[Math.floor(r() * GREYS.length)];
+    const withered = () => WITHERED[Math.floor(r() * WITHERED.length)];
     const trees: Inst[] = [];
     const pines: Inst[] = [];
     const bare: Inst[] = [];
@@ -1145,25 +1295,49 @@ export class World {
     const rocks: Inst[] = [];
     const bigRocks: Inst[] = [];
     const logs: Inst[] = [];
+    const bushes: Inst[] = [];
+    const smallBushes: Inst[] = [];
     const inPass = () => ({ x: MAP_BOX.x + r() * MAP_BOX.size, z: MAP_BOX.z + r() * MAP_BOX.size });
-    const okTree = (x: number, z: number) => zoneIdAt(x, z) === 'peaks' && this.free(x, z, 1.2) && !this.nearPack(x, z, 5) && gateDist(x, z) > 7
-      && !LAND_TRAILS[4].some(([px, pz]) => Math.hypot(px - x, pz - z) < 4);
-    for (const { x, z } of this.spread(70, 6, inPass, okTree)) {
+    const ok = (clear: number, pad: number) => (x: number, z: number) => zoneIdAt(x, z) === 'peaks' && this.free(x, z, pad)
+      && !this.nearPack(x, z, 5) && gateDist(x, z) > 7 && this.snowRoadDist(x, z) > clear;
+    // `n` clumps spread minD…2·minD apart, each of `size` items `gap` metres from its first one
+    const clumps = (n: number, minD: number, size: [number, number], gap: [number, number], fits: (x: number, z: number) => boolean,
+      put: (x: number, z: number) => void) => {
+      for (const c of this.spread(n, minD * (1 + r()), inPass, fits)) {
+        put(c.x, c.z);
+        const k = size[0] + Math.floor(r() * (size[1] - size[0] + 1));
+        for (let i = 1; i < k; i++) {
+          for (let t = 0; t < 8; t++) {
+            const a = r() * Math.PI * 2;
+            const d = gap[0] + r() * (gap[1] - gap[0]);
+            const x = c.x + Math.sin(a) * d;
+            const z = c.z + Math.cos(a) * d;
+            if (fits(x, z)) { put(x, z); break; }
+          }
+        }
+      }
+    };
+    clumps(34, 5, [1, 4], [2.2, 5], ok(4, 1.2), (x, z) => {
       const k = r();
-      const tint = GREYS[Math.floor(r() * GREYS.length)];
-      if (k < 0.35) trees.push({ x, z, s: 0.55 + r() * 0.35, r: r() * 6, tint });
-      else if (k < 0.75) pines.push({ x, z, s: 0.9 + r() * 0.4, r: r() * 6, tint });
-      else bare.push({ x, z, s: 0.8 + r() * 0.4, r: r() * 6 });
+      if (k < 0.35) trees.push({ x, z, s: 0.5 + r() * 0.45, r: r() * 6, tint: withered() });
+      else if (k < 0.78) pines.push({ x, z, s: 0.8 + r() * 0.55, r: r() * 6, tint: grey() });
+      else bare.push({ x, z, s: 0.7 + r() * 0.5, r: r() * 6 });
       this.obstacles.push({ x, z, r: 0.5 });
-    }
-    for (const { x, z } of this.spread(45, 4, inPass, okTree)) {
+    });
+    clumps(26, 4, [1, 3], [1.2, 3.5], ok(3, 0.8), (x, z) => {
       const k = r();
-      const it = { x, z, s: 0, r: r() * 6, tint: GREYS[Math.floor(r() * GREYS.length)] };
-      if (k < 0.3) stumps.push({ ...it, s: 0.3 + r() * 0.2 });
-      else if (k < 0.75) rocks.push({ ...it, s: 0.6 + r() * 0.5 });
-      else if (k < 0.92) { bigRocks.push({ ...it, s: 0.5 + r() * 0.3 }); this.obstacles.push({ x, z, r: 1 }); }
-      else { logs.push({ ...it, s: 0.5 }); this.obstacles.push({ x, z, r: 0.8 }); }
-    }
+      const it = { x, z, s: 0, r: r() * 6, tint: grey() };
+      if (k < 0.3) stumps.push({ ...it, s: 0.25 + r() * 0.25 });
+      else if (k < 0.72) rocks.push({ ...it, s: 0.5 + r() * 0.6 });
+      else if (k < 0.9) { bigRocks.push({ ...it, s: 0.45 + r() * 0.4 }); this.obstacles.push({ x, z, r: 1 }); }
+      else { logs.push({ ...it, s: 0.45 + r() * 0.15 }); this.obstacles.push({ x, z, r: 0.8 }); }
+    });
+    clumps(40, 3, [2, 3], [0.8, 1.8], ok(2.6, 0.6), (x, z) => {
+      const it = { x, z, s: 0, r: r() * 6, tint: SNOW[Math.floor(r() * SNOW.length)] };
+      if (r() < 0.6) bushes.push({ ...it, s: 0.6 + r() * 0.5 });
+      else smallBushes.push({ ...it, s: 0.7 + r() * 0.6 });
+      this.obstacles.push({ x, z, r: 0.3 });
+    });
     this.scatter('elf_tree', trees);
     this.pines(pines);
     this.deadTrees(bare, 0x6e6a66);
@@ -1171,7 +1345,8 @@ export class World {
     this.scatter('elf_rock_small', rocks, false);
     this.scatter('elf_rock_big', bigRocks);
     this.scatter('elf_log_pile', logs);
-    this.dressOuterLands(r);
+    this.scatter('elf_foliage_mid', bushes, true, { snow: true });
+    this.scatter('elf_foliage_small', smallBushes, false, { snow: true });
   }
 
   /**

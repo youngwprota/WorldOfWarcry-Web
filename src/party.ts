@@ -3,7 +3,7 @@
  * Each class has two gear slots: a weapon (save.weapons[0]) and its own class item (save.weapons[1]: the warrior's
  * shield, the hunter's pet, the mage's orb); each keeps its own pair (SaveData.kits).
  */
-import type { FactionId } from './config';
+import { RARITY_IDS, type FactionId } from './config';
 import type { VisualPart } from './items';
 
 export type HeroClass = 'warrior' | 'hunter' | 'mage';
@@ -26,6 +26,8 @@ export interface ClassDef {
   offName: string;
   /** Slot 2 holds a pet (config PETS) instead of an item. */
   pet?: boolean;
+  /** Slot 2 always holds the kit's `left` item: it never drops and is never swapped or taken off. */
+  fixedOff?: boolean;
   /**
    * What the class holds when it first takes the field, and extra items put into the bag then (src/save.ts classKit);
    * missing = the faction's start weapon.
@@ -37,7 +39,7 @@ export interface ClassDef {
 export const CLASSES: Record<HeroClass, ClassDef> = {
   warrior: {
     name: 'Воин', icon: 'shield', color: ['#ff7a6a', '#c0352c'], key: 'Digit1',
-    weapons: ['sword', 'axe', 'hammer', 'polearm'], off: ['shield_tower', 'shield_buckler', 'shield_spiked'], offName: 'Щит',
+    weapons: ['sword', 'axe', 'hammer', 'polearm'], off: ['shield_spiked'], offName: 'Щит',
   },
   hunter: {
     name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
@@ -46,8 +48,9 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
   },
   mage: {
     name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
-    weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_vigor', 'orb_fury'], offName: 'Сфера',
-    kit: { hand: 'staff_fire', left: 'orb_vigor', bag: ['staff_ice', 'staff_wind', 'orb_fury'] },
+    model: { human: 'mage', orc: 'orc_shaman' },
+    weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_fury', 'orb_vigor', 'orb_swift', 'orb_ward', 'orb_fortune', 'orb_demon'], offName: 'Сфера',
+    kit: { hand: 'staff_fire', left: 'orb_fury' },
   },
 };
 
@@ -67,20 +70,24 @@ export function weaponClass(def: string): HeroClass | null {
   return CLASS_IDS.find((c) => CLASSES[c].weapons.includes(def) || CLASSES[c].off.includes(def)) ?? null;
 }
 
-/** Hunter looks by quality (tools/import-archers.mjs), in config RARITY order. */
-const ARCHER_RARITY = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+/** Whether weapon def `def` can drop: it belongs to a class and is not a fixed class item (ClassDef.fixedOff). */
+export function droppable(def: string) {
+  const c = weaponClass(def);
+  return !!c && !(CLASSES[c].fixedOff && CLASSES[c].off.includes(def));
+}
+
 /** Body part on the hero → part file of the hunter sets. */
 const ARCHER_PART: Record<VisualPart, string> = { head: 'head', chest: 'torso', arms: 'arms', legs: 'legs' };
 
 /** The four body parts of the hunter set of quality `rarity` (RARITY index), as models for Character.setOutfit. */
 export function archerSet(f: FactionId, rarity: number): Record<VisualPart, string> {
-  const r = ARCHER_RARITY[rarity];
+  const r = RARITY_IDS[rarity];
   return Object.fromEntries(Object.entries(ARCHER_PART).map(([part, file]) => [part, `archers/${f}_archer_${file}_${r}`])) as Record<VisualPart, string>;
 }
 
 /** The set's bow; above common there are two variants (`v1`: the one close to the base bow). */
 export function archerBow(rarity: number, v1: boolean) {
-  return rarity === 0 ? 'archers/bow_common' : `archers/bow_${ARCHER_RARITY[rarity]}${v1 ? '_v1' : ''}`;
+  return rarity === 0 ? 'archers/bow_common' : `archers/bow_${RARITY_IDS[rarity]}${v1 ? '_v1' : ''}`;
 }
 
 /** Seconds between two switches, so a double tap does not flip the hero back and forth. */
