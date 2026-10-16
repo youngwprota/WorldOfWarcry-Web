@@ -294,7 +294,7 @@ class Prop extends Unit {
     this.obj = makeBreakable(spot.kind);
     this.obj.position.set(spot.x, 0, spot.z);
     this.obj.rotation.y = spot.rot;
-    this.maxHp = this.hp = def.hits;
+    this.maxHp = this.hp = def.hp;
     this.obj.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined;
       if (m && (m as THREE.MeshLambertMaterial).isMeshLambertMaterial && !this.mats.includes(m)) this.mats.push(m);
@@ -994,7 +994,7 @@ export class Game {
   }
 
   /** A blow on mob `def`: it may dodge (dmg 0, `fx` 'miss') or take a crit (`fx` 'crit'). */
-  private damageFor(it: Item, def: MobDef, mult = 1) {
+  private damageFor(it: Item, def: Pick<MobDef, 'resist' | 'dodge'>, mult = 1) {
     const tier = def.resist[WEAPONS[it.def].type] ?? 'normal';
     if (Math.random() < dodgeChance(def.dodge)) return { dmg: 0, tier, fx: 'miss' as HitFx };
     const s = this.stats;
@@ -1045,8 +1045,8 @@ export class Game {
       if (!u.hittable || !this.inShape(u.pos, u.radius, shape, arc, range, 0, yaw)) continue;
       hits++;
       if (u instanceof Prop) {
-        const tier = u.def.resist[w.type] ?? 'normal';
-        this.hitProp(u, (fin ? 3 : 1) * RESIST_MULT[tier], tier);
+        const { dmg, tier } = this.damageFor(it, u.def, fin ? fin.mult : 1);
+        this.hitProp(u, dmg, tier);
         continue;
       }
       const m = u as Mob;
@@ -1218,7 +1218,7 @@ export class Game {
     sfx.swing();
     const yaw = this.hero.facing;
     const from = v1.copy(this.hero.position).add(v2.set(Math.sin(yaw) * 0.6, 1.35, Math.cos(yaw) * 0.6));
-    for (const u of targets) this.arrows.fire(shot.arrow[this.faction], from, u, shot.speed, () => this.arrowHit(u, it, w, fin));
+    for (const u of targets) this.arrows.fire(shot.arrow[this.faction], from, u, shot.speed, () => this.arrowHit(u, it, fin));
     if (fin) {
       sfx.combo();
       this.shake = Math.max(this.shake, 0.2);
@@ -1227,10 +1227,10 @@ export class Game {
   }
 
   /** A bow arrow reaches its unit. */
-  private arrowHit(u: Unit, it: Item, w: WeaponDef, fin: ComboDef | null) {
+  private arrowHit(u: Unit, it: Item, fin: ComboDef | null) {
     if (u instanceof Prop) {
-      const tier = u.def.resist[w.type] ?? 'normal';
-      this.hitProp(u, (fin ? 3 : 1) * RESIST_MULT[tier], tier);
+      const { dmg, tier } = this.damageFor(it, u.def, fin ? fin.mult : 1);
+      this.hitProp(u, dmg, tier);
       return;
     }
     const m = u as Mob;
@@ -2151,11 +2151,10 @@ export class Game {
 
   // ---------- breakables ----------
   private hitProp(b: Prop, dmg: number, tier: string) {
-    b.hp = +(b.hp - dmg).toFixed(2);
+    b.hp -= dmg;
     b.shake = 0.2;
     b.flash = 0.1;
     sfx.hit();
-    // hits count in whole blows: -1, -0.5 against stone, -3 for a finisher
     const cls = tier === 'weak' ? 'dmg weak' : tier === 'resist' || tier === 'immune' ? 'dmg resist' : 'dmg';
     this.fx.spawn(this.unitTextAt(b), `-${fmtK(dmg)}`, cls, 0.8, { lift: b.uiEl.offsetHeight });
     this.particles.burst(v1.copy(b.pos).setY(0.7), b.def.color, 3, 0.1, 3, 0.4);

@@ -600,29 +600,29 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
     anim: 'SwordAttack', hp: 1640, dmg: 13, aps: 0.75, range: 2.1, speed: 3.0, aggro: 5.5, regen: 0.03, scale: 1.4,
     ...foes('cemetery'), reward: { hp: 6 }, respawn: 600,
-    drop: { kind: 'armor', def: 'hunter_head', rarity: 2 },
+    drop: { kind: 'armor', def: 'hunter_head', rarity: 0 },
   },
   shade: {
     id: 'shade', name: 'Тень', rank: 'elite',
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
     anim: 'SwordAttack', hp: 1280, dmg: 12, aps: 1.1, range: 1.5, speed: 4.5, aggro: 6.2, regen: 0.03, scale: 1.3,
     ...foes('cemetery'), reward: { speed: 5 }, respawn: 600,
-    drop: { kind: 'armor', def: 'hunter_legs', rarity: 2 },
+    drop: { kind: 'armor', def: 'hunter_legs', rarity: 0 },
   },
-  // the cemetery's elites dress the hunter (left half of the equip bar; the right half comes from the gacha)
+  // the cemetery's elites dress the hunter in his common set (left half of the equip bar; the right half comes from the gacha)
   grave_looter: {
     id: 'grave_looter', name: 'Мародёр', rank: 'elite',
     model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
     anim: 'SwordAttack', hp: 1460, dmg: 12, aps: 0.8, range: 1.7, speed: 3.2, aggro: 5.5, regen: 0.03, scale: 1.45,
     ...foes('cemetery'), reward: { hp: 6 }, respawn: 600,
-    drop: { kind: 'armor', def: 'hunter_chest', rarity: 2 },
+    drop: { kind: 'armor', def: 'hunter_chest', rarity: 0 },
   },
   cursed_archer: {
     id: 'cursed_archer', name: 'Проклятый стрелок', rank: 'elite',
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
     anim: 'SwordAttack', hp: 1800, dmg: 14, aps: 0.75, range: 2.1, speed: 3.1, aggro: 5.8, regen: 0.03, scale: 1.5,
     ...foes('cemetery'), reward: { power: 4 }, respawn: 600,
-    drop: { kind: 'weapon', def: 'bow', rarity: 2 },
+    drop: { kind: 'weapon', def: 'bow', rarity: 0 },
   },
   gravedigger: {
     id: 'gravedigger', name: 'Могильщик', rank: 'mini',
@@ -910,7 +910,8 @@ export type BreakEvent = { type: 'spawnMob'; mob: string; chance: number; count?
 
 export interface BreakableDef {
   model: string | null;
-  hits: number; // HP in "normal hits"
+  /** Plain HP: the hero's blows take their real damage (resistances and crits included), like on mobs. */
+  hp: number;
   color: number;
   scale: number;
   /** Fixed power orbs, shown above the HP bar like on mobs — one stat only. */
@@ -930,23 +931,23 @@ const GRAVE_RISE: BreakEvent[] = [{ type: 'spawnMob', mob: 'skeleton_worker', ch
 // wood is easy to chop, stone needs a hammer
 const WOOD: BreakableDef['resist'] = { chop: 'weak', crush: 'resist' };
 const STONE: BreakableDef['resist'] = { slash: 'resist', chop: 'resist', crush: 'weak' };
-/** The first boss's tower: 12 hits whatever the weapon, no stats, no weaknesses; the boss rebuilds it after 20 s while alive. */
-const FORT_TOWER = { hits: 12, respawn: 30, needsAlive: 'bandit_chief' };
+/** The first boss's tower: no stats, no weaknesses; the boss rebuilds it after 20 s while alive. */
+const FORT_TOWER = { hp: 1500, respawn: 30, needsAlive: 'bandit_chief' };
 const TOWER_SHOT = { dmg: 10, range: 20, cd: 2.4, r: 1.5, delay: 1.3, height: 5 };
 export const BREAKABLES: Record<string, BreakableDef> = {
-  barrel: { model: 'barrel', hits: 2, color: 0x8a5a2b, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
-  orc_barrel: { model: 'orc_barrel', hits: 2, color: 0x7a4a22, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
-  box: { model: 'box_small_1', hits: 1, color: 0xa87a45, scale: 0.9, reward: { power: 1 }, resist: {}, r: 0.45, respawn: 30 },
-  box_large: { model: 'box_large_1', hits: 3, color: 0xa87a45, scale: 0.8, reward: { power: 2 }, resist: {}, r: 0.7, respawn: 60 },
-  orc_box: { model: 'orc_box_small_1', hits: 1, color: 0x8a5a2b, scale: 0.9, reward: { power: 1 }, resist: {}, r: 0.45, respawn: 30 },
-  bush: { model: null, hits: 1, color: 0x3f8f2f, scale: 1, reward: { regen: 1 }, resist: { slash: 'weak', crush: 'resist' }, r: 0.6, respawn: 25 },
-  tomb1: { model: 'undead_tomb_stone_1', hits: 2, color: 0x77748a, scale: 0.75, reward: { power: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb2: { model: 'undead_tomb_stone_2', hits: 2, color: 0x77748a, scale: 0.75, reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb3: { model: 'undead_tomb_stone_3', hits: 2, color: 0x77748a, scale: 0.75, reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb4: { model: 'undead_tomb_stone_4', hits: 2, color: 0x77748a, scale: 0.75, reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  barrel: { model: 'barrel', hp: 120, color: 0x8a5a2b, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
+  orc_barrel: { model: 'orc_barrel', hp: 120, color: 0x7a4a22, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
+  box: { model: 'box_small_1', hp: 60, color: 0xa87a45, scale: 0.9, reward: { power: 1 }, resist: {}, r: 0.45, respawn: 30 },
+  box_large: { model: 'box_large_1', hp: 200, color: 0xa87a45, scale: 0.8, reward: { power: 2 }, resist: {}, r: 0.7, respawn: 60 },
+  orc_box: { model: 'orc_box_small_1', hp: 60, color: 0x8a5a2b, scale: 0.9, reward: { power: 1 }, resist: {}, r: 0.45, respawn: 30 },
+  bush: { model: null, hp: 40, color: 0x3f8f2f, scale: 1, reward: { regen: 1 }, resist: { slash: 'weak', crush: 'resist' }, r: 0.6, respawn: 25 },
+  tomb1: { model: 'undead_tomb_stone_1', hp: 500, color: 0x77748a, scale: 0.75, reward: { power: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb2: { model: 'undead_tomb_stone_2', hp: 500, color: 0x77748a, scale: 0.75, reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb3: { model: 'undead_tomb_stone_3', hp: 500, color: 0x77748a, scale: 0.75, reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb4: { model: 'undead_tomb_stone_4', hp: 500, color: 0x77748a, scale: 0.75, reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   fort_tower_orc: { model: 'orc_tower_Lv2', ...FORT_TOWER, color: 0x7a5a38, scale: 0.38, reward: {}, resist: {}, r: 1.4, shoot: TOWER_SHOT },
   fort_tower_human: { model: 'tower_Lv2', ...FORT_TOWER, color: 0x7a5a38, scale: 0.38, reward: {}, resist: {}, r: 1.4, shoot: TOWER_SHOT },
-  coffin: { model: 'undead_coffin', hits: 3, color: 0x5a3c2c, scale: 0.34, reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
+  coffin: { model: 'undead_coffin', hp: 900, color: 0x5a3c2c, scale: 0.34, reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
 };
 
 // ---------- spawners ----------
