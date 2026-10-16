@@ -43,9 +43,12 @@ export class Ambient {
   private u = {
     uTime: { value: 0 }, uCenter: { value: new THREE.Vector3() }, uBox: { value: BOX },
     uColor: { value: new THREE.Color() }, uSize: { value: 0.1 }, uRise: { value: 0 }, uWobble: { value: 0 }, uDrift: { value: 0 },
+    // rise and drift integrated over time (m): the blended speeds change as the hero walks, so time × speed would jump
+    uRiseOff: { value: 0 }, uDriftOff: { value: 0 },
     uFlicker: { value: 0 }, uAmount: { value: 0 }, uGlow: { value: 1 }, uScale: { value: 400 },
   };
   private w: number[] = [];
+  private last = -1;
   private tmp = new THREE.Color();
   /** Always this location's look (scenes off the island, e.g. the prologue); null = blended where the hero stands. */
   fixed: ZoneId | null = null;
@@ -64,14 +67,15 @@ export class Ambient {
       vertexShader: /* glsl */ `
         attribute vec4 aSeed;
         uniform float uTime; uniform vec3 uCenter; uniform vec3 uBox; uniform float uSize; uniform float uRise; uniform float uWobble;
-        uniform float uDrift; uniform float uFlicker; uniform float uAmount; uniform float uScale;
+        uniform float uDrift; uniform float uFlicker; uniform float uAmount; uniform float uScale; uniform float uRiseOff; uniform float uDriftOff;
         varying float vAlpha;
         void main(){
-          float t = uTime * (0.7 + aSeed.w * 0.6);
+          float k = 0.7 + aSeed.w * 0.6;
+          float t = uTime * k;
           vec3 p = aSeed.xyz * uBox;
-          p.y += t * uRise;
-          p.x += t * uDrift + sin(t * 0.9 + aSeed.w * 40.0) * uWobble;
-          p.z += t * uDrift * 0.45 + cos(t * 0.7 + aSeed.x * 31.0) * uWobble;
+          p.y += uRiseOff * k;
+          p.x += uDriftOff * k + sin(t * 0.9 + aSeed.w * 40.0) * uWobble;
+          p.z += uDriftOff * k * 0.45 + cos(t * 0.7 + aSeed.x * 31.0) * uWobble;
           // wrap round the hero
           vec3 lo = uCenter - uBox * vec3(0.5, 0.0, 0.5);
           p = lo + mod(p - lo, uBox);
@@ -123,6 +127,11 @@ export class Ambient {
       size += s.size * k; rise += s.rise * k; wobble += s.wobble * k; drift += s.drift * k;
       flicker += s.flicker * k; amount += s.amount * k; glow += s.glow * k;
     });
+    // dt clamped: a hidden tab or a pause must not throw the points far
+    const dt = this.last < 0 ? 0 : Math.min(0.1, Math.max(0, time - this.last));
+    this.last = time;
+    u.uRiseOff.value += rise * dt;
+    u.uDriftOff.value += drift * dt;
     u.uSize.value = size; u.uRise.value = rise; u.uWobble.value = wobble; u.uDrift.value = drift;
     u.uFlicker.value = flicker; u.uAmount.value = amount; u.uGlow.value = glow;
   }

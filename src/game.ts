@@ -6,7 +6,7 @@ import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
   ATTACK_HIT, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
-  mobRank, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
+  mobRank, zoneResist, ZONE_FOES, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
 import { ArenaFog, FloatingText, FogPuffs, Particles, Shockwaves, Spells, Telegraphs, type Bolt } from './fx';
 import {
@@ -75,7 +75,7 @@ class Prop extends Unit {
     this.obj = makeBreakable(spot.kind);
     this.obj.position.set(spot.x, 0, spot.z);
     this.obj.rotation.y = spot.rot;
-    this.maxHp = this.hp = def.hits;
+    this.maxHp = this.hp = def.hp;
     this.obj.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined;
       if (m && (m as THREE.MeshLambertMaterial).isMeshLambertMaterial && !this.mats.includes(m)) this.mats.push(m);
@@ -162,6 +162,8 @@ export class Game {
   onOpenGacha: () => void = () => {};
   /** After the party member on the field changes (src/party.ts): the classes hook in here later. */
   onClassChange: (c: HeroClass) => void = () => {};
+  /** Index of the named area (World.areas) the hero is in, -1 none. */
+  private area = -1;
   /** Game time of the last class switch (SWITCH_COOLDOWN). */
   private classT = -Infinity;
   private time = 0;
@@ -281,9 +283,11 @@ export class Game {
 
   private addMob(def: MobDef, at: THREE.Vector3, labels: HTMLElement, depth = 0, behavior?: SpawnPoint['behavior']) {
     const zone = this.world.zoneAt(at.x, at.z).id;
+    def = this.zoneDef(def, zone);
     const mul = def.boss || def.rank ? { hp: 1, dmg: 1, reward: 1, scale: 1 } : depthMul(zone, depth);
     const tier = ZONE_TIER[zone] ?? 1;
-    const m = new Mob(def, at, this.save.faction, labels, { ...mul, hp: mul.hp * tier, dmg: mul.dmg * tier }, behavior, this.dropBadge(def));
+    const items = [this.dropBadge(def), ...(def.moreDrops ?? []).map((d) => ({ icon: dropIconId(d), color: RARITY[d.rarity].color }))];
+    const m = new Mob(def, at, this.save.faction, labels, { ...mul, hp: mul.hp * tier, dmg: mul.dmg * tier }, behavior, items.filter((b) => !!b));
     m.ch.root.scale.setScalar(this.mobScale);
     this.addUnit(m);
     return m;
@@ -307,6 +311,19 @@ export class Game {
   get heroClass(): HeroClass { return this.save.cls ?? 'warrior'; }
   /** The active hero: item icons show what this hero would wear. */
   get wearer(): Wearer { return { cls: this.heroClass, faction: this.faction }; }
+
+  /** A mob def with the resistances of where it stands (ZONE_FOES): the boss its own, every other Snow Pass mob the alt one. */
+  private zoneDef(def: MobDef, zone: ZoneId) {
+    if (def.static) return def;
+    const z = def.boss?.zone ?? zone;
+    const kind = def.boss ? 'boss' as const : ZONE_FOES[z]?.alt && this.altN++ % 2 ? 'alt' as const : 'mob' as const;
+    const key = `${def.id}|${z}|${kind}`;
+    let out = this.zoneDefs.get(key);
+    if (!out) this.zoneDefs.set(key, (out = { ...def, resist: zoneResist(z, kind) }));
+    return out;
+  }
+  private zoneDefs = new Map<string, MobDef>();
+  private altN = 0;
 
   /** What a mob is shown to drop: the class its boss opens (the bow over the forest boss), or its item's own icon. */
   private dropBadge(d: MobDef): DropBadge | null {
@@ -698,6 +715,16 @@ export class Game {
       this.zone = zone;
       this.ui.zoneBanner(zone);
     }
+    // named areas inside a location (cemetery village, chapel…): the name on stepping in
+    let area = -1;
+    for (let i = 0; i < this.world.areas.length; i++) {
+      const A = this.world.areas[i];
+      if ((A.x - p.x) ** 2 + (A.z - p.z) ** 2 < A.r * A.r) { area = i; break; }
+    }
+    if (area !== this.area) {
+      this.area = area;
+      if (area >= 0) this.ui.toast(this.world.areas[area].name, 1800);
+    }
 
     ch.update(dt, moving);
     // blade trails from a bit before the blow to a bit after it
@@ -769,7 +796,7 @@ export class Game {
   }
 
   /** A blow on mob `def`: it may dodge (dmg 0, `fx` 'miss') or take a crit (`fx` 'crit'). */
-  private damageFor(it: Item, def: MobDef, mult = 1) {
+  private damageFor(it: Item, def: Pick<MobDef, 'resist' | 'dodge'>, mult = 1) {
     const tier = def.resist[WEAPONS[it.def].type] ?? 'normal';
     if (Math.random() < dodgeChance(def.dodge)) return { dmg: 0, tier, fx: 'miss' as HitFx };
     const s = this.stats;
@@ -817,8 +844,8 @@ export class Game {
       if (!u.hittable || !this.inShape(u.pos, u.radius, shape, arc, range, 0, yaw)) continue;
       hits++;
       if (u instanceof Prop) {
-        const tier = u.def.resist[w.type] ?? 'normal';
-        this.hitProp(u, RESIST_MULT[tier], tier);
+        const { dmg, tier } = this.damageFor(it, u.def);
+        this.hitProp(u, dmg, tier);
         continue;
       }
       const m = u as Mob;
@@ -958,15 +985,15 @@ export class Game {
     sfx.swing();
     const yaw = this.hero.facing;
     const from = v1.copy(this.hero.position).add(v2.set(Math.sin(yaw) * 0.6, 1.35, Math.cos(yaw) * 0.6));
-    this.arrows.fire(shot.arrow[this.faction], from, u, shot.speed, () => this.arrowHit(u, it, w));
+    this.arrows.fire(shot.arrow[this.faction], from, u, shot.speed, () => this.arrowHit(u, it));
     return 1;
   }
 
   /** A bow arrow reaches its unit. */
-  private arrowHit(u: Unit, it: Item, w: WeaponDef) {
+  private arrowHit(u: Unit, it: Item) {
     if (u instanceof Prop) {
-      const tier = u.def.resist[w.type] ?? 'normal';
-      this.hitProp(u, RESIST_MULT[tier], tier);
+      const { dmg, tier } = this.damageFor(it, u.def);
+      this.hitProp(u, dmg, tier);
       return;
     }
     const m = u as Mob;
@@ -1194,8 +1221,9 @@ export class Game {
     this.despawnMinions(m);
     this.shake = 0.6;
     sfx.levelUp();
-    // its own item on every kill (copies level it up)
+    // its own items on every kill (copies level them up)
     if (d.drop) m.loot.push(dropItem(d.drop));
+    for (const x of d.moreDrops ?? []) m.loot.push(dropItem(x));
     let classToast: (() => void) | null = null;
     const cls = d.boss!.unlockClass;
     if (cls && this.openClass(cls)) {
@@ -1957,11 +1985,10 @@ export class Game {
 
   // ---------- breakables ----------
   private hitProp(b: Prop, dmg: number, tier: string) {
-    b.hp = +(b.hp - dmg).toFixed(2);
+    b.hp -= dmg;
     b.shake = 0.2;
     b.flash = 0.1;
     sfx.hit();
-    // hits count in whole blows: -1, -0.5 against stone
     const cls = tier === 'weak' ? 'dmg weak' : tier === 'resist' || tier === 'immune' ? 'dmg resist' : 'dmg';
     this.fx.spawn(this.unitTextAt(b), `-${fmtK(dmg)}`, cls, 0.8, { lift: b.uiEl.offsetHeight });
     this.particles.burst(v1.copy(b.pos).setY(0.7), b.def.color, 3, 0.1, 3, 0.4);

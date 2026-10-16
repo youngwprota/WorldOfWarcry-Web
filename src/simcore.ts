@@ -7,7 +7,7 @@ import {
   PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, START_PET, STAVES, WEAPONS, depthMul, mobImpact, packUnits, mobRank, tokenChance as zoneTokenChance,
   type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
-import { addStat, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, heroStats, type HeroBuild } from './balance';
+import { addStat, heroDps, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, heroStats, type HeroBuild } from './balance';
 import { ARMOR, armorStats, dropItem, itemClass, makeItem, sameItem, weaponDamage, type Item } from './items';
 import { CLASSES, CLASS_IDS, classSlot, kitOf, weaponClass, type HeroClass } from './party';
 import { pull } from './gacha';
@@ -514,6 +514,11 @@ function run(seed: number): RunOut {
   const full = (c: HeroClass, zone: ZoneId): Hero => { const x = as(h, c, zone); x.hp = stats(x).maxHp; return x; };
   const bossRate = (c: HeroClass, u: Unit) => { let w = 0; for (let i = 0; i < OPT.probes; i++) if (fight(full(c, u.zone), foeOf(u)).win) w++; return w / OPT.probes; };
   /** The bot's estimate of the fight, by the best class for it: a boss by win rate, a mob by a safe and quick win. */
+  /** Seconds to break a prop: its HP over the hero's plain-swing DPS against its material. */
+  const propTime = (b: CONFIG.BreakableDef) => {
+    const st = stats(h);
+    return b.hp / Math.max(1, heroDps(h.weapons, st.power, st.powerMul, 1, b.resist));
+  };
   const estimate = (u: Unit) => {
     const key = `${u.def}|${u.depth.toFixed(2)}`;
     let e = est.get(key);
@@ -632,7 +637,7 @@ function run(seed: number): RunOut {
           const boss = !!MOBS[u.def].boss;
           if (boss ? (e.rate ?? 0) < bossMin : !e.win || e.taken > 0.7 * st.maxHp) continue;
           dur = e.dur;
-        } else dur = Math.ceil(BREAKABLES[u.def].hits / RESIST_MULT[BREAKABLES[u.def].resist[WEAPONS[h.weapons[0]?.def ?? h.weapons[1]!.def].type] ?? 'normal']) / WEAPONS[(h.weapons[0] ?? h.weapons[1])!.def].aps;
+        } else dur = propTime(BREAKABLES[u.def]);
         // the HP a fight costs has to be won back later: a tree or a crate is cheaper than its fight time alone says
         const score = value(u) / (dist(h.spot, u.spot) / st.speed + dur + healTime(e?.taken ?? 0, u.spot) + 2);
         if (score > bestScore) { bestScore = score; best = u; bestEst = e; }
@@ -667,8 +672,7 @@ function run(seed: number): RunOut {
     const t0 = t;
     if (u.kind === 'prop') {
       const b = BREAKABLES[u.def];
-      const w = WEAPONS[(h.weapons[0] ?? h.weapons[1])!.def];
-      t += Math.ceil(b.hits / RESIST_MULT[b.resist[w.type] ?? 'normal']) / w.aps;
+      t += propTime(b);
       giveStats(h, b.reward, true);
       event(u, t0, 'break', { gain: b.reward });
       for (const ev of b.onBreak ?? []) {
@@ -754,7 +758,7 @@ export function simMap(): SimMap {
   const units = buildUnits().map((u): MapUnit => {
     const p = posOf(u.spot);
     const base = { id: u.id, def: u.def, kind: u.kind, zone: u.zone, x: p.x, z: p.z, approx: u.id.startsWith('tree:') || undefined, depth: u.depth, charges: u.charges, reward: rewardOf(u) };
-    if (u.kind === 'prop') return { ...base, name: u.def, rank: 'prop', hp: BREAKABLES[u.def].hits, dmg: 0, token: 0 };
+    if (u.kind === 'prop') return { ...base, name: u.def, rank: 'prop', hp: BREAKABLES[u.def].hp, dmg: 0, token: 0 };
     const d = MOBS[u.def];
     const f = foeOf(u);
     return { ...base, name: d.name, rank: mobRank(d), hp: f.hp, dmg: f.dmg, bonus: d.bonus, drop: d.drop ? wname(dropItem(d.drop)) : undefined, token: tokenChance(u) };

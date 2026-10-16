@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import {
-  DAMAGE_TYPE_NAME, FACTIONS, fmtOrb, UI_REF, WEAPONS, ZONE_FOES,
+  FACTIONS, fmtOrb, UI_REF, WEAPONS, ZONE_FOES,
   type FactionId, type OrbKind, type PetDef, type ZoneDef,
 } from './config';
 import { ARMOR_SLOTS, EQUIP_BAR, cellHtml, petCellHtml, type ArmorSlot, type Item } from './items';
-import { DAMAGE_TYPE_ICON, fmtK, hasIcon, icon, iconImage, resistIcons, rewardChips } from './icons';
+import { CLASS_DAMAGE_ICON, fmtK, hasIcon, icon, iconImage, resistIcons, rewardChips } from './icons';
 import { STAT_ICON, art, hasPng, mini, tintedArt, whiteArt } from './art';
 import type { MobDef } from './config';
 import { sfx } from './audio';
@@ -375,14 +375,16 @@ export class UI {
 
   zoneBanner(z: ZoneDef) {
     const f = ZONE_FOES[z.id];
-    // over the minimap: what the location's enemies are weak to (green)
-    const weak = f?.weak ?? [];
+    // over the minimap: which classes the location's enemies are weak to (green)
+    // both halves of the Snow Pass (ZoneFoes.alt)
+    const weak = [...new Set([...(f?.weak ?? []), ...(f?.alt?.weak ?? [])])];
+    const resist = [...new Set([...(f?.resist ?? []), ...(f?.alt?.resist ?? [])])];
+    const names = (cs: HeroClass[]) => cs.map((c) => CLASSES[c].name.toLowerCase()).join(', ');
     $('zone-foes').innerHTML = weak
-      .map((t) => `<i class="foe weak" title="Слабость врагов: ${DAMAGE_TYPE_NAME[t]} урон">${icon(DAMAGE_TYPE_ICON[t], '#fff', 22)}</i>`).join('');
+      .map((c) => `<i class="foe weak" title="Слабость врагов: ${CLASSES[c].name}">${icon(CLASS_DAMAGE_ICON[c], '#fff', 22)}</i>`).join('');
     const el = $('zone-banner');
-    el.innerHTML = z.name + (weak.length
-      ? `<small>Слабость врагов: ${weak.map((t) => DAMAGE_TYPE_NAME[t]).join(', ')}</small>`
-      : f || z.id === 'forest' ? '' : '<small>Безопасная зона</small>');
+    const tags = [weak.length ? `Слабость: ${names(weak)}` : '', resist.length ? `Сопротивление: ${names(resist)}` : ''].filter(Boolean);
+    el.innerHTML = z.name + (tags.length ? `<small>${tags.join(' · ')}</small>` : f || z.id === 'forest' ? '' : '<small>Безопасная зона</small>');
     el.classList.add('show');
     clearTimeout(this.bannerT);
     this.bannerT = window.setTimeout(() => el.classList.remove('show'), 2600);

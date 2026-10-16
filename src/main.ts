@@ -103,7 +103,7 @@ for (const [m] of FORGE3D.decor) models.add(m);
   'undead_windmill', 'undead_tower_Lv2', 'undead_throne_Lv1', 'undead_throne', 'undead_floating_stone',
   'undead_floating_coffin', 'undead_column_2', 'undead_tomb_stone_5', 'undead_tomb_stone_6', 'undead_ground_bone_1',
   'undead_ground_bone_2', 'undead_ground_bone_3', 'orc_bucket', 'orc_box_large_2', 'shield', 'spear',
-  'orc_wood_pile_small', 'orc_beam_pile', 'elf_mine_Lv1', 'elf_oracle_Lv1', 'elf_throne_Lv1', 'elf_fountain'].forEach((m) => models.add(m));
+  'orc_wood_pile_small', 'orc_beam_pile', 'undead_wood_pile', 'undead_oracle_Lv1', 'house_Lv1', 'lantern_street', 'elf_mine_Lv1', 'elf_oracle_Lv1', 'elf_throne_Lv1', 'elf_fountain'].forEach((m) => models.add(m));
 
 await Promise.all([
   assets.loadAll([...models], (p) => ui.loading(p, `Загрузка моделей… ${Math.round(p * 100)}%`)),

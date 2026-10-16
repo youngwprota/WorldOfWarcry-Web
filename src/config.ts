@@ -4,7 +4,7 @@ import type { MobBehavior } from './mobs/behavior';
 // All gameplay numbers live here (GDD: "все числа — ориентиры").
 
 /** Sword — slash (режущий), axe — chop (рубящий), hammer — crush (дробящий), mage staves — magic (магический). */
-export type DamageType = 'slash' | 'chop' | 'crush' | 'magic';
+export type DamageType = 'slash' | 'chop' | 'crush' | 'pierce' | 'magic';
 export type ResistTier = 'weak' | 'normal' | 'resist' | 'immune';
 export type FactionId = 'human' | 'orc';
 export type ZoneId = 'forest' | 'cemetery' | 'peaks' | 'swamp' | 'grove' | 'dunes' | 'hills';
@@ -30,9 +30,12 @@ export function mobImpact(hit: number, period: number) { return Math.min(hit, pe
  */
 export const UI_REF = { hud: { w: 540, h: 960 }, modal: { w: 760, h: 1351 } };
 
-export const RESIST_MULT: Record<ResistTier, number> = { weak: 1.5, normal: 1, resist: 0.5, immune: 0.25 };
-export const DAMAGE_TYPE_NAME: Record<DamageType, string> = { slash: 'режущий', chop: 'рубящий', crush: 'дробящий', magic: 'магический' };
-export const DAMAGE_TYPE_COLOR: Record<DamageType, string> = { slash: '#7fd3ff', chop: '#ff8a5a', crush: '#ffb347', magic: '#b49bff' };
+/** Damage taken by tier: a weakness +30%, a resistance −50%. */
+export const RESIST_MULT: Record<ResistTier, number> = { weak: 1.3, normal: 1, resist: 0.5, immune: 0.25 };
+/** Which party class deals a damage type: mobs resist and are weak to classes (warrior — sword, axe, hammer, polearm). */
+export const DAMAGE_CLASS: Record<DamageType, HeroClass> = { slash: 'warrior', chop: 'warrior', crush: 'warrior', pierce: 'hunter', magic: 'mage' };
+export const DAMAGE_TYPE_NAME: Record<DamageType, string> = { slash: 'режущий', chop: 'рубящий', crush: 'дробящий', pierce: 'колющий', magic: 'магический' };
+export const DAMAGE_TYPE_COLOR: Record<DamageType, string> = { slash: '#7fd3ff', chop: '#ff8a5a', crush: '#ffb347', pierce: '#c8f07a', magic: '#b49bff' };
 
 /**
  * Item quality. Weapon damage = (base + copy × (level − 1)) × the weapon's dmgMul: every extra copy of the same
@@ -144,7 +147,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   // hunter (src/party.ts): ~2.5 sword ranges
   bow: {
-    id: 'bow', name: 'Лук', type: 'slash', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 5.75,
+    id: 'bow', name: 'Лук', type: 'pierce', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 5.75,
     anim: 'SwordAttack', model: { human: 'bow_human_archer', orc: 'bow_orc_archer' }, icon: '🏹', single: true,
     leftHand: true,
     shot: { speed: 24, arrow: { human: 'arrow_human_archer', orc: 'arrow_orc_archer' }, volley: 3 },
@@ -323,6 +326,8 @@ export interface MobDef {
   /** elite: drops `drop` on every kill; mini: micro-boss giving `bonus` stats. Main bosses have `boss`. */
   rank?: 'elite' | 'mini';
   drop?: ItemDrop;
+  /** More items dropped along with `drop` on every kill (main bosses), each shown over the HP bar. */
+  moreDrops?: ItemDrop[];
   /** Permanent stats added straight to the hero on every kill (micro-bosses), in stat units: hp 500 = +500 HP. */
   bonus?: OrbReward;
   /** Fixed power orbs dropped on death (shown above the HP bar) — one stat only. */
@@ -392,25 +397,40 @@ const BOSS_BASE = {
 export const MOB_REGEN_DELAY = 5;
 
 /**
- * Each location's enemies share one profile: what they are weak to (green icon over the minimap) and what
- * they resist. Mobs take it via `foes(zone)`. The starting forest has neither: every blow lands as it is.
+ * Each location's enemies share one profile by class (DAMAGE_CLASS): what they resist (−50%) and are weak to (+30%).
+ * `alt`: every other mob of the location has this profile instead (the Snow Pass: half resist the warrior and are weak to
+ * the hunter, half the other way round);
+ * `boss`: the location's main boss resists these and has no weakness (none: like everyone). Game.addMob gives every
+ * mob the profile of the location it stands in; MobDefs carry their home location's one (`foes`).
  */
-export interface ZoneFoes { weak: DamageType[]; resist?: DamageType[] }
+export interface ZoneFoes { weak: HeroClass[]; resist: HeroClass[]; alt?: { weak: HeroClass[]; resist: HeroClass[] }; boss?: HeroClass[] }
+const ALL_CLASSES: HeroClass[] = ['warrior', 'hunter', 'mage'];
 export const ZONE_FOES: Partial<Record<ZoneId, ZoneFoes>> = {
-  forest: { weak: [] },
-  cemetery: { weak: ['crush'], resist: ['slash', 'chop'] },
-  peaks: { weak: ['crush'] },
-  hills: { weak: ['slash'] },
-  grove: { weak: ['crush'] },
-  swamp: { weak: ['slash'] },
-  dunes: { weak: ['crush'] },
+  forest: { weak: [], resist: [], boss: ['warrior'] },
+  cemetery: { weak: ['hunter'], resist: ['warrior'] },
+  peaks: { weak: ['hunter'], resist: ['warrior'], alt: { weak: ['warrior'], resist: ['hunter'] }, boss: ['warrior', 'hunter'] },
+  hills: { weak: ['mage'], resist: ['warrior', 'hunter'] },
+  grove: { weak: ['warrior'], resist: ['hunter', 'mage'], boss: ALL_CLASSES },
+  swamp: { weak: ['hunter'], resist: ['mage', 'warrior'], boss: ALL_CLASSES },
+  dunes: { weak: ['mage'], resist: ['hunter', 'warrior'], boss: ALL_CLASSES },
 };
+/** Resistances of a mob of location `zone`: a plain one, an `alt` one (ZoneFoes.alt) or the main boss. */
+export function zoneResist(zone: ZoneId, kind: 'mob' | 'alt' | 'boss' = 'mob'): MobDef['resist'] {
+  const f = ZONE_FOES[zone];
+  if (!f) return {};
+  const boss = kind === 'boss' && f.boss;
+  const alt = kind === 'alt' ? f.alt : undefined;
+  const resist = boss ? f.boss! : alt ? alt.resist : f.resist;
+  const weak = boss ? [] : alt ? alt.weak : f.weak;
+  const out: MobDef['resist'] = {};
+  for (const t of Object.keys(DAMAGE_CLASS) as DamageType[]) {
+    if (resist.includes(DAMAGE_CLASS[t])) out[t] = 'resist';
+    else if (weak.includes(DAMAGE_CLASS[t])) out[t] = 'weak';
+  }
+  return out;
+}
 function foes(zone: ZoneId): Pick<MobDef, 'resist'> {
-  const f = ZONE_FOES[zone]!;
-  const resist: MobDef['resist'] = {};
-  for (const t of f.resist ?? []) resist[t] = 'resist';
-  for (const t of f.weak) resist[t] = 'weak';
-  return { resist };
+  return { resist: zoneResist(zone) };
 }
 
 /** Static trees of the forest (MobDef.static), 400–2000 HP, each with its own loot: HP early, then damage, regen, speed. */
@@ -448,20 +468,20 @@ export const MOBS: Record<string, MobDef> = {
     anim: 'SwordAttack', hp: 220, dmg: 6, aps: 0.8, range: 1.6, speed: 3.4, aggro: 5, regen: 0.03, scale: 1.08,
     ...foes('forest'), reward: { power: 1 }, respawn: 60,
   },
-  // ---------- the forest's elites: each drops a common piece of the warrior's kit ----------
+  // ---------- the forest's elites: each drops an uncommon piece of the warrior's kit (no common items drop: only the start weapons are common) ----------
   bandit_veteran: {
     id: 'bandit_veteran', name: 'Ветеран', rank: 'elite',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
     anim: 'SwordAttack', hp: 800, dmg: 8, aps: 0.9, range: 1.8, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.3,
     ...foes('forest'), reward: { power: 3 }, respawn: 300,
-    drop: { kind: 'armor', def: 'plate_chest', rarity: 0 },
+    drop: { kind: 'armor', def: 'plate_chest', rarity: 1 },
   },
   bandit_brute: {
     id: 'bandit_brute', name: 'Громила', rank: 'elite',
     model: { human: ['orc_grunt', 'sword_orc_warrior'], orc: ['human_knight', 'sword_human_knight'] },
     anim: 'SwordAttack', hp: 1600, dmg: 14, aps: 0.7, range: 1.8, speed: 3.2, aggro: 5.2, regen: 0.03, scale: 1.35,
     ...foes('forest'), reward: { hp: 8 }, respawn: 300,
-    drop: { kind: 'armor', def: 'plate_head', rarity: 0 },
+    drop: { kind: 'armor', def: 'plate_head', rarity: 1 },
   },
   bandit_lumberjack: {
     id: 'bandit_lumberjack', name: 'Лесоруб', rank: 'elite',
@@ -469,14 +489,14 @@ export const MOBS: Record<string, MobDef> = {
     anim: 'SwordAttack', hp: 2000, dmg: 17, aps: 0.6, range: 1.8, speed: 3.0, aggro: 5.2, regen: 0.03, scale: 1.45,
     ...foes('forest'), reward: { regen: 3 }, respawn: 300,
     // a copy of the hero's starting sword: it levels the sword up
-    drop: { kind: 'weapon', def: 'sword', rarity: 0 },
+    drop: { kind: 'weapon', def: 'sword', rarity: 1 },
   },
   bandit_runner_elite: {
     id: 'bandit_runner_elite', name: 'Скороход', rank: 'elite',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
     anim: 'SwordAttack', hp: 1200, dmg: 11, aps: 0.9, range: 1.8, speed: 3.8, aggro: 5.2, regen: 0.03, scale: 1.3,
     ...foes('forest'), reward: { speed: 2 }, respawn: 300,
-    drop: { kind: 'armor', def: 'plate_legs', rarity: 0 },
+    drop: { kind: 'armor', def: 'plate_legs', rarity: 1 },
   },
   // Reinforcements of the bandit chief: weak, no drops (they leave only a few orbs).
   bandit_runner: {
@@ -523,8 +543,8 @@ export const MOBS: Record<string, MobDef> = {
     // tuned to the hero after one forest cycle on the forest's own drops (no gacha there): a coin flip at ~90% of it
     anim: 'SwordAttack', hp: 10500, dmg: 34, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
     ...foes('forest'), reward: { power: 12 }, respawn: 900,
-    // the forest's swords barely scratch him (−50%)
-    resist: { slash: 'resist' },
+    // the warrior's weapons barely scratch him (−50%)
+    resist: zoneResist('forest', 'boss'),
     boss: {
       ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest', unlocks: ['forest-cemetery'], unlockClass: 'hunter',
       slamRadius: 4.2, slamMul: 2.4, chaseMul: 1.4, phase2Dmg: 1.2,
@@ -606,14 +626,29 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
     anim: 'SwordAttack', hp: 1640, dmg: 13, aps: 0.75, range: 2.1, speed: 3.0, aggro: 5.5, regen: 0.03, scale: 1.4,
     ...foes('cemetery'), reward: { hp: 6 }, respawn: 600,
-    drop: { kind: 'armor', def: 'plate_head', rarity: 2 },
+    drop: { kind: 'armor', def: 'hunter_head', rarity: 1 },
   },
   shade: {
     id: 'shade', name: 'Тень', rank: 'elite',
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
     anim: 'SwordAttack', hp: 1280, dmg: 12, aps: 1.1, range: 1.5, speed: 4.5, aggro: 6.2, regen: 0.03, scale: 1.3,
     ...foes('cemetery'), reward: { speed: 5 }, respawn: 600,
-    drop: { kind: 'armor', def: 'plate_legs', rarity: 2 },
+    drop: { kind: 'armor', def: 'hunter_legs', rarity: 1 },
+  },
+  // the cemetery's elites dress the hunter in his uncommon set (left half of the equip bar; the right half comes from the gacha)
+  grave_looter: {
+    id: 'grave_looter', name: 'Мародёр', rank: 'elite',
+    model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
+    anim: 'SwordAttack', hp: 1460, dmg: 12, aps: 0.8, range: 1.7, speed: 3.2, aggro: 5.5, regen: 0.03, scale: 1.45,
+    ...foes('cemetery'), reward: { hp: 6 }, respawn: 600,
+    drop: { kind: 'armor', def: 'hunter_chest', rarity: 1 },
+  },
+  cursed_archer: {
+    id: 'cursed_archer', name: 'Проклятый стрелок', rank: 'elite',
+    model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
+    anim: 'SwordAttack', hp: 1800, dmg: 14, aps: 0.75, range: 2.1, speed: 3.1, aggro: 5.8, regen: 0.03, scale: 1.5,
+    ...foes('cemetery'), reward: { power: 4 }, respawn: 600,
+    drop: { kind: 'weapon', def: 'bow', rarity: 1 },
   },
   gravedigger: {
     id: 'gravedigger', name: 'Могильщик', rank: 'mini',
@@ -627,7 +662,8 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_king', 'death_scythe'], orc: ['undead_king', 'death_scythe'] },
     anim: 'MeleeHigh', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
     ...foes('cemetery'), reward: { power: 18 }, respawn: 1200,
-    drop: { kind: 'armor', def: 'ring_swift', rarity: 3 },
+    // a better sword for the warrior
+    drop: { kind: 'weapon', def: 'sword', rarity: 2 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['cemetery-peaks'],
       slamRadius: 5, slamMul: 4.7, noSlam: true, chaseMul: 2.6, phase2Dmg: 1.3,
@@ -668,7 +704,7 @@ export const MOBS: Record<string, MobDef> = {
     anim: 'SwordAttack', hp: 16000, dmg: 100, aps: 0.25, range: 2.6, speed: 2.6, aggro: 6.5, regen: 0.03, scale: 2.0,
     ...foes('peaks'), reward: { power: 20 }, respawn: 1200,
     boss: {
-      ...BOSS_BASE, titles: { human: 'Королева льдов', orc: 'Королева льдов' }, zone: 'peaks', unlocks: ['forest-peaks', 'forest-hills'],
+      ...BOSS_BASE, titles: { human: 'Королева льдов', orc: 'Королева льдов' }, zone: 'peaks', unlocks: ['forest-peaks', 'forest-hills'], unlockClass: 'mage',
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.15,
       // a small guard: the fight stays about her blows
       reinforce: { at: [0.4], pool: ['elf_sentinel', 'elf_sentinel'], bark: 'Стража, ко мне!' },
@@ -679,6 +715,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['elf_priestess', 'magic_ball'], orc: ['elf_priestess', 'magic_ball'] },
     anim: 'SwordAttack', hp: 32000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.0,
     ...foes('grove'), reward: { regen: 3 }, respawn: 1200,
+    drop: { kind: 'weapon', def: 'staff_fire', rarity: 2 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Жрица Осенней рощи', orc: 'Жрица Осенней рощи' }, zone: 'grove', unlocks: ['grove-swamp', 'forest-swamp'],
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
@@ -708,6 +745,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['orc_shaman', 'staff_orc_shaman'], orc: ['orc_shaman', 'staff_orc_shaman'] },
     skin: 'tauren', anim: 'AxeAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.0,
     ...foes('hills'), reward: { power: 20 }, respawn: 1200,
+    drop: { kind: 'weapon', def: 'bow', rarity: 2 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Шаман Чёрной Скалы', orc: 'Шаман Чёрной Скалы' }, zone: 'hills', unlocks: ['hills-grove'],
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
@@ -720,6 +758,9 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['human_murloc', null], orc: ['human_murloc', null] },
     anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.4,
     ...foes('swamp'), reward: { hp: 20 }, respawn: 1200,
+    // an epic weapon for every class
+    drop: { kind: 'weapon', def: 'sword', rarity: 3 },
+    moreDrops: [{ kind: 'weapon', def: 'staff_fire', rarity: 3 }, { kind: 'weapon', def: 'bow', rarity: 3 }],
     boss: {
       ...BOSS_BASE, titles: { human: 'Король мурлоков', orc: 'Король мурлоков' }, zone: 'swamp', unlocks: ['swamp-dunes'],
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
@@ -730,6 +771,9 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['orc_boar', null], orc: ['orc_boar', null] },
     anim: 'AxeAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 3,
     ...foes('dunes'), reward: { speed: 20 }, respawn: 1200,
+    // an epic helmet for every class
+    drop: { kind: 'armor', def: 'plate_head', rarity: 3 },
+    moreDrops: [{ kind: 'armor', def: 'hunter_head', rarity: 3 }, { kind: 'armor', def: 'mage_head', rarity: 3 }],
     boss: {
       ...BOSS_BASE, titles: { human: 'Песчаный вепрь', orc: 'Песчаный вепрь' }, zone: 'dunes', unlocks: [],
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
@@ -750,16 +794,15 @@ const elf = (base: string, id: string, name: string, body: string, weapon: strin
 MOBS.elf_swordsman = elf('elf_sentinel', 'elf_swordsman', 'Эльф-мечник', 'elf_worker', 'sword_elf_warrior');
 MOBS.elf_cutthroat = elf('elf_assassin', 'elf_cutthroat', 'Эльф-головорез', 'elf_worker', 'dagger');
 MOBS.elf_gate_guard = elf('gate_guard', 'elf_gate_guard', 'Эльф-привратник', 'elf_warrior', 'sword_elf_warrior');
-// Snow Pass elites: each drops an uncommon (green) piece of the warrior's kit
+// Snow Pass elites: each drops a rare (blue) piece of the warrior's armour
 const elfElite = (id: string, name: string, body: string, weapon: string, scale: number, reward: OrbReward, drop: ItemDrop): MobDef => ({
   id, name, rank: 'elite', model: { human: [body, weapon], orc: [body, weapon] },
   anim: 'SwordAttack', hp: 1600, dmg: 14, aps: 0.8, range: 1.8, speed: 3.3, aggro: 5.5, regen: 0.03, scale,
   ...foes('peaks'), reward, respawn: 600, drop,
 });
-MOBS.elf_glovemaster = elfElite('elf_glovemaster', 'Эльф-кулачник', 'elf_assassin', 'sword_elf_warrior', 1.3, { power: 4 }, { kind: 'armor', def: 'plate_arms', rarity: 1 });
-MOBS.elf_champion = elfElite('elf_champion', 'Эльф-латник', 'elf_warrior', 'sword_elf_warrior', 1.4, { hp: 6 }, { kind: 'armor', def: 'plate_chest', rarity: 1 });
-MOBS.elf_bladesmith = elfElite('elf_bladesmith', 'Эльф-оружейник', 'elf_worker', 'sword_elf_warrior', 1.35, { power: 4 }, { kind: 'weapon', def: 'sword', rarity: 1 });
-MOBS.elf_warden = elfElite('elf_warden', 'Эльф-хранитель', 'elf_priestess', 'glaive_elf_queen', 1.3, { regen: 2 }, { kind: 'weapon', def: 'shield_spiked', rarity: 1 });
+MOBS.elf_glovemaster = elfElite('elf_glovemaster', 'Эльф-дозорный', 'elf_assassin', 'sword_elf_warrior', 1.3, { power: 4 }, { kind: 'armor', def: 'plate_head', rarity: 2 });
+MOBS.elf_champion = elfElite('elf_champion', 'Эльф-латник', 'elf_warrior', 'sword_elf_warrior', 1.4, { hp: 6 }, { kind: 'armor', def: 'plate_chest', rarity: 2 });
+MOBS.elf_bladesmith = elfElite('elf_bladesmith', 'Эльф-следопыт', 'elf_worker', 'sword_elf_warrior', 1.35, { power: 4 }, { kind: 'armor', def: 'plate_legs', rarity: 2 });
 /** Faded grey-green crowns of the Snow Pass trees (multiply the elf tree texture: low green mutes it). */
 export const WITHERED = [0xd9c4cc, 0xccbcc4, 0xe0ccd2, 0xc4b4bc];
 MOBS.snow_tree_young = { ...MOBS.tree_young, id: 'snow_tree_young', name: 'Увядшее дерево', tint: WITHERED[0] };
@@ -782,6 +825,34 @@ MOBS.tauren_warlord = {
   ...MOBS.bandit_warlord, ...foes('hills'), id: 'tauren_warlord', name: 'Вожак тауренов', skin: 'tauren', drop: undefined,
   model: { human: ['orc_chieftain', 'axe_orc_chieftain'], orc: ['orc_chieftain', 'axe_orc_chieftain'] }, anim: 'AxeAttack',
 };
+
+// Loot elites of the outer lands (LAND_ELITES): one item each on every kill, stats like the Snow Pass elites (ZONE_TIER scales them).
+const landElite = (zone: ZoneId, id: string, name: string, look: Pick<MobDef, 'model' | 'anim'> & Partial<Pick<MobDef, 'skin' | 'creature'>>, scale: number, reward: OrbReward, drop: ItemDrop): MobDef => ({
+  id, name, rank: 'elite', hp: 1600, dmg: 14, aps: 0.8, range: 1.8, speed: 3.3, aggro: 5.5, regen: 0.03, scale,
+  ...foes(zone), ...look, reward, respawn: 600, drop,
+});
+const both = (body: string, weapon: string | null): MobDef['model'] => ({ human: [body, weapon], orc: [body, weapon] });
+const TAUREN = { skin: 'tauren', anim: 'AxeAttack' as const };
+// Rocky Hills: the mage's uncommon set and staff
+MOBS.tauren_seer = landElite('hills', 'tauren_seer', 'Таурен-провидец', { ...TAUREN, model: both('orc_peon', 'axe_orc_peon') }, 1.35, { regen: 2 }, { kind: 'armor', def: 'mage_head', rarity: 1 });
+MOBS.tauren_hide = landElite('hills', 'tauren_hide', 'Таурен-кожевник', { ...TAUREN, model: both('orc_grunt', 'axe_orc_grunt') }, 1.4, { hp: 6 }, { kind: 'armor', def: 'mage_chest', rarity: 1 });
+MOBS.tauren_strider = landElite('hills', 'tauren_strider', 'Таурен-бегун', { ...TAUREN, model: both('orc_warrior', 'sword_orc_warrior') }, 1.35, { speed: 3 }, { kind: 'armor', def: 'mage_legs', rarity: 1 });
+MOBS.tauren_totem = landElite('hills', 'tauren_totem', 'Таурен-тотемщик', { ...TAUREN, model: both('orc_shaman', 'staff_orc_shaman') }, 1.4, { power: 4 }, { kind: 'weapon', def: 'staff_fire', rarity: 1 });
+// Autumn Grove: the hunter's rare set
+MOBS.elf_ranger = landElite('grove', 'elf_ranger', 'Эльф-егерь', { anim: 'SwordAttack', model: both('elf_assassin', 'dagger') }, 1.3, { speed: 3 }, { kind: 'armor', def: 'hunter_head', rarity: 2 });
+MOBS.elf_poacher = landElite('grove', 'elf_poacher', 'Эльф-браконьер', { anim: 'SwordAttack', model: both('elf_worker', 'sword_elf_warrior') }, 1.4, { hp: 6 }, { kind: 'armor', def: 'hunter_chest', rarity: 2 });
+MOBS.elf_tracker = landElite('grove', 'elf_tracker', 'Эльф-следопыт рощи', { anim: 'SwordAttack', model: both('elf_warrior', 'sword_elf_warrior') }, 1.35, { power: 4 }, { kind: 'armor', def: 'hunter_legs', rarity: 2 });
+// Rotten Swamp: the mage's rare set
+MOBS.murloc_oracle = landElite('swamp', 'murloc_oracle', 'Мурлок-оракул', { anim: 'SwordAttack', creature: true, model: both('human_murloc', null) }, 1.35, { regen: 2 }, { kind: 'armor', def: 'mage_head', rarity: 2 });
+MOBS.murloc_brute = landElite('swamp', 'murloc_brute', 'Мурлок-громила', { anim: 'SwordAttack', creature: true, model: both('human_murloc', null) }, 1.5, { hp: 6 }, { kind: 'armor', def: 'mage_chest', rarity: 2 });
+MOBS.murloc_runner = landElite('swamp', 'murloc_runner', 'Мурлок-бегун', { anim: 'SwordAttack', creature: true, model: both('human_murloc', null) }, 1.3, { speed: 3 }, { kind: 'armor', def: 'mage_legs', rarity: 2 });
+// Sand Dunes: epic chests and boots of every class
+MOBS.dune_raider = landElite('dunes', 'dune_raider', 'Пустынный налётчик', { anim: 'SwordAttack', model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] } }, 1.4, { hp: 6 }, { kind: 'armor', def: 'plate_chest', rarity: 3 });
+MOBS.dune_hunter = landElite('dunes', 'dune_hunter', 'Пустынный охотник', { anim: 'SwordAttack', model: { human: ['human_archer', 'bow_human_archer'], orc: ['orc_archer', 'bow_orc_archer'] } }, 1.35, { power: 4 }, { kind: 'armor', def: 'hunter_chest', rarity: 3 });
+MOBS.dune_mystic = landElite('dunes', 'dune_mystic', 'Пустынный мистик', { anim: 'SwordAttack', model: both('orc_shaman', 'staff_orc_shaman') }, 1.35, { regen: 2 }, { kind: 'armor', def: 'mage_chest', rarity: 3 });
+MOBS.dune_nomad = landElite('dunes', 'dune_nomad', 'Кочевник', { anim: 'SwordAttack', model: { human: ['orc_grunt', 'sword_orc_warrior'], orc: ['human_knight', 'sword_human_knight'] } }, 1.4, { speed: 3 }, { kind: 'armor', def: 'plate_legs', rarity: 3 });
+MOBS.dune_scout = landElite('dunes', 'dune_scout', 'Пустынный разведчик', { anim: 'SwordAttack', model: { human: ['human_archer', 'bow_human_archer'], orc: ['orc_archer', 'bow_orc_archer'] } }, 1.3, { speed: 3 }, { kind: 'armor', def: 'hunter_legs', rarity: 3 });
+MOBS.dune_seer = landElite('dunes', 'dune_seer', 'Пустынный провидец', { anim: 'SwordAttack', model: both('orc_shaman', 'staff_orc_shaman') }, 1.3, { power: 4 }, { kind: 'armor', def: 'mage_legs', rarity: 3 });
 
 export type OrbKind = 'power' | 'hp' | 'regen' | 'speed';
 /** Stats a mob / prop gives: exactly one stat ({ hp: 3 }), a second key is a type error. */
@@ -908,7 +979,8 @@ export type BreakEvent = { type: 'spawnMob'; mob: string; chance: number; count?
 
 export interface BreakableDef {
   model: string | null;
-  hits: number; // HP in "normal hits"
+  /** Plain HP: the hero's blows take their real damage (resistances and crits included), like on mobs. */
+  hp: number;
   color: number;
   scale: number;
   /** Fixed power orbs, shown above the HP bar like on mobs — one stat only. */
@@ -928,23 +1000,23 @@ const GRAVE_RISE: BreakEvent[] = [{ type: 'spawnMob', mob: 'skeleton_worker', ch
 // wood is easy to chop, stone needs a hammer
 const WOOD: BreakableDef['resist'] = { chop: 'weak', crush: 'resist' };
 const STONE: BreakableDef['resist'] = { slash: 'resist', chop: 'resist', crush: 'weak' };
-/** The first boss's tower: 12 hits whatever the weapon, no stats, no weaknesses; the boss rebuilds it after 20 s while alive. */
-const FORT_TOWER = { hits: 12, respawn: 30, needsAlive: 'bandit_chief' };
+/** The first boss's tower: no stats, no weaknesses; the boss rebuilds it after 20 s while alive. */
+const FORT_TOWER = { hp: 1500, respawn: 30, needsAlive: 'bandit_chief' };
 const TOWER_SHOT = { dmg: 10, range: 20, cd: 2.4, r: 1.5, delay: 1.3, height: 5 };
 export const BREAKABLES: Record<string, BreakableDef> = {
-  barrel: { model: 'barrel', hits: 2, color: 0x8a5a2b, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
-  orc_barrel: { model: 'orc_barrel', hits: 2, color: 0x7a4a22, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
-  box: { model: 'box_small_1', hits: 1, color: 0xa87a45, scale: 0.9, reward: { power: 1 }, resist: {}, r: 0.45, respawn: 30 },
-  box_large: { model: 'box_large_1', hits: 3, color: 0xa87a45, scale: 0.8, reward: { power: 2 }, resist: {}, r: 0.7, respawn: 60 },
-  orc_box: { model: 'orc_box_small_1', hits: 1, color: 0x8a5a2b, scale: 0.9, reward: { power: 1 }, resist: {}, r: 0.45, respawn: 30 },
-  bush: { model: null, hits: 1, color: 0x3f8f2f, scale: 1, reward: { regen: 1 }, resist: { slash: 'weak', crush: 'resist' }, r: 0.6, respawn: 25 },
-  tomb1: { model: 'undead_tomb_stone_1', hits: 2, color: 0x77748a, scale: 0.75, reward: { power: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb2: { model: 'undead_tomb_stone_2', hits: 2, color: 0x77748a, scale: 0.75, reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb3: { model: 'undead_tomb_stone_3', hits: 2, color: 0x77748a, scale: 0.75, reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  tomb4: { model: 'undead_tomb_stone_4', hits: 2, color: 0x77748a, scale: 0.75, reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  barrel: { model: 'barrel', hp: 120, color: 0x8a5a2b, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
+  orc_barrel: { model: 'orc_barrel', hp: 120, color: 0x7a4a22, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
+  box: { model: 'box_small_1', hp: 60, color: 0xa87a45, scale: 0.9, reward: { power: 1 }, resist: {}, r: 0.45, respawn: 30 },
+  box_large: { model: 'box_large_1', hp: 200, color: 0xa87a45, scale: 0.8, reward: { power: 2 }, resist: {}, r: 0.7, respawn: 60 },
+  orc_box: { model: 'orc_box_small_1', hp: 60, color: 0x8a5a2b, scale: 0.9, reward: { power: 1 }, resist: {}, r: 0.45, respawn: 30 },
+  bush: { model: null, hp: 40, color: 0x3f8f2f, scale: 1, reward: { regen: 1 }, resist: { slash: 'weak', crush: 'resist' }, r: 0.6, respawn: 25 },
+  tomb1: { model: 'undead_tomb_stone_1', hp: 500, color: 0x77748a, scale: 0.75, reward: { power: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb2: { model: 'undead_tomb_stone_2', hp: 500, color: 0x77748a, scale: 0.75, reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb3: { model: 'undead_tomb_stone_3', hp: 500, color: 0x77748a, scale: 0.75, reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
+  tomb4: { model: 'undead_tomb_stone_4', hp: 500, color: 0x77748a, scale: 0.75, reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   fort_tower_orc: { model: 'orc_tower_Lv2', ...FORT_TOWER, color: 0x7a5a38, scale: 0.38, reward: {}, resist: {}, r: 1.4, shoot: TOWER_SHOT },
   fort_tower_human: { model: 'tower_Lv2', ...FORT_TOWER, color: 0x7a5a38, scale: 0.38, reward: {}, resist: {}, r: 1.4, shoot: TOWER_SHOT },
-  coffin: { model: 'undead_coffin', hits: 3, color: 0x5a3c2c, scale: 0.34, reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
+  coffin: { model: 'undead_coffin', hp: 900, color: 0x5a3c2c, scale: 0.34, reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
 };
 
 // ---------- spawners ----------
@@ -984,8 +1056,10 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
   ]).map((id) => spawner(id, FOREST_CHARGES)),
   // one endless charge with the mob's own respawn time
   cemetery: ([
-    'skeleton_worker', 'undead_boar', 'skeleton_worker', 'ghost', 'bone_guard', 'skeleton_warrior', 'undead_boar',
-    'skeleton_worker', 'ghost', 'gravedigger', 'skeleton_warrior', 'undead_boar', 'skeleton_worker', 'shade', 'skeleton_warrior',
+    // village (Мародёр) → graves by the trail (Костяной страж) → chapel ruins (Проклятый стрелок) →
+    // grave field (Могильщик) → before the arena (Тень); CEMETERY_PINS put the specials into their areas
+    'skeleton_worker', 'undead_boar', 'skeleton_worker', 'grave_looter', 'ghost', 'bone_guard', 'skeleton_warrior', 'undead_boar',
+    'skeleton_worker', 'cursed_archer', 'ghost', 'gravedigger', 'skeleton_warrior', 'undead_boar', 'skeleton_worker', 'shade', 'skeleton_warrior',
     'skeleton_warrior', 'undead_boar',
   ]).map((id) => spawner(id)),
   hills: ([
@@ -1008,7 +1082,7 @@ export const PEAKS_SPAWNERS = {
     .map((id) => spawner(id)),
   guards: pack(['elf_gate_guard', 'elf_gate_guard', 'elf_gate_guard']),
   /** Elites at hand-picked spots (map drawing; slid onto walkable land). */
-  elites: ([['elf_glovemaster', -14, -135], ['elf_champion', 59.5, -148], ['elf_bladesmith', 13, -115.5], ['elf_warden', 54.5, -92]] as const)
+  elites: ([['elf_glovemaster', -14, -135], ['elf_champion', 59.5, -148], ['elf_bladesmith', 13, -115.5]] as const)
     .map(([id, x, z]) => ({ def: spawner(id), x, z })),
   /** Wolves and bears wandering alone through the empty woods. */
   beasts: ['wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_bear', 'wild_direwolf']
@@ -1021,6 +1095,17 @@ export const PEAKS_SPAWNERS = {
 };
 /** «Свирепый вожак» mini-bosses of the cemetery and the outer lands. */
 export const MINI_SPAWNER = spawner('bandit_warlord');
+/**
+ * Loot elites of the outer lands (MOBS landElite): spots spread over each location, away from its boss and mini-boss
+ * and from each other (World slides them onto walkable land).
+ */
+const at = (list: [string, number, number][]) => list.map(([id, x, z]) => ({ def: spawner(id), x, z }));
+export const LAND_ELITES: Partial<Record<ZoneId, { def: SpawnerDef; x: number; z: number }[]>> = {
+  hills: at([['tauren_seer', -56, -20], ['tauren_hide', -82, -50], ['tauren_strider', -104, -82], ['tauren_totem', -58, -118]]),
+  grove: at([['elf_ranger', -38, -2], ['elf_poacher', -84, 0], ['elf_tracker', -98, 32]]),
+  swamp: at([['murloc_oracle', -8, 10], ['murloc_brute', -6, 56], ['murloc_runner', -16, 100]]),
+  dunes: at([['dune_raider', 16, 12], ['dune_hunter', 8, 90], ['dune_mystic', 64, 4], ['dune_nomad', 32, 52], ['dune_scout', 46, 82], ['dune_seer', 82, 30]]),
+};
 /** Zones whose mini-bosses are a local variant instead of «Свирепый вожак». */
 export const MINI_SPAWNER_OF: Partial<Record<ZoneId, SpawnerDef>> = {
   hills: spawner('tauren_warlord'), peaks: spawner('frost_warden'), grove: spawner('grove_dryad'), swamp: spawner('murloc_tidehunter'),
@@ -1117,6 +1202,15 @@ export const PROP_SPAWNERS: Record<'camp' | 'forest' | 'cemetery' | 'cemeteryFie
   cemetery: props(GRAVES, 18),
   cemeteryField: props(GRAVES, 6),
 };
+/**
+ * Areas of the Old Cemetery (world.buildCemetery): centre by angle (deg) and distance from the island centre, like its
+ * buildings; `r` — radius, m (stepping in shows the name). `pin` — the special mob standing in the centre.
+ */
+export const CEMETERY_AREAS: { id: 'village' | 'chapel' | 'field'; name: string; deg: number; d: number; r: number; pin?: string }[] = [
+  { id: 'village', name: 'Заброшенная деревня', deg: 90, d: 72, r: 12, pin: 'grave_looter' },
+  { id: 'chapel', name: 'Руины часовни', deg: 70, d: 99, r: 10, pin: 'cursed_archer' },
+  { id: 'field', name: 'Старое поле могил', deg: 113, d: 72, r: 11, pin: 'gravedigger' },
+];
 export const LEASH = 15;
 
 /**
