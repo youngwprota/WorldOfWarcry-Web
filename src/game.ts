@@ -22,7 +22,7 @@ import { assets } from './assets';
 import { Arrows, type ArrowTarget } from './arrows';
 import { PET_SEEK, Pet } from './pet';
 import { GATE, GATES, ISLAND, SPAWN, inCamp, pathAt, progressAt } from './island';
-import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnGroup, type SpawnPoint } from './world';
+import { BREAKABLES, World, makeBreakable, type BreakableDef, type Obstacle, type SpawnGroup, type SpawnPoint } from './world';
 import { MARK_COLOR, Unit, setChargeBars, unitBar } from './mobs/unit';
 import { Mob } from './mobs/mob';
 import { Spawn } from './mobs/spawn';
@@ -67,6 +67,9 @@ class Prop extends Unit {
   flash = 0;
   /** Turret: seconds until the next shot. */
   shootCd = 1.5;
+  /** Its level collider (World.obstacles), off while broken so the ruin leaves no invisible wall. */
+  block?: Obstacle;
+  private blockR = 0;
   constructor(spot: SpawnPoint, layer: HTMLElement) {
     const def = BREAKABLES[spot.kind];
     super(new THREE.Vector3(spot.x, 0, spot.z), layer, 'mobui prop', unitBar(lootHtml(def.reward), resistIcons(def, 24)), 'respawn prop');
@@ -92,10 +95,12 @@ class Prop extends Unit {
     this.hp = this.maxHp;
     this.shootCd = 1.5;
     this.obj.visible = true;
+    if (this.block) this.block.r = this.blockR;
   }
   vanish() {
     this.broken = true;
     this.obj.visible = false;
+    if (this.block) { this.blockR ||= this.block.r; this.block.r = 0; }
   }
 }
 
@@ -295,6 +300,7 @@ export class Game {
 
   private addProp(s: SpawnPoint, labels: HTMLElement) {
     const b = new Prop(s, labels);
+    b.block = this.world.obstacles.find((o) => o.x === s.x && o.z === s.z);
     this.addUnit(b);
     return b;
   }

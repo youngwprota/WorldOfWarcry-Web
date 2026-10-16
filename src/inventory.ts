@@ -14,7 +14,7 @@ import { DAMAGE_TYPE_ICON, fmtK, icon } from './icons';
 import { art } from './art';
 import type { Game } from './game';
 import type { UI } from './ui';
-import { CLASSES, classSlot, weaponClass } from './party';
+import { CLASSES, CLASS_IDS, classSlot, weaponClass, type HeroClass } from './party';
 
 /** 0.237 → "24%". */
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -286,7 +286,7 @@ export class Inventory {
     <div class="inv-equipped"><div class="eq-title">Экипировано</div>
       <div class="eq-doll">
         <div class="eq-side" id="i-eq-l"></div>
-        <div class="eq-stage"><canvas id="i-canvas"></canvas><div class="eq-rot"><button id="i-rl">↶</button><button id="i-rr">↷</button></div></div>
+        <div class="eq-stage"><canvas id="i-canvas"></canvas><div class="eq-rot"><button id="i-rl">↶</button><button id="i-rr">↷</button></div><div class="eq-cls" id="i-cls"></div></div>
         <div class="eq-w" id="i-eq-w"></div>
         <div class="eq-side" id="i-eq-r"></div>
       </div>
@@ -297,11 +297,15 @@ export class Inventory {
       <div class="sheet-body"><div id="b-grid"></div></div>
       <p class="hint-line">Нажми на предмет: надеть, сравнить или выбросить</p>
     </div>`);
-    this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, this.game.heroModel(), this.game.petDef);
+    this.newPreview();
     this.ui.on('#i-close', () => this.close());
     this.ui.on('#i-info', () => this.showInfo());
     this.ui.modal.querySelector('#i-rl')!.addEventListener('click', () => this.preview?.nudge(-1));
     this.ui.modal.querySelector('#i-rr')!.addEventListener('click', () => this.preview?.nudge(1));
+    this.ui.modal.querySelector('#i-cls')!.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-cls]');
+      if (b) this.switchClass(b.dataset.cls as HeroClass);
+    });
     this.ui.modal.querySelectorAll<HTMLElement>('[data-filter]').forEach((b) => b.addEventListener('click', () => {
       sfx.click();
       this.bagFilter = b.dataset.filter as BagFilter;
@@ -312,6 +316,22 @@ export class Inventory {
     const sw = this.ui.modal.querySelector<HTMLElement>('#i-sw')!;
     sw.addEventListener('click', (e) => { if (e.target === sw) sw.classList.add('hidden'); });
     this.ui.modal.addEventListener('click', this.onClick);
+    this.rerender();
+  }
+
+  private newPreview() {
+    this.preview?.dispose();
+    this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, this.game.heroModel(), this.game.petDef);
+  }
+
+  private switchClass(c: HeroClass) {
+    const g = this.game;
+    const model = g.heroModel();
+    const pet = g.petDef;
+    if (!g.switchClass(c)) return;
+    sfx.click();
+    this.hideTip();
+    if (g.heroModel() !== model || g.petDef !== pet) this.newPreview();
     this.rerender();
   }
 
@@ -333,6 +353,11 @@ export class Inventory {
     q('#i-eq-l').innerHTML = armor(EQUIP_BAR.left);
     q('#i-eq-w').innerHTML = weapons;
     q('#i-eq-r').innerHTML = armor(EQUIP_BAR.right);
+    q('#i-cls').innerHTML = CLASS_IDS.map((c) => {
+      const d = CLASSES[c];
+      const st = `${c === g.heroClass ? ' on' : ''}${g.classOpen(c) ? '' : ' locked'}`;
+      return `<button class="cls${st}" data-cls="${c}" style="--c1:${d.color[0]};--c2:${d.color[1]}" title="${d.name}">${art(d.icon, 30)}</button>`;
+    }).join('');
     this.preview?.setGear(...g.heldModels(), g.outfit(), g.staffInHand(), g.orbModel(), g.trims());
     g.newItems = 0;
   }

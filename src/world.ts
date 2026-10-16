@@ -210,6 +210,8 @@ function bands(items: Inst[]) {
 export class World {
   readonly group = new THREE.Group();
   readonly obstacles: Obstacle[] = [];
+  /** Room kept clear of decor round units that move or die (no collider: they block while alive themselves). */
+  private reserved: Obstacle[] = [];
   /** Every spawner on the island: mobs and breakable props alike. */
   readonly spawns: SpawnPoint[] = [];
   readonly bosses: { mob: string; x: number; z: number }[] = [];
@@ -321,7 +323,7 @@ export class World {
   free(x: number, z: number, pad = 0.6, avoidPath = false) {
     if (!walkable(x, z, pad)) return false;
     if (avoidPath && pathDist(x, z) < PATH_W * 0.5 + 1.6) return false;
-    for (const o of this.obstacles) if ((x - o.x) ** 2 + (z - o.z) ** 2 < (o.r + pad) ** 2) return false;
+    for (const o of [...this.obstacles, ...this.reserved]) if ((x - o.x) ** 2 + (z - o.z) ** 2 < (o.r + pad) ** 2) return false;
     return true;
   }
 
@@ -1411,7 +1413,7 @@ export class World {
     };
     this.spread(PEAKS_SPAWNERS.assassins.length, 16, inPass, okLone, true).forEach(({ x, z }, i) => {
       // not a pack centre: trees may grow close round them
-      this.obstacles.push({ x, z, r: 1.2 });
+      this.reserved.push({ x, z, r: 1.2 });
       this.addSpawn(`peaks:lone:${i}`, PEAKS_SPAWNERS.assassins[i], x, z, 'peaks', 0, 0);
     });
     // the bear trio a few metres off the west mini-boss
@@ -1436,7 +1438,7 @@ export class World {
         const x = p.x + p.tz * side * 2.6;
         const z = p.z - p.tx * side * 2.6;
         if (zoneIdAt(x, z) !== 'peaks' || !this.free(x, z, 1) || this.nearPack(x, z, 6) || gateDist(x, z) < 8) continue;
-        this.obstacles.push({ x, z, r: 0.8 });
+        this.reserved.push({ x, z, r: 0.8 });
         this.taken.push([x, z]);
         this.addSpawn(`peaks:tree:${i}`, d, x, z, 'peaks', 0, r() * 6);
         return;

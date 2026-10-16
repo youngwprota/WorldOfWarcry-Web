@@ -788,21 +788,22 @@ export const MOBS: Record<string, MobDef> = {
     ...foes('dunes'), reward: { power: 1 }, respawn: 60,
   },
 };
-// Snow Pass look variants: the stats of the mob they copy on another elf body
+// Snow Pass look variants: the stats of the mob they copy on another elf body, with that body's own weapon
+const elfAnim = (weapon: string): WeaponAnim => (weapon === 'axe' ? 'AxeAttack' : 'SwordAttack');
 const elf = (base: string, id: string, name: string, body: string, weapon: string): MobDef =>
-  ({ ...MOBS[base], ...foes('peaks'), id, name, model: { human: [body, weapon], orc: [body, weapon] } });
-MOBS.elf_swordsman = elf('elf_sentinel', 'elf_swordsman', 'Эльф-мечник', 'elf_worker', 'sword_elf_warrior');
+  ({ ...MOBS[base], ...foes('peaks'), id, name, anim: elfAnim(weapon), model: { human: [body, weapon], orc: [body, weapon] } });
+MOBS.elf_swordsman = elf('elf_sentinel', 'elf_swordsman', 'Эльф-рубака', 'elf_worker', 'axe');
 MOBS.elf_cutthroat = elf('elf_assassin', 'elf_cutthroat', 'Эльф-головорез', 'elf_worker', 'dagger');
 MOBS.elf_gate_guard = elf('gate_guard', 'elf_gate_guard', 'Эльф-привратник', 'elf_warrior', 'sword_elf_warrior');
 // Snow Pass elites: each drops a rare (blue) piece of the warrior's armour
 const elfElite = (id: string, name: string, body: string, weapon: string, scale: number, reward: OrbReward, drop: ItemDrop): MobDef => ({
   id, name, rank: 'elite', model: { human: [body, weapon], orc: [body, weapon] },
-  anim: 'SwordAttack', hp: 1600, dmg: 14, aps: 0.8, range: 1.8, speed: 3.3, aggro: 5.5, regen: 0.03, scale,
+  anim: elfAnim(weapon), hp: 1600, dmg: 14, aps: 0.8, range: 1.8, speed: 3.3, aggro: 5.5, regen: 0.03, scale,
   ...foes('peaks'), reward, respawn: 600, drop,
 });
-MOBS.elf_glovemaster = elfElite('elf_glovemaster', 'Эльф-дозорный', 'elf_assassin', 'sword_elf_warrior', 1.3, { power: 4 }, { kind: 'armor', def: 'plate_head', rarity: 2 });
+MOBS.elf_glovemaster = elfElite('elf_glovemaster', 'Эльф-дозорный', 'elf_assassin', 'dagger', 1.3, { power: 4 }, { kind: 'armor', def: 'plate_head', rarity: 2 });
 MOBS.elf_champion = elfElite('elf_champion', 'Эльф-латник', 'elf_warrior', 'sword_elf_warrior', 1.4, { hp: 6 }, { kind: 'armor', def: 'plate_chest', rarity: 2 });
-MOBS.elf_bladesmith = elfElite('elf_bladesmith', 'Эльф-следопыт', 'elf_worker', 'sword_elf_warrior', 1.35, { power: 4 }, { kind: 'armor', def: 'plate_legs', rarity: 2 });
+MOBS.elf_bladesmith = elfElite('elf_bladesmith', 'Эльф-следопыт', 'elf_worker', 'axe', 1.35, { power: 4 }, { kind: 'armor', def: 'plate_legs', rarity: 2 });
 /** Faded grey-green crowns of the Snow Pass trees (multiply the elf tree texture: low green mutes it). */
 export const WITHERED = [0xd9c4cc, 0xccbcc4, 0xe0ccd2, 0xc4b4bc];
 MOBS.snow_tree_young = { ...MOBS.tree_young, id: 'snow_tree_young', name: 'Увядшее дерево', tint: WITHERED[0] };
@@ -840,7 +841,7 @@ MOBS.tauren_strider = landElite('hills', 'tauren_strider', 'Таурен-бег�
 MOBS.tauren_totem = landElite('hills', 'tauren_totem', 'Таурен-тотемщик', { ...TAUREN, model: both('orc_shaman', 'staff_orc_shaman') }, 1.4, { power: 4 }, { kind: 'weapon', def: 'staff_fire', rarity: 1 });
 // Autumn Grove: the hunter's rare set
 MOBS.elf_ranger = landElite('grove', 'elf_ranger', 'Эльф-егерь', { anim: 'SwordAttack', model: both('elf_assassin', 'dagger') }, 1.3, { speed: 3 }, { kind: 'armor', def: 'hunter_head', rarity: 2 });
-MOBS.elf_poacher = landElite('grove', 'elf_poacher', 'Эльф-браконьер', { anim: 'SwordAttack', model: both('elf_worker', 'sword_elf_warrior') }, 1.4, { hp: 6 }, { kind: 'armor', def: 'hunter_chest', rarity: 2 });
+MOBS.elf_poacher = landElite('grove', 'elf_poacher', 'Эльф-браконьер', { anim: 'AxeAttack', model: both('elf_worker', 'axe') }, 1.4, { hp: 6 }, { kind: 'armor', def: 'hunter_chest', rarity: 2 });
 MOBS.elf_tracker = landElite('grove', 'elf_tracker', 'Эльф-следопыт рощи', { anim: 'SwordAttack', model: both('elf_warrior', 'sword_elf_warrior') }, 1.35, { power: 4 }, { kind: 'armor', def: 'hunter_legs', rarity: 2 });
 // Rotten Swamp: the mage's rare set
 MOBS.murloc_oracle = landElite('swamp', 'murloc_oracle', 'Мурлок-оракул', { anim: 'SwordAttack', creature: true, model: both('human_murloc', null) }, 1.35, { regen: 2 }, { kind: 'armor', def: 'mage_head', rarity: 2 });
