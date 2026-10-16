@@ -39,7 +39,7 @@ export interface ClassDef {
 export const CLASSES: Record<HeroClass, ClassDef> = {
   warrior: {
     name: 'Воин', icon: 'shield', color: ['#ff7a6a', '#c0352c'], key: 'Digit1',
-    weapons: ['sword', 'axe', 'hammer', 'polearm'], off: ['shield_tower', 'shield_buckler', 'shield_spiked'], offName: 'Щит',
+    weapons: ['sword', 'axe', 'hammer', 'polearm'], off: ['shield_spiked'], offName: 'Щит',
   },
   hunter: {
     name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
@@ -49,8 +49,8 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
   mage: {
     name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
     model: { human: 'mage', orc: 'orc_shaman' },
-    weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_vigor'], offName: 'Сфера', fixedOff: true,
-    kit: { hand: 'staff_fire', left: 'orb_vigor' },
+    weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_fury', 'orb_vigor', 'orb_swift', 'orb_ward', 'orb_fortune', 'orb_demon'], offName: 'Сфера',
+    kit: { hand: 'staff_fire', left: 'orb_fury' },
   },
 };
 

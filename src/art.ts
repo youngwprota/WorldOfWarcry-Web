@@ -223,7 +223,14 @@ const PNG: Record<string, string> = {
   ...Object.fromEntries(['staff_fire', 'staff_ice', 'staff_wind', 'sword', 'axe', 'hammer', 'polearm', 'shield_tower',
     'shield_buckler', 'shield_spiked', 'bow'].flatMap((def) =>
     ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${def}_${r}`, `${def}_${r}`]))),
-  orb_vigor: 'orb_vigor', orb_fury: 'orb_fury',
+  // armour item icons per rarity and faction (src/looks.ts CLASS_LOOK.icon): plate sets, hunter / caster skins, jewels
+  ...Object.fromEntries([
+    ...['guard', 'knight', 'lord', 'archer', 'caster'].flatMap((set) => ['head', 'chest', 'arms', 'legs'].map((slot) => `${set}_${slot}`)),
+    'ring', 'amulet',
+  ].flatMap((piece) => ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].flatMap((r) =>
+    ['human', 'orc'].map((f) => [`${piece}_${r}_${f}`, `armor/${piece}_${r}_${f}`])))),
+  orb_vigor: 'orb_vigor', orb_fury: 'orb_glass',
+  orb_swift: 'orb_swift', orb_ward: 'orb_ward', orb_fortune: 'orb_fortune', orb_demon: 'orb_demon',
 };
 /** The id has a pack PNG (art() draws it instead of the vector). */
 export const hasPng = (id: string) => !!PNG[id];

@@ -1,8 +1,9 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
-import { DAMAGE_TYPE_NAME, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type PetDef, type StatId } from './config';
+import { DAMAGE_TYPE_NAME, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type PetDef, type StatId, type WeaponDef } from './config';
 import { DAMAGE_TYPE_ICON, icon } from './icons';
 import { art, hasPng } from './art';
 import { CLASSES, weaponClass, type HeroClass } from './party';
+import { CLASS_LOOK, type Wearer } from './looks';
 
 /** Quality ids in model names (tools/blender/rarity_gear.py): `<def>_<id>`. */
 
@@ -27,9 +28,9 @@ export function armorTrim(it: Item, faction: FactionId): string | null {
   const d = ARMOR[it.def];
   if (!d) return null;
   const jewel = d.slot === 'ring' || d.slot === 'amulet';
-  // pieces are fitted to the warrior's plate sets only (the hunter's sets have their own textured parts)
-  if (!jewel && (it.rarity === 0 || d.cls !== 'warrior')) return null;
-  return trimModel(jewel ? d.slot : d.id, it.rarity, faction);
+  // pieces are fitted to the warrior's plate only (the hunter's and the mage's sets have their own textured parts)
+  if (!jewel && (it.rarity === 0 || !d.trim)) return null;
+  return trimModel(jewel ? d.slot : `${d.trim![faction]}_${d.slot}`, it.rarity, faction);
 }
 
 /** Quality piece model of armour def (or jewel slot) `id`. */
@@ -93,15 +94,20 @@ export interface ArmorDef {
   alwaysBonus?: boolean;
   /** Only this party class wears it; none = everyone (rings, amulets). */
   cls?: HeroClass;
+  /** Plate set whose quality pieces and icons it uses, per faction (`armor_<trim>_<slot>_...`). */
+  trim?: Record<FactionId, string>;
 }
 
-// Armour sets reuse other characters of the hero's own race as "outfits". The hero itself is the plainest
-// model (peasant / peon, FACTIONS.hero), so every piece visibly changes it.
-const SETS = [
-  { id: 'guard', of: { human: 'стражника', orc: 'рубаки' }, src: { human: 'soldier', orc: 'orc_warrior' }, mult: 1 },
-  { id: 'knight', of: { human: 'рыцаря', orc: 'громилы' }, src: { human: 'human_knight', orc: 'orc_grunt' }, mult: 1.2 },
-  { id: 'lord', of: { human: 'паладина', orc: 'вождя' }, src: { human: 'paladin', orc: 'orc_chieftain' }, mult: 1.45 },
-] as const;
+// One armour set per class. The warrior's plate reuses another character of the hero's own race as an "outfit"
+// (the knight for humans, the chieftain for orcs; the hero itself is the plainest model, FACTIONS.hero); the
+// hunter's and the mage's sets are class skins by quality (src/looks.ts CLASS_LOOK).
+const SETS: { id: string; cls: HeroClass; of: Record<FactionId, string>; src?: Record<FactionId, string>; trim?: Record<FactionId, string>; mult: number }[] = [
+  { id: 'plate', cls: 'warrior', of: { human: 'рыцаря', orc: 'вождя' }, src: { human: 'human_knight', orc: 'orc_chieftain' }, trim: { human: 'knight', orc: 'lord' }, mult: 1.2 },
+  { id: 'hunter', cls: 'hunter', of: { human: 'охотника', orc: 'следопыта' }, mult: 1.2 },
+  { id: 'mage', cls: 'mage', of: { human: 'мага', orc: 'шамана' }, mult: 1.2 },
+];
+/** The class's armour set id (`<set>_<slot>`). */
+export const CLASS_SET = Object.fromEntries(SETS.map((s) => [s.cls, s.id])) as Record<HeroClass, string>;
 const PIECES: { slot: VisualPart; noun: string; defense: number; bonus: { stat: BonusStat; value: number } }[] = [
   { slot: 'head', noun: 'Шлем', defense: 5, bonus: { stat: 'regen', value: 1 } },
   { slot: 'chest', noun: 'Нагрудник', defense: 9, bonus: { stat: 'hp', value: 18 } },
@@ -115,16 +121,13 @@ for (const s of SETS) {
     ARMOR[`${s.id}_${p.slot}`] = {
       id: `${s.id}_${p.slot}`, slot: p.slot,
       name: { human: `${p.noun} ${s.of.human}`, orc: `${p.noun} ${s.of.orc}` },
-      source: s.src, defense: Math.round(p.defense * s.mult),
+      ...(s.src ? { source: s.src } : {}), ...(s.trim ? { trim: s.trim } : {}), defense: Math.round(p.defense * s.mult),
       bonus: { stat: p.bonus.stat, value: Math.max(1, Math.round(p.bonus.value * s.mult)) },
-      // plate of soldiers, knights and paladins: the warrior's
-      cls: 'warrior',
+      cls: s.cls,
     };
   }
 }
-ARMOR.ring_power = { id: 'ring_power', slot: 'ring', name: { human: 'Кольцо силы', orc: 'Кольцо ярости' }, defense: 0, bonus: { stat: 'power', value: 5 }, alwaysBonus: true };
 ARMOR.ring_swift = { id: 'ring_swift', slot: 'ring', name: { human: 'Кольцо ветра', orc: 'Кольцо следопыта' }, defense: 0, bonus: { stat: 'speed', value: 4 }, alwaysBonus: true };
-ARMOR.amulet_life = { id: 'amulet_life', slot: 'amulet', name: { human: 'Амулет жизни', orc: 'Клык предков' }, defense: 2, bonus: { stat: 'hp', value: 20 }, alwaysBonus: true };
 ARMOR.amulet_spring = { id: 'amulet_spring', slot: 'amulet', name: { human: 'Амулет родника', orc: 'Тотем крови' }, defense: 2, bonus: { stat: 'regen', value: 1 }, alwaysBonus: true };
 
 export const BAG_SIZE = 128;
@@ -173,26 +176,35 @@ export function itemName(it: Item, f: FactionId) {
   return it.name ?? (it.kind === 'weapon' ? WEAPONS[it.def].name : ARMOR[it.def].name[f]);
 }
 
-/** Icon id for icon(): the weapon's `<def>_<rarity>` PNG when there is one, else the weapon id; armour slot. */
-export function itemIconId(it: Item) {
-  if (it.kind !== 'weapon') return ARMOR[it.def].slot;
-  const tier = `${it.def}_${RARITY_IDS[it.rarity]}`;
-  return hasPng(tier) ? tier : it.def;
+/**
+ * Icon id for icon(): the weapon's `<def>_<rarity>` PNG when there is one, else the weapon id; armour: the piece
+ * `w` would wear (jewels by rarity and faction) when it has a PNG, else the slot.
+ */
+export function itemIconId(it: Item, w?: Wearer) {
+  if (it.kind === 'weapon') {
+    const tier = `${it.def}_${RARITY_IDS[it.rarity]}`;
+    return hasPng(tier) ? tier : it.def;
+  }
+  const slot = ARMOR[it.def].slot;
+  if (!w) return slot;
+  const jewel = slot === 'ring' || slot === 'amulet';
+  const id = jewel ? `${slot}_${RARITY_IDS[it.rarity]}_${w.faction}` : CLASS_LOOK[w.cls].icon(w.faction, it);
+  return hasPng(id) ? id : slot;
 }
 
-export function itemIcon(it: Item, size = 24) {
-  return art(itemIconId(it), size);
+export function itemIcon(it: Item, size = 24, w?: Wearer) {
+  return art(itemIconId(it, w), size);
 }
 
 /** Butcher-style item cell: rarity background, damage-type badge, level, sharpening. Empty cells show a faded slot icon. */
-export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = '', extra = '', cls = '') {
+export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = '', extra = '', cls = '', w?: Wearer) {
   if (!it) {
     // an empty slot shows the slot's own icon, faded (the game PNG when there is one)
     const ph = !placeholder ? '' : hasPng(placeholder) ? art(placeholder, 30, 'ic ph') : icon(placeholder, '#ffffff55', 30, 'ic');
     return `<button class="cell empty ${cls}" ${attrs}>${ph}${extra}</button>`;
   }
   const badge = it.kind === 'weapon' && !WEAPONS[it.def].guard ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#4a2a12', 12)}</span>` : '';
-  return `<button class="cell r${it.rarity} ${cls}" ${attrs}>${art(itemIconId(it), 34, 'ic')}${badge}` +
+  return `<button class="cell r${it.rarity} ${cls}" ${attrs}>${art(itemIconId(it, w), 34, 'ic')}${badge}` +
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }
 
@@ -216,7 +228,7 @@ export function itemLines(it: Item): [string, string][] {
       if (g.reflect) out.push(['Отражение', pc(g.reflect)]);
       return out;
     }
-    if (w.orb) return [w.orb.regen ? ['Реген здоровья', `+${Math.round(w.orb.regen * 100)}%`] : ['Урон', `+${Math.round((w.orb.power ?? 0) * 100)}%`]];
+    if (w.orb) return [orbLine(w.orb)];
     return [
       ['Урон', String(Math.round(weaponDamage(it)))],
       ['Тип', DAMAGE_TYPE_NAME[w.type]],
@@ -233,8 +245,22 @@ export function itemLines(it: Item): [string, string][] {
 let uidSeq = Date.now() % 1e9;
 export const newUid = () => ++uidSeq;
 
+/** The orb's bonus as [stat, value] (WeaponDef.orb). */
+export function orbLine(o: NonNullable<WeaponDef['orb']>): [string, string] {
+  const pc = (x: number) => `${Math.round(x * 100)}%`;
+  if (o.regen) return ['Реген здоровья', `+${pc(o.regen)}`];
+  if (o.speed) return ['Скорость бега', `+${pc(o.speed)}`];
+  if (o.defense) return ['Защита', `+${pc(o.defense)}`];
+  if (o.pull) return ['Крутка с моба', pc(o.pull)];
+  if (o.critDmg) return ['Крит. урон', `+${pc(o.critDmg[0])}–${pc(o.critDmg[1])}`];
+  return ['Урон', `+${pc(o.power ?? 0)}`];
+}
+
+/** The only rarity a weapon exists at (WeaponDef.rarity: the mage's orbs), or undefined. */
+export const fixedRarity = (kind: ItemKind, def: string) => (kind === 'weapon' ? WEAPONS[def]?.rarity : undefined);
+
 export function makeItem(kind: ItemKind, def: string, rarity: number, lvl: number): Item {
-  return { uid: newUid(), kind, def, rarity, sharpen: 0, lvl };
+  return { uid: newUid(), kind, def, rarity: fixedRarity(kind, def) ?? rarity, sharpen: 0, lvl };
 }
 
 /** The item a mob's `drop` describes (one copy). */
@@ -242,12 +268,16 @@ export const dropItem = (d: ItemDrop) => makeItem(d.kind, d.def, d.rarity, 1);
 /** Icon id of a drop (weapon id or armour slot). */
 export const dropIconId = (d: ItemDrop) => (d.kind === 'weapon' ? d.def : ARMOR[d.def].slot);
 
-/** Old saves stored bare {def, rarity, sharpen} weapons. */
-const RENAMED: Record<string, string> = { nagamaki: 'polearm', shield: 'shield_tower' };
+/** Old saves stored bare {def, rarity, sharpen} weapons. Items taken out of the game become the kept one of their slot. */
+const RENAMED: Record<string, string> = {
+  nagamaki: 'polearm', shield: 'shield_spiked', shield_tower: 'shield_spiked', shield_buckler: 'shield_spiked',
+  ring_power: 'ring_swift', amulet_life: 'amulet_spring',
+};
 
 export function normalizeItem(it: Partial<Item> & { def: string }): Item {
-  // the old peasant set is gone (the hero looks like a peasant already): its pieces become guard pieces
-  // the nagamaki became the polearm, the one shield the tower shield
-  const def = it.def.startsWith('peasant_') ? it.def.replace('peasant_', 'guard_') : RENAMED[it.def] ?? it.def;
-  return { uid: it.uid ?? newUid(), kind: it.kind ?? 'weapon', def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
+  // the old peasant, guard, knight and lord sets became the one warrior plate
+  const old = /^(peasant|guard|knight|lord)_(head|chest|arms|legs)$/.exec(it.def);
+  const def = old ? `plate_${old[2]}` : RENAMED[it.def] ?? it.def;
+  const kind = it.kind ?? 'weapon';
+  return { uid: it.uid ?? newUid(), kind, def, rarity: fixedRarity(kind, def) ?? it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
 }

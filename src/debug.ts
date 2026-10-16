@@ -5,6 +5,7 @@ import type { ZoneId } from './config';
 import { ARENA, FOREST_MINI, FORT, GATES, ISLAND, LAND_BOSSES } from './island';
 import type { Game } from './game';
 import { CLASSES, CLASS_IDS, type HeroClass } from './party';
+import { CLASS_SET } from './items';
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
@@ -36,15 +37,15 @@ function teleport(g: Game, arg: string) {
   g.debugTeleportTo(at[0] + (dx / l) * 5, at[1] + (dz / l) * 5, kind === 'fort' || kind === 'arena' || kind === 'fmini' ? undefined : gate?.id);
 }
 
-/** Gear a player plausibly has by each boss: armour set + rarity, weapon rarity, ring and amulet. */
-const BOSS_GEAR: Partial<Record<ZoneId, { set: string; rarity: number; weapon: number; jewels: boolean }>> = {
-  forest: { set: 'guard', rarity: 0, weapon: 0, jewels: false },
-  cemetery: { set: 'guard', rarity: 1, weapon: 1, jewels: true },
-  peaks: { set: 'knight', rarity: 1, weapon: 2, jewels: true },
-  hills: { set: 'knight', rarity: 2, weapon: 2, jewels: true },
-  grove: { set: 'lord', rarity: 2, weapon: 3, jewels: true },
-  swamp: { set: 'lord', rarity: 3, weapon: 4, jewels: true },
-  dunes: { set: 'lord', rarity: 4, weapon: 4, jewels: true },
+/** Gear a player plausibly has by each boss: armour rarity (the class set), weapon rarity, ring and amulet. */
+const BOSS_GEAR: Partial<Record<ZoneId, { rarity: number; weapon: number; jewels: boolean }>> = {
+  forest: { rarity: 0, weapon: 0, jewels: false },
+  cemetery: { rarity: 1, weapon: 1, jewels: true },
+  peaks: { rarity: 1, weapon: 2, jewels: true },
+  hills: { rarity: 2, weapon: 2, jewels: true },
+  grove: { rarity: 2, weapon: 3, jewels: true },
+  swamp: { rarity: 3, weapon: 4, jewels: true },
+  dunes: { rarity: 4, weapon: 4, jewels: true },
 };
 
 /** `arg`: '<zone> <teleport arg>'; equips BOSS_GEAR, teleports to the boss, then balances the hero against it (Game.debugBalanceBoss). */
@@ -101,16 +102,12 @@ const SECTIONS: [string, Action[]][] = [
     ['Древковое', (g) => g.debugGiveWeapon('polearm')],
   ]],
   ['Щит', [
-    ['Башенный', (g) => g.debugGiveWeapon('shield_tower', 1)],
-    ['Баклер', (g) => g.debugGiveWeapon('shield_buckler', 1)],
     ['Шипастый', (g) => g.debugGiveWeapon('shield_spiked', 1)],
     ['Пусто', (g) => g.debugClearLeft(), 'wide'],
   ]],
   // a set's 4 pieces + ring + amulet; pressing the same set again raises the quality (common → mythic → common)
   ['Броня', [
-    ['Стражник', (g) => g.debugGiveArmor('guard')],
-    ['Рыцарь', (g) => g.debugGiveArmor('knight')],
-    ['Паладин', (g) => g.debugGiveArmor('lord')],
+    ['Сет класса', (g) => g.debugGiveArmor(CLASS_SET[g.heroClass]), 'wide'],
   ]],
   ['Предметы', [
     ['Выдать все', (g) => g.debugGiveAll(), 'wide'],

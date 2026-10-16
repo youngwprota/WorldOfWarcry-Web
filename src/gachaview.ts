@@ -109,7 +109,7 @@ export class GachaView {
       <div class="g-result r${gachaTier(it.rarity)}" style="--rc:${rar.color}">
         <div class="g-tag">${rar.name}</div>
         <div class="g-name">${itemName(it, this.game.faction)}</div>
-        <div class="g-got">${cellHtml(it, 'disabled')}${linesHtml(it)}</div>
+        <div class="g-got">${cellHtml(it, 'disabled', '', '', '', this.game.wearer)}${linesHtml(it)}</div>
         <div class="g-where">${this.where}</div>
         <div class="g-btns"><button class="btn" id="g-back">Назад</button><button class="btn primary" id="g-again"${this.game.save.pulls ? '' : ' disabled'}>Ещё раз${this.game.save.pulls ? ` · ${this.game.save.pulls}` : ''}</button></div>
       </div>`;

@@ -86,11 +86,15 @@ export interface WeaponDef {
   staff?: StaffElement;
   /**
    * Mage orb: the mage's second slot (like a shield, never swings), floats above the right shoulder.
-   * Passive multipliers while equipped: `regen` +share of HP regen, `power` +share of damage.
+   * Passive bonuses while equipped: `regen` +share of HP regen, `power` +share of damage, `speed` +share of run speed,
+   * `defense` +share of defense, `pull` chance a kill gives an extra gacha pull, `critDmg` [min, max] rolled per hit
+   * and added to the crit multiplier.
    */
-  orb?: { regen?: number; power?: number };
+  orb?: { regen?: number; power?: number; speed?: number; defense?: number; pull?: number; critDmg?: [number, number] };
   /** Model per rarity (RARITY index), GLB props with their own materials (src/assets.ts loadProps); over `model`. */
   tiers?: string[];
+  /** The item exists only at this rarity (RARITY index): the mage's orbs. */
+  rarity?: number;
 }
 
 export type MobRank = 'normal' | 'elite' | 'mini' | 'boss';
@@ -160,11 +164,27 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   orb_vigor: {
     id: 'orb_vigor', name: 'Благословление бодрости', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_vigor', orc: 'orb_vigor' }, icon: '💚', orb: { regen: 0.3 },
+    anim: 'SwordAttack', model: { human: 'orb_vigor', orc: 'orb_vigor' }, icon: '💚', orb: { regen: 0.3 }, rarity: 1,
   },
   orb_fury: {
     id: 'orb_fury', name: 'Яростный клич', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_fury', orc: 'orb_fury' }, icon: '🎲', orb: { power: 0.1 },
+    anim: 'SwordAttack', model: { human: 'orb_glass', orc: 'orb_glass' }, icon: '🎲', orb: { power: 0.1 }, rarity: 0,
+  },
+  orb_swift: {
+    id: 'orb_swift', name: 'Сфера ветра', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
+    anim: 'SwordAttack', model: { human: 'orb_swift', orc: 'orb_swift' }, icon: '💨', orb: { speed: 0.05 }, rarity: 2,
+  },
+  orb_ward: {
+    id: 'orb_ward', name: 'Сфера оберега', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
+    anim: 'SwordAttack', model: { human: 'orb_ward', orc: 'orb_ward' }, icon: '💠', orb: { defense: 0.2 }, rarity: 3,
+  },
+  orb_fortune: {
+    id: 'orb_fortune', name: 'Сфера удачи', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
+    anim: 'SwordAttack', model: { human: 'orb_fortune', orc: 'orb_fortune' }, icon: '🪙', orb: { pull: 0.01 }, rarity: 4,
+  },
+  orb_demon: {
+    id: 'orb_demon', name: 'Сфера демона', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
+    anim: 'SwordAttack', model: { human: 'orb_demon', orc: 'orb_demon' }, icon: '😈', orb: { critDmg: [0.11, 0.66] }, rarity: 5,
   },
 };
 
@@ -429,7 +449,7 @@ export const MOBS: Record<string, MobDef> = {
     anim: 'SwordAttack', hp: 800, dmg: 8, aps: 0.9, range: 1.8, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.3,
     ...foes('forest'), reward: { power: 3 }, respawn: 300,
     // the first armour of the run: the forest's early elite dresses the hero
-    drop: { kind: 'armor', def: 'guard_chest', rarity: 0 },
+    drop: { kind: 'armor', def: 'plate_chest', rarity: 0 },
   },
   bandit_brute: {
     id: 'bandit_brute', name: 'Громила', rank: 'elite',
@@ -575,14 +595,14 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
     anim: 'SwordAttack', hp: 1640, dmg: 13, aps: 0.75, range: 2.1, speed: 3.0, aggro: 5.5, regen: 0.03, scale: 1.4,
     ...foes('cemetery'), reward: { hp: 6 }, respawn: 600,
-    drop: { kind: 'armor', def: 'lord_head', rarity: 2 },
+    drop: { kind: 'armor', def: 'plate_head', rarity: 2 },
   },
   shade: {
     id: 'shade', name: 'Тень', rank: 'elite',
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
     anim: 'SwordAttack', hp: 1280, dmg: 12, aps: 1.1, range: 1.5, speed: 4.5, aggro: 6.2, regen: 0.03, scale: 1.3,
     ...foes('cemetery'), reward: { speed: 5 }, respawn: 600,
-    drop: { kind: 'armor', def: 'lord_legs', rarity: 2 },
+    drop: { kind: 'armor', def: 'plate_legs', rarity: 2 },
   },
   gravedigger: {
     id: 'gravedigger', name: 'Могильщик', rank: 'mini',
@@ -596,7 +616,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_king', 'death_scythe'], orc: ['undead_king', 'death_scythe'] },
     anim: 'MeleeHigh', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
     ...foes('cemetery'), reward: { power: 18 }, respawn: 1200,
-    drop: { kind: 'armor', def: 'ring_power', rarity: 3 },
+    drop: { kind: 'armor', def: 'ring_swift', rarity: 3 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['cemetery-peaks'],
       slamRadius: 5, slamMul: 4.7, noSlam: true, chaseMul: 2.6, phase2Dmg: 1.3,

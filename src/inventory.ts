@@ -6,7 +6,7 @@ import {
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, petCellHtml, slotOf, weaponBase,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, orbLine, petCellHtml, slotOf, weaponBase,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -159,7 +159,7 @@ export class Inventory {
   get isOpen() { return this.opened; }
 
   private cell(it: Item | null | undefined, attrs: string, placeholder = '', extra = '', cls = '') {
-    return cellHtml(it, attrs, placeholder, extra, cls);
+    return cellHtml(it, attrs, placeholder, extra, cls, this.game.wearer);
   }
 
   close() {
@@ -431,7 +431,10 @@ export class Inventory {
     let ability: string;
     const orb = it.kind === 'weapon' ? WEAPONS[it.def].orb : undefined;
     if (orb) {
-      const what = orb.regen ? `<b>+${Math.round(orb.regen * 100)}%</b> к регену здоровья` : `<b>+${Math.round((orb.power ?? 0) * 100)}%</b> к урону`;
+      const v = orbLine(orb)[1];
+      const what = orb.pull ? `<b>${v}</b> шанс выбить крутку в горнило с каждого моба`
+        : orb.critDmg ? `каждый удар получает случайно <b>${v}</b> к крит. урону`
+        : `<b>${v}</b> ${orb.regen ? 'к регену здоровья' : orb.speed ? 'к скорости бега' : orb.defense ? 'к защите' : 'к урону'}`;
       ability = `<div class="ab-title">Сфера</div><p>Второй слот мага, парит над правым плечом. Пока надета: ${what}.</p>`;
     } else if (it.kind === 'weapon') {
       const c = COMBOS[it.def];
@@ -468,7 +471,7 @@ export class Inventory {
     // a class item (shield, orb) shows its slot's name instead of a damage type
     const offOf = it.kind === 'weapon' && (WEAPONS[it.def].guard || WEAPONS[it.def].orb) ? weaponClass(it.def) : null;
     const type = offOf ? CLASSES[offOf].offName : slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
-    tip.innerHTML = `<div class="card-head">${cellHtml(it, 'disabled', '', '', 'big')}
+    tip.innerHTML = `<div class="card-head">${cellHtml(it, 'disabled', '', '', 'big', this.game.wearer)}
         <div class="card-title"><h3>${itemName(it, g.faction)}${it.sharpen ? ` +${it.sharpen}` : ''}</h3>
           <div class="pills"><span class="rar" style="color:${r.color}">${r.name}</span><span class="typ">${type}</span></div></div>${x}</div>
       <div class="card-main well"><span>${main[0]}</span><span class="v">${mainIcon}${cmp(main[0], main[1])}</span></div>

@@ -10,6 +10,7 @@ import type { MobDef } from './config';
 import { sfx } from './audio';
 import type { World } from './world';
 import { CLASSES, CLASS_IDS, type HeroClass } from './party';
+import type { Wearer } from './looks';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 /** Seconds a "+N stat" line stays under the buffs after the last orb of that stat. */
@@ -303,17 +304,17 @@ export class UI {
    * Bottom "equipped" bar: armour left, the weapon and the class item (shield, or the hunter's `pet`) in the centre,
    * gloves and jewellery right.
    */
-  weapons(items: (Item | null)[], dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>, pet: PetDef | null = null) {
+  weapons(items: (Item | null)[], dmg: (it: Item) => number, equip: Partial<Record<ArmorSlot, Item>>, w: Wearer, pet: PetDef | null = null) {
     const box = $('weapons');
     box.innerHTML = [0, 1].map((i) => {
       if (i === 1 && pet) return petCellHtml(pet, `data-pet title="Питомец: ${pet.name}"`, 'wslot active');
       const it = items[i];
       const title = !it ? '' : WEAPONS[it.def].guard ? `title="${WEAPONS[it.def].name}"` : `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"`;
-      return cellHtml(it, `data-w="${i}" ${title}`, i ? 'shield' : 'sword', '', it ? 'wslot active' : 'wslot');
+      return cellHtml(it, `data-w="${i}" ${title}`, i ? 'shield' : 'sword', '', it ? 'wslot active' : 'wslot', w);
     }).join('');
     const side = (ids: ArmorSlot[]) => ids.map((id) => {
       const x = ARMOR_SLOTS.find((s) => s.id === id)!;
-      return cellHtml(equip[id], `data-armor="${id}" title="${x.name}"`, x.icon);
+      return cellHtml(equip[id], `data-armor="${id}" title="${x.name}"`, x.icon, '', '', w);
     }).join('');
     $('armor-l').innerHTML = side(EQUIP_BAR.left);
     $('armor-r').innerHTML = side(EQUIP_BAR.right);

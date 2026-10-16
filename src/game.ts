@@ -11,14 +11,14 @@ import {
 } from './config';
 import { ArenaFog, FloatingText, FogPuffs, Particles, Shockwaves, Spells, Telegraphs, type Bolt } from './fx';
 import {
-  ARMOR, BAG_SIZE, armorTrim, copyGain, dropIconId, dropItem, itemClass, itemIcon, itemModel, itemName, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, CLASS_SET, armorTrim, copyGain, dropIconId, dropItem, fixedRarity, itemClass, itemIcon, itemModel, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
 import { sfx } from './audio';
 import { classKit, writeSave, type SaveData } from './save';
-import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, archerBow, classSlot, kitOf, type HeroClass } from './party';
-import { BODY_PARTS, CLASS_LOOK, debugSetTrims } from './looks';
+import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, archerBow, classSlot, kitOf, weaponClass, type HeroClass } from './party';
+import { BODY_PARTS, CLASS_LOOK, debugSetTrims, type Wearer } from './looks';
 import { assets } from './assets';
 import { Arrows } from './arrows';
 import { PET_SEEK, Pet } from './pet';
@@ -487,6 +487,8 @@ export class Game {
   get faction() { return this.save.faction; }
   /** The party member on the field. */
   get heroClass(): HeroClass { return this.save.cls ?? 'warrior'; }
+  /** The active hero: item icons show what this hero would wear. */
+  get wearer(): Wearer { return { cls: this.heroClass, faction: this.faction }; }
 
   /** Puts another party member on the field; false while the switch cooldown runs or if it is already there. */
   switchClass(c: HeroClass) {
@@ -599,6 +601,8 @@ export class Game {
   staffInHand() { const w = this.save.weapons[0]; return !!w && !!WEAPONS[w.def].staff; }
 
   /** Model of the mage's orb floating over the shoulder, or null. */
+  /** Bonuses of the equipped mage orb (WeaponDef.orb). */
+  private get orb() { const o = this.save.weapons[1]; return o ? WEAPONS[o.def].orb : undefined; }
   orbModel() { const o = this.save.weapons[1]; return o && WEAPONS[o.def].orb ? WEAPONS[o.def].model[this.faction] : null; }
 
   /** The hunter in a debug set draws the set's bow. */
@@ -939,7 +943,9 @@ export class Game {
     if (Math.random() < dodgeChance(def.dodge)) return { dmg: 0, tier, fx: 'miss' as HitFx };
     const s = this.stats;
     const crit = Math.random() < s.crit;
-    const dmg = this.itemDamage(it) * RESIST_MULT[tier] * mult * (crit ? s.critMul : 1) * (0.9 + Math.random() * 0.2);
+    const roll = this.orb?.critDmg;
+    const critMul = s.critMul + (roll ? roll[0] + Math.random() * (roll[1] - roll[0]) : 0);
+    const dmg = this.itemDamage(it) * RESIST_MULT[tier] * mult * (crit ? critMul : 1) * (0.9 + Math.random() * 0.2);
     return { dmg: Math.max(1, Math.round(dmg)), tier, fx: (crit ? 'crit' : '') as HitFx };
   }
 
@@ -1284,9 +1290,10 @@ export class Game {
   /** Right on the kill: stat orbs, items, a micro-boss's bonus, the gacha pull. */
   private grantKillRewards(m: Mob) {
     this.payRewards(m);
-    const pull = !m.owner && Math.random() < tokenChance(mobRank(m.def), this.world.zoneAt(m.spawn.x, m.spawn.z).id);
+    const chance = tokenChance(mobRank(m.def), this.world.zoneAt(m.spawn.x, m.spawn.z).id);
+    const pull = !m.owner && Math.random() < 1 - (1 - chance) * (1 - (this.orb?.pull ?? 0));
     const n = m.loot.length + (pull ? 1 : 0);
-    m.loot.forEach((it, i) => this.flyDrop(m.pos, i, n, itemIcon(it, 44), RARITY[it.rarity].color, 'btn-bag', it));
+    m.loot.forEach((it, i) => this.flyDrop(m.pos, i, n, itemIcon(it, 44, this.wearer), RARITY[it.rarity].color, 'btn-bag', it));
     m.loot = [];
     if (m.def.bonus) this.grantBonus(m);
     if (pull) this.grantPull(m, n - 1, n);
@@ -2295,7 +2302,7 @@ export class Game {
     });
     this.ui.tickGains(this.time);
     if (full) {
-      this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it), this.save.equip, this.petDef);
+      this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it), this.save.equip, this.wearer, this.petDef);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
       this.ui.gachaBadge(this.save.pulls ?? 0);
       this.showCharge();
@@ -2381,10 +2388,10 @@ export class Game {
   }
 
   /**
-   * Debug: one weapon, the best DPS against the boss(es) of `zone`, and a full armour `set` (guard / knight / lord)
-   * of `rarity`; the ring and the amulet only with `jewels`. Replaced items go to the bag while it has room.
+   * Debug: one weapon, the best DPS against the boss(es) of `zone`, and the class's full armour set of `rarity`;
+   * the ring and the amulet only with `jewels`. Replaced items go to the bag while it has room.
    */
-  debugEquipFor(zone: ZoneId, gear: { set: string; rarity: number; weapon: number; jewels: boolean }) {
+  debugEquipFor(zone: ZoneId, gear: { rarity: number; weapon: number; jewels: boolean }) {
     const bosses = this.mobs.filter((m) => m.def.boss?.zone === zone && !m.removed);
     const s = this.stats;
     const crit = critAvg(s.critPts, s.critDmgPts);
@@ -2400,8 +2407,8 @@ export class Game {
     stash(this.save.weapons[0]);
     stash(this.save.weapons[1]);
     this.save.weapons = [best, null];
-    const pieces = ['head', 'chest', 'arms', 'legs'].map((p) => `${gear.set}_${p}`);
-    if (gear.jewels) pieces.push('ring_power', 'amulet_life');
+    const pieces = ['head', 'chest', 'arms', 'legs'].map((p) => `${CLASS_SET[this.heroClass]}_${p}`);
+    if (gear.jewels) pieces.push('ring_swift', 'amulet_spring');
     for (const def of pieces) {
       const slot = ARMOR[def].slot;
       stash(this.save.equip[slot]);
@@ -2449,9 +2456,11 @@ export class Game {
     const worn = Object.values(this.save.gear ?? {}).flatMap((g) => Object.values(g));
     const own = [...this.save.weapons, ...kits, ...Object.values(this.save.equip), ...worn, ...this.save.bag].filter((x): x is Item => !!x);
     let n = 0;
-    for (const [kind, defs] of [['weapon', Object.keys(WEAPONS)], ['armor', Object.keys(ARMOR)]] as const) {
+    // only what the classes use (weapons and shields out of the class lists stay in the data for old saves)
+    for (const [kind, defs] of [['weapon', Object.keys(WEAPONS).filter((w) => weaponClass(w))], ['armor', Object.keys(ARMOR)]] as const) {
       for (const def of defs) {
         for (let rarity = 0; rarity < 6; rarity++) {
+          if ((fixedRarity(kind, def) ?? rarity) !== rarity) continue;
           const it = dropItem({ kind, def, rarity });
           if (own.some((x) => sameItem(x, it))) continue;
           this.save.bag.push(it);
@@ -2471,7 +2480,7 @@ export class Game {
     const rarity = head?.def === `${set}_head` ? (head.rarity + 1) % 6 : 1;
     const defs: [ArmorSlot, string][] = [
       ['head', `${set}_head`], ['chest', `${set}_chest`], ['arms', `${set}_arms`], ['legs', `${set}_legs`],
-      ['ring', 'ring_power'], ['amulet', 'amulet_life'],
+      ['ring', 'ring_swift'], ['amulet', 'amulet_spring'],
     ];
     for (const [slot, def] of defs) this.save.equip[slot] = dropItem({ kind: 'armor', def, rarity });
     this.fx.spawn(v1.copy(this.hero.position).setY(2.6), `${set} · ${rarity}`, 'dmg weak', 1);
