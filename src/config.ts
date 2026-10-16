@@ -1253,7 +1253,9 @@ export const GACHA = {
   token: { normal: 0, elite: 0, mini: 0, boss: 0 } as Record<MobRank, number>,
   /** Locations whose kills never give a pull (bosses there too): the first one is beaten on the forest's own drops alone. */
   noTokens: ['forest'] as ZoneId[],
-  banner: { def: 'hammer', name: 'Молот Короля-лича', subtitle: 'Выкован из костей павших королей. Шанс повышен!' },
+  banner: { kind: 'armor' as const, def: 'ring_blood', name: 'Кольцо Короля-лича', subtitle: 'Пьёт кровь врагов и отдаёт её хозяину. Шанс повышен!' },
+  /** Orbs (one quality each) a non-legendary gacha tier gives, by RARITY index: Fury / Vigor + Wind / Ward. */
+  orbs: [[0], [1, 2], [3]] as number[][],
   /** Hammer blows per pull; the rarity colour can climb after each, legendary only on the last one. */
   strikes: 5,
   /** Reveal timing, seconds: delay between hammer blows, then the final flash. */

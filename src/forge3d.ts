@@ -9,7 +9,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { assets } from './assets';
 import { sfx } from './audio';
-import { FORGE3D as F, GACHA, RARITY, type FactionId } from './config';
+import { FORGE3D as F, GACHA, RARITY, WEAPONS, type FactionId } from './config';
 import { gachaTier } from './gacha';
 import { itemModel, type Item } from './items';
 
@@ -335,8 +335,10 @@ export class Forge3D {
 
   private buildItem(item: Item) {
     let m: THREE.Object3D;
-    if (item.kind === 'weapon' && assets.has(itemModel(item, this.faction))) {
-      m = assets.clone(itemModel(item, this.faction));
+    const pet = item.kind === 'weapon' && !!WEAPONS[item.def].pet;
+    if (item.kind === 'weapon' && (pet ? assets.hasCreature(itemModel(item, this.faction)) : assets.has(itemModel(item, this.faction)))) {
+      // a pet rises as its creature (skinned: cloned with its own skeleton), standing in its bind pose
+      m = pet ? assets.cloneCreature(itemModel(item, this.faction)).model : assets.clone(itemModel(item, this.faction));
       const b = new THREE.Box3().setFromObject(m);
       const h = b.max.y - b.min.y || 1;
       m.scale.multiplyScalar(F.itemSize / h);
@@ -348,7 +350,7 @@ export class Forge3D {
       m.scale.set(1, 1.6, 1);
     }
     const tilt = new THREE.Group();
-    tilt.rotation.z = 0.35;
+    tilt.rotation.z = pet ? 0 : 0.35;
     tilt.add(m);
     this.holder.add(tilt);
     this.holder.position.set(this.hitPos.x, this.top, this.hitPos.z);

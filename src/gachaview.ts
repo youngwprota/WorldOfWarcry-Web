@@ -5,7 +5,7 @@ import { GACHA, RARITY } from './config';
 import { Forge3D } from './forge3d';
 import { bannerItem, gachaTier, pull } from './gacha';
 import type { Game } from './game';
-import { cellHtml, itemLines, itemName, type Item } from './items';
+import { cellHtml, itemIconId, itemLines, itemName, type Item } from './items';
 import type { UI } from './ui';
 
 const plural = (n: number, one: string, few: string, many: string) => {
@@ -66,7 +66,7 @@ export class GachaView {
       <div class="g-banner">
         <div class="g-rays"></div>
         <div class="g-tag">Легендарное</div>
-        <div class="g-weapon">${art(it.def, 170)}</div>
+        <div class="g-weapon">${art(itemIconId(it, this.game.wearer), 170)}</div>
         <div class="g-name">${GACHA.banner.name}</div>
         <div class="g-sub">${GACHA.banner.subtitle}</div>
         ${linesHtml(it)}

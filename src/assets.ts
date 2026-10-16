@@ -355,6 +355,7 @@ class Assets {
 
   /** Merged, static geometry for props (cheap to instance). */
   has(name: string) { return this.sources.has(name); }
+  hasCreature(name: string) { return this.creatures.has(name); }
 }
 
 export const assets = new Assets();
