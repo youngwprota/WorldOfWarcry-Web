@@ -865,12 +865,14 @@ export interface BreakableDef {
   color: number;
   scale: number;
   /** Fixed power orbs, shown above the HP bar like on mobs — one stat only. */
-  reward: OrbReward;
+  reward: OrbReward | Record<never, never>;
   /** Material resistances: wood is easy to chop, stone needs a hammer. */
   resist: Partial<Record<DamageType, ResistTier>>;
   r: number;
   /** Respawn cooldown, seconds (GDD 7.3: 30–60 s). */
   respawn: number;
+  /** Mob id whose death keeps the prop down: it comes back only while that mob is alive. */
+  needsAlive?: string;
   onBreak?: BreakEvent[];
   /** A turret: while the hero is within `range` it lobs a shot every `cd` s at his position; it lands after `delay` s, hits within `r` for `dmg`. */
   shoot?: { dmg: number; range: number; cd: number; r: number; delay: number; height: number };
@@ -879,6 +881,8 @@ const GRAVE_RISE: BreakEvent[] = [{ type: 'spawnMob', mob: 'skeleton_worker', ch
 // wood is easy to chop, stone needs a hammer
 const WOOD: BreakableDef['resist'] = { chop: 'weak', crush: 'resist' };
 const STONE: BreakableDef['resist'] = { slash: 'resist', chop: 'resist', crush: 'weak' };
+/** The first boss's tower: 12 hits whatever the weapon, no stats, no weaknesses; the boss rebuilds it after 20 s while alive. */
+const FORT_TOWER = { hits: 12, respawn: 30, needsAlive: 'bandit_chief' };
 const TOWER_SHOT = { dmg: 10, range: 20, cd: 2.4, r: 1.5, delay: 1.3, height: 5 };
 export const BREAKABLES: Record<string, BreakableDef> = {
   barrel: { model: 'barrel', hits: 2, color: 0x8a5a2b, scale: 0.85, reward: { hp: 1 }, resist: WOOD, r: 0.5, respawn: 40 },
@@ -891,8 +895,8 @@ export const BREAKABLES: Record<string, BreakableDef> = {
   tomb2: { model: 'undead_tomb_stone_2', hits: 2, color: 0x77748a, scale: 0.75, reward: { regen: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   tomb3: { model: 'undead_tomb_stone_3', hits: 2, color: 0x77748a, scale: 0.75, reward: { hp: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
   tomb4: { model: 'undead_tomb_stone_4', hits: 2, color: 0x77748a, scale: 0.75, reward: { speed: 1 }, resist: STONE, r: 0.55, respawn: 45, onBreak: GRAVE_RISE },
-  fort_tower_orc: { model: 'orc_tower_Lv2', hits: 30, color: 0x7a5a38, scale: 0.38, reward: { power: 3 }, resist: { slash: 'weak' }, r: 1.4, respawn: 900, shoot: TOWER_SHOT },
-  fort_tower_human: { model: 'tower_Lv2', hits: 30, color: 0x7a5a38, scale: 0.38, reward: { power: 3 }, resist: { slash: 'weak' }, r: 1.4, respawn: 900, shoot: TOWER_SHOT },
+  fort_tower_orc: { model: 'orc_tower_Lv2', ...FORT_TOWER, color: 0x7a5a38, scale: 0.38, reward: {}, resist: {}, r: 1.4, shoot: TOWER_SHOT },
+  fort_tower_human: { model: 'tower_Lv2', ...FORT_TOWER, color: 0x7a5a38, scale: 0.38, reward: {}, resist: {}, r: 1.4, shoot: TOWER_SHOT },
   coffin: { model: 'undead_coffin', hits: 3, color: 0x5a3c2c, scale: 0.34, reward: { hp: 2 }, resist: { crush: 'weak' }, r: 0.7, respawn: 75, onBreak: [{ type: 'spawnMob', mob: 'skeleton_warrior', chance: 0.7, bark: 'Вечный покой окончен!' }] },
 };
 

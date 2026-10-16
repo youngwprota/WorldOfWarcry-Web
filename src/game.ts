@@ -763,6 +763,7 @@ export class Game {
     this.updateMobBars(w, h);
     this.hudT -= dt;
     if (this.hudT <= 0) { this.hudT = 0.1; this.refreshHud(false); }
+    this.ui.minimap(this.hero.position, this.hero.facing, this.mapDots(45), this.world, this.mapMarks(45));
   }
 
   private updateHero(dt: number) {
@@ -1360,7 +1361,14 @@ export class Game {
 
   /** Spawners: a dead unit comes back when its charge's cooldown ends (the hero's position does not matter). */
   private updateRespawns() {
-    for (const u of this.units) if (!u.alive && this.time >= u.respawnAt) u.respawn();
+    for (const u of this.units) if (!u.alive && this.time >= u.respawnAt && this.mayRespawn(u)) u.respawn();
+  }
+
+  private mayRespawn(u: Unit) {
+    const boss = u instanceof Prop ? u.def.needsAlive : undefined;
+    if (!boss) return true;
+    for (const m of this.mobs) if (m.def.id === boss) return m.alive;
+    return true;
   }
 
   /**
@@ -2307,7 +2315,6 @@ export class Game {
       this.ui.gachaBadge(this.save.pulls ?? 0);
       this.showCharge();
     }
-    this.ui.minimap(this.hero.position, this.hero.facing, this.mapDots(45), this.world, this.mapMarks(45));
   }
 
   /** Quality preset: shadows, mist and grass are the expensive parts on phones. */
