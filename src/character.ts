@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { HIT_FLASH, applyHitFlash } from './hitflash';
 import { SKINS, assets } from './assets';
-import { WEAPON_GRIPS, attachTrim, attachWeapon } from './rig';
+import { WEAPON_GRIPS, aimBlend, attachTrim, attachWeapon } from './rig';
 import { Swinger, type SwingKind } from './swing';
 import { PART_PREFIXES, type VisualPart } from './items';
 import { ATTACK_HIT, type AttackAnim, type BossAnim } from './config';
@@ -491,6 +491,11 @@ export class Character {
     }
     this.mixer.update(dt);
     if (!this.dead) this.swinger.apply(dt);
+    // a weapon with a rest hold (rig.ts WEAPON_GRIPS rest: bows, the gun, polearms, staves) turns into the hand as
+    // its swing or the attack clip starts (the bow: as the arm rises to shoot)
+    for (const w of [this.weapon, this.weaponL]) {
+      if (w) aimBlend(w, Math.max(this.swinger.raise[w.parent?.name === 'hand_l' ? 1 : 0], this.atkW), this.model);
+    }
   }
 
   /** Freezes the current swing at `at` s into its clip (a wind-up) until release(). */

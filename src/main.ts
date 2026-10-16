@@ -78,7 +78,7 @@ for (const f of Object.values(FACTIONS)) {
 }
 for (const w of Object.values(WEAPONS)) {
   // (mage orbs are GLB creatures, below)
-  if (!w.orb) Object.values(w.model).forEach((m) => models.add(m));
+  if (!w.orb && !w.pet) Object.values(w.model).forEach((m) => models.add(m)); // pets are GLB creatures (PETS)
   if (w.shot) Object.values(w.shot.arrow).forEach((m) => models.add(m));
 }
 for (const c of Object.values(CLASSES)) Object.values(c.model ?? {}).forEach((m) => models.add(m));

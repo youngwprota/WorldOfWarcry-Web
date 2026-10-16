@@ -6,7 +6,7 @@ import {
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, orbLine, petCellHtml, slotOf, weaponBase,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, orbLine, slotOf, weaponBase, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -323,9 +323,7 @@ export class Inventory {
       const x = ARMOR_SLOTS.find((a) => a.id === id)!;
       return this.cell(s.equip[id], `data-armor="${id}" title="${x.name}"`, x.icon);
     }).join('');
-    const pet = g.petDef;
     const weapons = ([0, 1] as const).map((i) => {
-      if (i === 1 && pet) return petCellHtml(pet, `title="Питомец: ${pet.name}"`, 'active', '<span class="wtag on">питомец</span>');
       const tag = `<span class="wtag ${s.weapons[i] ? 'on' : ''}">${g.slotName(i).toLowerCase()}</span>`;
       return this.cell(s.weapons[i], `data-weapon="${i}"`, i ? 'shield' : 'sword', tag, s.weapons[i] ? 'active' : '');
     }).join('');
@@ -440,6 +438,7 @@ export class Inventory {
       const c = COMBOS[it.def];
       ability = !c ? '' : `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
       const w = WEAPONS[it.def];
+      if (w.pet) ability = `<div class="ab-title">Питомец</div><p>Второй слот охотника: бежит рядом и кусает его цель — <b>${Math.round(weaponDamage(it))}</b> урона ${w.aps} раз/с. Урон свой — от качества и уровня питомца, сила героя и лук на него не влияют.</p>`;
       const pl = w.shot?.pellets;
       if (pl) ability = `<div class="ab-title">Дробь</div><p>Стреляет реже лука: <b>${pl.n}</b> дробинок веером <b>${pl.spread}°</b> на <b>${w.range} м</b>, каждая — <b>×${pl.mul}</b> урона.</p>` + ability;
       if (w.staff === 'fire') {
@@ -470,7 +469,7 @@ export class Inventory {
       if (src.slot === 1) actions += btn('unequip', 'Снять', 'red');
     }
     // a class item (shield, orb) shows its slot's name instead of a damage type
-    const offOf = it.kind === 'weapon' && (WEAPONS[it.def].guard || WEAPONS[it.def].orb) ? weaponClass(it.def) : null;
+    const offOf = it.kind === 'weapon' && (WEAPONS[it.def].guard || WEAPONS[it.def].orb || WEAPONS[it.def].pet) ? weaponClass(it.def) : null;
     const type = offOf ? CLASSES[offOf].offName : slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
     tip.innerHTML = `<div class="card-head">${cellHtml(it, 'disabled', '', '', 'big', this.game.wearer)}
         <div class="card-title"><h3>${itemName(it, g.faction)}${it.sharpen ? ` +${it.sharpen}` : ''}</h3>

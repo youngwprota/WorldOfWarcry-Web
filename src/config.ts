@@ -97,6 +97,11 @@ export interface WeaponDef {
    * and added to the crit multiplier.
    */
   orb?: { regen?: number; power?: number; speed?: number; defense?: number; pull?: number; critDmg?: [number, number] };
+  /**
+   * The hunter's pet (his class slot, config PETS id): an item of its own that never swings; the pet bites the
+   * hunter's target with this item's damage (quality, copies, sharpening — not the hero's power, bow or crits).
+   */
+  pet?: string;
   /** Model per rarity (RARITY index), GLB props with their own materials (src/assets.ts loadProps); over `model`. */
   tiers?: string[];
   /** The item exists only at this rarity (RARITY index): the mage's orbs. */
@@ -159,12 +164,17 @@ export const WEAPONS: Record<string, WeaponDef> = {
     leftHand: true,
     shot: { speed: 24, arrow: { human: 'arrow_human_archer', orc: 'arrow_orc_archer' } },
   },
-  // the hunter's shotgun (mock model and icon, src/mocks.ts): slower than the bow, a fan of weaker pellets
+  // the hunter's gun (a dwarven blunderbuss, gun_<quality>.glb): slower than the bow, a fan of weaker pellets
   gun: {
     id: 'gun', name: 'Ружьё', type: 'pierce', dmgMul: 0.9, aps: 0.6, shape: 'arc', arc: 40, range: 4.8,
-    anim: 'SwordAttack', model: { human: 'gun_mock', orc: 'gun_mock' }, icon: '🔫', single: true,
+    anim: 'SwordAttack', model: { human: 'gun_common', orc: 'gun_common' }, icon: '🔫', single: true,
     leftHand: true,
     shot: { speed: 40, arrow: { human: 'pellet_mock', orc: 'pellet_mock' }, pellets: { n: 5, spread: 40, mul: 0.4 } },
+  },
+  // the hunter's pet as an item (WeaponDef.pet): `aps` = its bite rate (PETS.boar.aps)
+  boar: {
+    id: 'boar', name: 'Вепрь', type: 'crush', dmgMul: 0.8, aps: 0.9, shape: 'arc', arc: 0, range: 0,
+    anim: 'SwordAttack', model: { human: 'orc_boar', orc: 'orc_boar' }, icon: '🐗', pet: 'boar',
   },
   staff_fire: {
     id: 'staff_fire', name: 'Посох огня', type: 'magic', dmgMul: 1.9, aps: 0.495, shape: 'arc', arc: 60, range: 3.2,
@@ -238,8 +248,7 @@ export interface PetDef {
   /** GLB creature (src/creature.ts). */
   model: string;
   scale: number;
-  type: DamageType;
-  dmg: number;
+  /** Bites per second (its damage comes from the pet item, WeaponDef.pet). */
   aps: number;
   /** Bite reach from its centre to the foe's edge, m. */
   range: number;
@@ -247,10 +256,8 @@ export interface PetDef {
   speed: number;
 }
 export const PETS: Record<string, PetDef> = {
-  boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, type: 'crush', dmg: 0.6, aps: 0.9, range: 1.3, speed: 6.5 },
+  boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, aps: 0.9, range: 1.3, speed: 6.5 },
 };
-/** Pet the hunter starts with. */
-export const START_PET = 'boar';
 
 export const SHARPEN = { max: 10, perLevel: 0.08, cost: (lvl: number) => 40 + lvl * lvl * 25 };
 

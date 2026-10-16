@@ -5,11 +5,11 @@ import { Creature } from './creature';
 import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
-  ATTACK_HIT, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
+  ATTACK_HIT, FACTIONS, PETS, tokenChance, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
   mobRank, zoneResist, ZONE_FOES, ZONE_SUN, type DamageType, type ResistTier, type ItemDrop, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
 import { ArenaFog, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, Telegraphs, type Bolt } from './fx';
-import { Glows, LootBeams, SunLight } from './vfx';
+import { Glows, SunLight } from './vfx';
 import {
   ARMOR, BAG_SIZE, CLASS_SET, armorTrim, copyGain, dropAny, dropIconId, dropItem, fixedRarity, rollDrop, itemClass, itemIcon, itemModel, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
@@ -127,9 +127,8 @@ export class Game {
   private clearOf = new Map<ZoneId, Mob[]>();
   private fx: FloatingText;
   private particles: Particles;
-  /** Glowing particles, the loot reveal, stat orbs flying in, the sun's shafts (src/vfx.ts). */
+  /** Glowing particles, stat orbs flying in, the sun's shafts (src/vfx.ts). */
   private glows: Glows;
-  private beams: LootBeams;
   private pickups: Pickups;
   private sunFx: SunLight;
   private lowGfx = false;
@@ -284,7 +283,6 @@ export class Game {
     this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, text: hb.querySelector('span')! };
     this.particles = new Particles(this.scene);
     this.glows = new Glows(this.scene);
-    this.beams = new LootBeams(this.glows);
     this.pickups = new Pickups(this.scene);
     this.pickups.onCollect = (k) => this.collect(k);
     this.pickups.onTrail = (pos, k) => this.glows.emit(pos, 1, { color: ORBS[k].color, bright: 1.5, size: 0.12, life: 0.35 });
@@ -455,7 +453,8 @@ export class Game {
   get weaponItem(): Item { return this.save.weapons[0] ?? this.save.weapons[1]!; }
   get weapon() { return WEAPONS[this.weaponItem.def]; }
   /** Damage of one plain blow of `it` with the hero's power and damage percents (no crit, no hand multiplier). */
-  itemDamage(it: Item) { const s = this.stats; return weaponDamage(it, s.power, s.powerMul); }
+  /** A weapon's blow with the hero's power; a pet item's bite is its own (no hero power). */
+  itemDamage(it: Item) { const s = this.stats; return WEAPONS[it.def].pet ? weaponDamage(it) : weaponDamage(it, s.power, s.powerMul); }
   /** Both hands together, crits on average; `resist` applies each hand's own damage type. */
   heroDps(resist?: Partial<Record<DamageType, ResistTier>>) {
     const s = this.stats;
@@ -469,7 +468,8 @@ export class Game {
     const m = (it: Item | null) => (it ? itemModel(r >= 0 ? { ...it, rarity: r } : it, this.faction) : null);
     // the mage's orb is not held: it floats over the shoulder (Character.setOrb)
     const left = this.save.weapons[1];
-    return [m(this.save.weapons[0]), left && WEAPONS[left.def].orb ? null : m(left)];
+    // the mage's orb floats over the shoulder (orbModel), the hunter's pet runs beside him (Pet): neither is held
+    return [m(this.save.weapons[0]), left && (WEAPONS[left.def].orb || WEAPONS[left.def].pet) ? null : m(left)];
   }
 
   /** Weapon models as the hero holds them, [right hand, left hand]: the bow goes into the left hand while that one is free. */
@@ -784,7 +784,7 @@ export class Game {
     if (!it) { h.combo = 0; h.impact = -1; return; }
     const w = WEAPONS[it.def];
     // the shield never swings, it only answers blows (shieldAnswer); the mage's orb never swings either
-    if (w.guard || w.orb) { h.combo = 0; return; }
+    if (w.guard || w.orb || w.pet) { h.combo = 0; return; }
     h.atkCd -= dt;
     const period = 1 / w.aps;
     // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
@@ -1081,8 +1081,8 @@ export class Game {
     if (fx !== 'miss') this.hitFx(m, type, fx === 'crit');
   }
 
-  /** The pet in the class's second slot (the hunter's), or null. */
-  get petDef(): PetDef | null { return CLASSES[this.heroClass].pet ? PETS[this.save.pet ?? START_PET] : null; }
+  /** The pet whose item is in the class slot (the hunter's), or null. */
+  get petDef(): PetDef | null { const it = this.save.weapons[1]; const p = it && WEAPONS[it.def].pet; return p ? PETS[p] : null; }
 
   /** Puts the class's pet on the field (or takes it away). */
   private syncPet() {
@@ -1111,9 +1111,11 @@ export class Game {
       return best;
     }, (foe) => {
       const m = foe as Mob;
-      const it = this.weaponItem;
-      const tier = m.def.resist[pet.def.type] ?? 'normal';
-      const dmg = Math.max(1, Math.round(this.itemDamage(it) * pet.def.dmg * RESIST_MULT[tier] * (0.9 + Math.random() * 0.2)));
+      const it = this.save.weapons[1];
+      if (!it) return;
+      // the pet item's own damage (quality, copies), never the hero's or his bow's
+      const tier = m.def.resist[WEAPONS[it.def].type] ?? 'normal';
+      const dmg = Math.max(1, Math.round(this.itemDamage(it) * RESIST_MULT[tier] * (0.9 + Math.random() * 0.2)));
       this.fightOf(m).hits++;
       // only extra damage: mobs never turn on the pet, the bite does not wake or shove them
       this.damageMob(m, dmg, tier, 0, '', false);
@@ -1190,7 +1192,7 @@ export class Game {
     const chance = tokenChance(mobRank(m.def), this.world.zoneAt(m.spawn.x, m.spawn.z).id);
     const pull = !m.owner && Math.random() < 1 - (1 - chance) * (1 - (this.orb?.pull ?? 0));
     const n = m.loot.length + (pull ? 1 : 0);
-    m.loot.forEach((it, i) => this.revealLoot(m.pos, it, i, m.loot.length));
+    m.loot.forEach((it, i) => this.flyDrop(m.pos, i, n, itemIcon(it, 44, this.wearer), RARITY[it.rarity].color, 'btn-bag', it));
     m.loot = [];
     if (m.def.bonus) this.grantBonus(m);
     if (pull) this.grantPull(m, n - 1, n);
@@ -1373,12 +1375,11 @@ export class Game {
   }
 
   // ---------- visual effects (src/vfx.ts) ----------
-  /** Per frame: glow particles, the loot reveal, flying orbs, campfire embers and smoke, the gear's aura, the sun. */
+  /** Per frame: glow particles, flying orbs, campfire embers and smoke, the gear's aura, the sun. */
   private updateVfx(dt: number) {
     const hp = this.hero.position;
     this.glows.setViewport(this.ui.size().h * (this.lowGfx ? 1 : Math.min(devicePixelRatio || 1, 2)));
     this.glows.update(dt);
-    this.beams.update(dt);
     this.pickups.update(dt, hp);
     if (this.lowGfx) { this.sunFx.strength = 0; this.sunFx.update(dt, v1, v1, hp); return; }
     // campfires near the hero: embers rising and a thin smoke
@@ -1475,18 +1476,6 @@ export class Game {
     if (this.lowGfx || Math.abs(p.x - this.hero.position.x) > 30 || Math.abs(p.z - this.hero.position.z) > 30) return;
     this.puffs.cloud(p, 0.7, DUST[this.world.zoneAt(p.x, p.z).id] ?? 0xb8a07a, 5, 1);
     this.waves.add(p, 1.6, 0xffffff, 0.4);
-  }
-
-  /**
-   * Loot reveal: the item's icon pops up over the corpse glowing in its quality colour (a DOM label like the damage
-   * numbers) with sparks round it, floats a moment, then flies to the bag.
-   */
-  private revealLoot(at: THREE.Vector3, it: Item, slot: number, count: number) {
-    const color = RARITY[it.rarity].color;
-    const p = at.clone().setY(1.2).add(fxA.set((slot - (count - 1) / 2) * 1.3, 0, 0));
-    const icon = itemIcon(it, 52, { cls: itemClass(it) ?? this.heroClass, faction: this.faction });
-    this.fx.spawn(p, `<div class="lootpop" style="--rc:${color}">${icon}</div>`, 'loot-pop', LootBeams.duration(it.rarity) + 0.25, { html: true });
-    this.beams.add(p, it.rarity, RARITY_HEX[it.rarity], () => this.flyDrop(p, 0, 1, itemIcon(it, 44, this.wearer), color, 'btn-bag', it));
   }
 
   private collect(k: OrbKind) {
@@ -2370,6 +2359,7 @@ export class Game {
     this.dressHero();
     this.hp = Math.min(this.maxHp, Math.max(1, hpFrac * this.maxHp));
     this.resetHands();
+    this.syncPet();
     sfx.click();
     this.persist();
     this.refreshHud(true);
@@ -2441,7 +2431,7 @@ export class Game {
     const foes = this.clearOf.get(zone.id) ?? [];
     this.ui.clearProgress(zone.id, zone.name, foes.filter((m) => !m.alive).length, foes.length);
     if (full) {
-      this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it), this.save.equip, this.wearer, this.petDef);
+      this.ui.weapons(this.save.weapons, (it) => this.itemDamage(it), this.save.equip, this.wearer);
       this.ui.bagBadge(this.newItems, this.save.bag.length >= BAG_SIZE);
       this.ui.gachaBadge(this.save.pulls ?? 0);
       this.showCharge();

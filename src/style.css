@@ -951,10 +951,3 @@ body::before, body::after { content: ''; position: fixed; left: 0; right: 0; hei
 body::before { top: 0; transform: translateY(-100%); }
 body::after { bottom: 0; transform: translateY(100%); }
 body.cutscene::before, body.cutscene::after { transform: none; }
-
-/* loot reveal (Game.revealLoot): the item's icon over the corpse, glowing in its quality colour */
-.ftext.loot-pop .lootpop { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--rc) 70%, transparent) 0%, transparent 68%);
-  animation: lootpop-glow 0.5s ease-in-out infinite alternate; }
-.ftext.loot-pop .lootpop .svgi { filter: drop-shadow(0 0 4px var(--rc)) drop-shadow(0 2px 0 var(--ink)); }
-@keyframes lootpop-glow { from { box-shadow: 0 0 10px color-mix(in srgb, var(--rc) 40%, transparent); } to { box-shadow: 0 0 22px var(--rc); } }

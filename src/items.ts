@@ -1,5 +1,5 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
-import { DAMAGE_TYPE_NAME, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type PetDef, type StatId, type WeaponDef } from './config';
+import { DAMAGE_TYPE_NAME, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type StatId, type WeaponDef } from './config';
 import { CLASS_DAMAGE_ICON, DAMAGE_TYPE_ICON, icon } from './icons';
 import { art, hasPng } from './art';
 import { CLASSES, weaponClass, type HeroClass } from './party';
@@ -8,10 +8,10 @@ import { CLASS_LOOK, type Wearer } from './looks';
 /** Quality ids in model names (tools/blender/rarity_gear.py): `<def>_<id>`. */
 
 /**
- * Sword, axe, hammer, polearm and the shields have a GLB per quality, common included (tools/blender/rarity_gear.py):
- * one model for every race, no faction FBX.
+ * Sword, axe, hammer, polearm, the gun and the shields have a GLB per quality, common included
+ * (tools/blender/rarity_gear.py, gun_v5.py / gun_rarity.py): one model for every race, no faction FBX.
  */
-const GEAR_DEFS = ['sword', 'axe', 'hammer', 'polearm', ...CLASSES.warrior.off];
+const GEAR_DEFS = ['sword', 'axe', 'hammer', 'polearm', 'gun', ...CLASSES.warrior.off];
 
 /**
  * 3D model of a weapon, shield or staff: a staff's model per quality (WeaponDef.tiers); the per-quality GLB of a
@@ -210,11 +210,6 @@ export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = 
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }
 
-/** The hunter's pet in his second weapon slot (config PETS). */
-export function petCellHtml(pet: PetDef, attrs = '', cls = '', extra = '') {
-  return `<button class="cell pet ${cls}" ${attrs}>${art(pet.icon, 34, 'ic')}${extra}</button>`;
-}
-
 export function scrapValue(it: Item) {
   return Math.round((25 * (it.rarity + 1) * (it.rarity + 1) + it.sharpen * 20) * lvlMult(it.lvl));
 }
@@ -231,6 +226,7 @@ export function itemLines(it: Item): [string, string][] {
       return out;
     }
     if (w.orb) return [orbLine(w.orb)];
+    if (w.pet) return [['Урон укуса', String(Math.round(weaponDamage(it)))], ['Тип', DAMAGE_TYPE_NAME[w.type]], ['Укусов/с', String(w.aps)]];
     return [
       ['Урон', String(Math.round(weaponDamage(it)))],
       ['Тип', DAMAGE_TYPE_NAME[w.type]],

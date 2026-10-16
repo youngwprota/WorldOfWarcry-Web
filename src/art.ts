@@ -226,7 +226,7 @@ const PNG: Record<string, string> = {
   hit: 'i-hit', dps: 'i-dps', dodge: 'i-dodge',
   // weapon item icons per rarity (`<def>_<rarity>`), rendered from their models
   ...Object.fromEntries(['staff_fire', 'staff_ice', 'staff_wind', 'sword', 'axe', 'hammer', 'polearm', 'shield_tower',
-    'shield_buckler', 'shield_spiked', 'bow'].flatMap((def) =>
+    'shield_buckler', 'shield_spiked', 'bow', 'gun'].flatMap((def) =>
     ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${def}_${r}`, `${def}_${r}`]))),
   // armour item icons per rarity and faction (src/looks.ts CLASS_LOOK.icon): plate sets, hunter / caster skins, jewels
   ...Object.fromEntries([

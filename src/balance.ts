@@ -132,7 +132,8 @@ export function heroDps(weapons: HeroBuild['weapons'], power: number, powerMul: 
     const w = WEAPONS[it.def];
     if (w.orb || (w.guard && weapons.some((x) => x && !WEAPONS[x.def].guard))) continue;
     const r = resist ? RESIST_MULT[resist[w.type] ?? 'normal'] : 1;
-    dps += weaponDamage(it, power, powerMul) * w.aps * attackMul(w) * r;
+    // a pet item bites with its own damage, without the hero's power
+    dps += (w.pet ? weaponDamage(it) : weaponDamage(it, power, powerMul)) * w.aps * attackMul(w) * r;
   }
   return dps * crit;
 }

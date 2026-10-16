@@ -1,5 +1,4 @@
-// Glow effects: soft additive particles (one draw call for all of them), the loot reveal (the item's icon popping up
-// with a halo), and the sun's shafts on sunny locations. Colours above white feed the post glow (src/post.ts).
+// Glow effects: soft additive particles (one draw call for all of them) and the sun's shafts on sunny locations. Colours above white feed the post glow (src/post.ts).
 import * as THREE from 'three';
 
 const v = new THREE.Vector3();
@@ -138,35 +137,6 @@ export class Glows {
     g.attributes.color.needsUpdate = true;
     g.attributes.size.needsUpdate = true;
     g.attributes.alpha.needsUpdate = true;
-  }
-}
-
-interface Reveal { at: THREE.Vector3; t: number; dur: number; color: number; done: (() => void) | null }
-
-/**
- * Loot reveal, the 3D side (the item's icon pops up as a DOM label: Game.revealLoot): a burst of sparks of the
- * item's quality colour where it drops and motes rising there while it floats; then `done` (the icon flies to the bag).
- */
-export class LootBeams {
-  private list: Reveal[] = [];
-
-  constructor(private glows: Glows) {}
-
-  /** Seconds the icon floats before it flies to the bag (by RARITY index). */
-  static duration(rarity: number) { return 0.9 + rarity * 0.06; }
-
-  add(at: THREE.Vector3, rarity: number, color: number, done: () => void) {
-    this.list.push({ at: at.clone(), t: 0, dur: LootBeams.duration(rarity), color, done });
-    this.glows.emit(v.set(at.x, 1.1, at.z), 8 + rarity * 5, { color, bright: 1.4, size: 0.12, life: 0.8, speed: 3, up: 1.5, gravity: 4, drag: 2 });
-  }
-
-  update(dt: number) {
-    for (let i = this.list.length - 1; i >= 0; i--) {
-      const b = this.list[i];
-      b.t += dt;
-      if (Math.random() < dt * 10) this.glows.emit(v.set(b.at.x, 0.4, b.at.z), 1, { color: b.color, bright: 1.4, size: 0.09, life: 0.9, spread: 0.6, up: 1.2, drag: 0.6 });
-      if (b.t >= b.dur) { b.done?.(); this.list.splice(i, 1); }
-    }
   }
 }
 

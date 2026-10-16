@@ -24,8 +24,6 @@ export interface ClassDef {
   off: string[];
   /** Name of slot 2. */
   offName: string;
-  /** Slot 2 holds a pet (config PETS) instead of an item. */
-  pet?: boolean;
   /** Slot 2 always holds the kit's `left` item: it never drops and is never swapped or taken off. */
   fixedOff?: boolean;
   /**
@@ -50,7 +48,7 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
   hunter: {
     name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
     model: { human: 'human_archer', orc: 'orc_archer' },
-    weapons: ['bow', 'polearm', 'gun'], off: [], offName: 'Питомец', pet: true, kit: { hand: 'bow', bag: ['polearm', 'gun'] }, locked: true,
+    weapons: ['bow', 'polearm', 'gun'], off: ['boar'], offName: 'Питомец', kit: { hand: 'bow', left: 'boar', bag: ['polearm', 'gun'] }, locked: true,
   },
   mage: {
     name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
