@@ -75,6 +75,7 @@ for (const f of Object.values(FACTIONS)) {
   f.campBuildings.forEach((b) => models.add(b));
   f.campProps.forEach((p) => models.add(p));
   models.add(f.campfire);
+  f.preview.forEach((m) => models.add(m)); // the faction choice scene
 }
 for (const w of Object.values(WEAPONS)) {
   // (mage orbs are GLB creatures, below)
@@ -92,8 +93,9 @@ for (const p of Object.values(PETS)) creatures.add(p.model);
 for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
 // gacha forge scene (src/forge3d.ts): anvil and decor are cloned from here
 models.add('anvil_big');
+models.add('hammer_human_paladin');
 for (const [m] of FORGE3D.decor) models.add(m);
-['orc_stone_big', 'orc_stone_mid', 'orc_stone_small', 'orc_log', 'orc_wood_pile_big', 'orc_tusk_standing', 'orc_skull',
+['orc_stone_big', 'orc_log', 'orc_wood_pile_big', 'orc_tusk_standing', 'orc_skull',
   'undead_fence', 'undead_ruins_01', 'undead_ruins_02', 'undead_obelisk', 'undead_column_1', 'undead_big_bone',
   'undead_bones_remains', 'undead_lamp_post', 'campfire',
   // level design kit
@@ -101,8 +103,8 @@ for (const [m] of FORGE3D.decor) models.add(m);
   'barrack_Lv2', 'tower_big', 'orc_cabin', 'orc_barrack_Lv2', 'orc_tower_Lv2',
   'practice_dummy', 'orc_practice_dummy', 'target', 'orc_practice_aim', 'elf_well', 'wood_pile_big', 'orc_wood_pile_big',
   'orc_head_lantern', 'orc_flag_red', 'orc_drum_big', 'orc_altar', 'orc_horned_skull', 'cauldron', 'box_large_2',
-  'elf_log_pile', 'saw', 'wood_pile_small', 'bucket', 'elf_stone_big', 'mine_enterance', 'minecart',
-  'mine_rail_piece', 'box_small_2', 'orc_throne', 'tower_Lv2', 'throne_Lv1', 'banner', 'elf_rock_small', 'elf_tree',
+  'elf_log_pile', 'saw', 'wood_pile_small', 'bucket',
+  'box_small_2', 'orc_throne', 'tower_Lv2', 'throne_Lv1', 'banner', 'elf_rock_small', 'elf_tree',
   'elf_foliage_small', 'elf_foliage_mid', 'elf_tree_root_1', 'elf_rock_big', 'undead_tusk_gate', 'undead_house_tower', 'undead_tower_small',
   'undead_smithy_house', 'undead_building', 'undead_tower', 'undead_wheel_of_pain', 'undead_cauldron', 'undead_flag',
   'undead_windmill', 'undead_tower_Lv2', 'undead_throne_Lv1', 'undead_throne', 'undead_floating_stone',
