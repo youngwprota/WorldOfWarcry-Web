@@ -2,7 +2,7 @@ import type { SwingKind } from './swing';
 // All gameplay numbers live here (GDD: "все числа — ориентиры").
 
 /** Sword — slash (режущий), axe — chop (рубящий), hammer — crush (дробящий), mage staves — magic (магический). */
-export type DamageType = 'slash' | 'chop' | 'crush' | 'magic';
+export type DamageType = 'slash' | 'chop' | 'crush' | 'pierce' | 'magic';
 export type ResistTier = 'weak' | 'normal' | 'resist' | 'immune';
 export type FactionId = 'human' | 'orc';
 export type ZoneId = 'forest' | 'cemetery' | 'peaks' | 'swamp' | 'grove' | 'dunes' | 'hills';
@@ -29,8 +29,8 @@ export function mobImpact(hit: number, period: number) { return Math.min(hit, pe
 export const UI_REF = { hud: { w: 540, h: 960 }, modal: { w: 760, h: 1351 } };
 
 export const RESIST_MULT: Record<ResistTier, number> = { weak: 1.5, normal: 1, resist: 0.5, immune: 0.25 };
-export const DAMAGE_TYPE_NAME: Record<DamageType, string> = { slash: 'режущий', chop: 'рубящий', crush: 'дробящий', magic: 'магический' };
-export const DAMAGE_TYPE_COLOR: Record<DamageType, string> = { slash: '#7fd3ff', chop: '#ff8a5a', crush: '#ffb347', magic: '#b49bff' };
+export const DAMAGE_TYPE_NAME: Record<DamageType, string> = { slash: 'режущий', chop: 'рубящий', crush: 'дробящий', pierce: 'колющий', magic: 'магический' };
+export const DAMAGE_TYPE_COLOR: Record<DamageType, string> = { slash: '#7fd3ff', chop: '#ff8a5a', crush: '#ffb347', pierce: '#c8f07a', magic: '#b49bff' };
 
 /**
  * Item quality. Weapon damage = (base + copy × (level − 1)) × the weapon's dmgMul: every extra copy of the same
@@ -142,7 +142,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   // hunter (src/party.ts): ~2.5 sword ranges
   bow: {
-    id: 'bow', name: 'Лук', type: 'slash', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 5.75,
+    id: 'bow', name: 'Лук', type: 'pierce', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 5.75,
     anim: 'SwordAttack', model: { human: 'bow_human_archer', orc: 'bow_orc_archer' }, icon: '🏹', single: true,
     leftHand: true,
     shot: { speed: 24, arrow: { human: 'arrow_human_archer', orc: 'arrow_orc_archer' }, volley: 3 },
@@ -397,7 +397,8 @@ export const MOB_REGEN_DELAY = 5;
 export interface ZoneFoes { weak: DamageType[]; resist?: DamageType[] }
 export const ZONE_FOES: Partial<Record<ZoneId, ZoneFoes>> = {
   forest: { weak: [] },
-  cemetery: { weak: ['crush'], resist: ['slash', 'chop'] },
+  // the undead: weak to arrows (the hunter's location) and hammers, resist swords and axes
+  cemetery: { weak: ['pierce', 'crush'], resist: ['slash', 'chop'] },
   peaks: { weak: ['crush'] },
   hills: { weak: ['slash'] },
   grove: { weak: ['crush'] },
