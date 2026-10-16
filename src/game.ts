@@ -1041,14 +1041,19 @@ export class Game {
         if (d < bd) { bd = d; best = m; }
       }
       return best;
-    }, (foe) => {
+    }, (foe, mul) => {
+      const bite = (m: Mob) => {
+        const tier = m.def.resist[pet.def.type] ?? 'normal';
+        const dmg = Math.max(1, Math.round(this.itemDamage(this.weaponItem) * pet.def.dmg * PET_RARITY.dmg[pet.rarity] * mul * RESIST_MULT[tier] * (0.9 + Math.random() * 0.2)));
+        this.fightOf(m).hits++;
+        // only extra damage: mobs never turn on the pet, the bite does not wake or shove them
+        this.damageMob(m, dmg, tier, 0, mul > 1 ? 'crit' : '', false);
+      };
       const m = foe as Mob;
-      const it = this.weaponItem;
-      const tier = m.def.resist[pet.def.type] ?? 'normal';
-      const dmg = Math.max(1, Math.round(this.itemDamage(it) * pet.def.dmg * PET_RARITY.dmg[pet.rarity] * RESIST_MULT[tier] * (0.9 + Math.random() * 0.2)));
-      this.fightOf(m).hits++;
-      // only extra damage: mobs never turn on the pet, the bite does not wake or shove them
-      this.damageMob(m, dmg, tier, 0, '', false);
+      bite(m);
+      // the bear's paw also hits every fighting mob next to the target
+      const r = pet.def.cleave;
+      if (r) for (const o of this.mobs) if (o !== m && o.hittable && !o.passive && o.state !== 'idle' && o.pos.distanceTo(m.pos) - o.radius < r) bite(o);
     });
   }
 
