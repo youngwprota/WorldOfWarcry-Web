@@ -78,6 +78,10 @@ export const PART_PREFIXES: Record<VisualPart, string[]> = {
   legs: ['legs_', 'leg_', 'hip_', 'hips_', 'kilt_'],
 };
 
+/** Art icon of each bonus stat (the stat window's). */
+export const BONUS_ICON: Record<BonusStat, string> = {
+  hp: 'heart', regen: 'regen', power: 'hit', speed: 'run', defense: 'defense', dodge: 'dodge', crit: 'crit', critDmg: 'critdmg', haste: 'fist', leech: 'heart',
+};
 export const BONUS_NAME: Record<BonusStat, string> = {
   hp: 'Здоровье', regen: 'Реген, хп/с', power: 'Урон', speed: 'Скорость',
   defense: 'Защита', dodge: 'Уклонение', crit: 'Шанс крита', critDmg: 'Урон крита',
@@ -225,7 +229,10 @@ export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = 
     const ph = !placeholder ? '' : hasPng(placeholder) ? art(placeholder, 30, 'ic ph') : icon(placeholder, '#ffffff55', 30, 'ic');
     return `<button class="cell empty ${cls}" ${attrs}>${ph}${extra}</button>`;
   }
-  const badge = it.kind === 'weapon' && !WEAPONS[it.def].guard ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#4a2a12', 12)}</span>` : '';
+  // weapons and pets: their damage type; gacha gear: the stat it gives (three kinds share one look per slot)
+  const badge = it.kind === 'weapon'
+    ? (!WEAPONS[it.def].guard && !WEAPONS[it.def].orb ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#4a2a12', 12)}</span>` : '')
+    : GACHA_GEAR.includes(it.def) ? `<span class="badge stat">${art(BONUS_ICON[ARMOR[it.def].bonus.stat], 14)}</span>` : '';
   return `<button class="cell r${it.rarity} ${cls}" ${attrs}>${art(itemIconId(it, w), 34, 'ic')}${badge}` +
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }
@@ -294,7 +301,7 @@ export const dropIconId = (d: ItemDrop) => (d.kind === 'weapon' ? d.def : ARMOR[
 
 /** Old saves stored bare {def, rarity, sharpen} weapons. Items taken out of the game become the kept one of their slot. */
 const RENAMED: Record<string, string> = {
-  nagamaki: 'polearm', shield: 'shield_spiked', shield_tower: 'shield_spiked', shield_buckler: 'shield_spiked',
+  nagamaki: 'polearm', shield: 'shield_tower',
   ring_power: 'ring_swift', amulet_life: 'amulet_spring',
 };
 
