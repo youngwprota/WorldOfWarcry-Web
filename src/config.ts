@@ -515,9 +515,9 @@ export const MOBS: Record<string, MobDef> = {
     // tuned to the hero after one forest cycle on the forest's own drops (no gacha there): a coin flip at ~90% of it
     anim: 'SwordAttack', hp: 10500, dmg: 34, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
     ...foes('forest'), reward: { power: 12 }, respawn: 900,
-    // the forest's swords barely scratch him (−50%); his hammer is the key to the undead behind the gate
+    // the forest's swords barely scratch him (−50%); his bow opens the hunter (ClassDef.unlock) for the undead behind the gate
     resist: { slash: 'resist' },
-    drop: { kind: 'weapon', def: 'hammer', rarity: 0 },
+    drop: { kind: 'weapon', def: 'bow', rarity: 1 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest', unlocks: ['forest-cemetery'],
       slamRadius: 4.2, slamMul: 2.4, chaseMul: 1.4, phase2Dmg: 1.2,
@@ -599,14 +599,29 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
     anim: 'SwordAttack', hp: 1640, dmg: 13, aps: 0.75, range: 2.1, speed: 3.0, aggro: 5.5, regen: 0.03, scale: 1.4,
     ...foes('cemetery'), reward: { hp: 6 }, respawn: 600,
-    drop: { kind: 'armor', def: 'plate_head', rarity: 2 },
+    drop: { kind: 'armor', def: 'hunter_head', rarity: 2 },
   },
   shade: {
     id: 'shade', name: 'Тень', rank: 'elite',
     model: { human: ['undead_assassin', null], orc: ['undead_assassin', null] },
     anim: 'SwordAttack', hp: 1280, dmg: 12, aps: 1.1, range: 1.5, speed: 4.5, aggro: 6.2, regen: 0.03, scale: 1.3,
     ...foes('cemetery'), reward: { speed: 5 }, respawn: 600,
-    drop: { kind: 'armor', def: 'plate_legs', rarity: 2 },
+    drop: { kind: 'armor', def: 'hunter_legs', rarity: 2 },
+  },
+  // the cemetery's elites dress the hunter (left half of the equip bar; the right half comes from the gacha)
+  grave_looter: {
+    id: 'grave_looter', name: 'Мародёр', rank: 'elite',
+    model: { human: ['undead_worker', null], orc: ['undead_worker', null] },
+    anim: 'SwordAttack', hp: 1460, dmg: 12, aps: 0.8, range: 1.7, speed: 3.2, aggro: 5.5, regen: 0.03, scale: 1.45,
+    ...foes('cemetery'), reward: { hp: 6 }, respawn: 600,
+    drop: { kind: 'armor', def: 'hunter_chest', rarity: 2 },
+  },
+  cursed_archer: {
+    id: 'cursed_archer', name: 'Проклятый стрелок', rank: 'elite',
+    model: { human: ['undead_warrior', 'spear_undead_warrior'], orc: ['undead_warrior', 'spear_undead_warrior'] },
+    anim: 'SwordAttack', hp: 1800, dmg: 14, aps: 0.75, range: 2.1, speed: 3.1, aggro: 5.8, regen: 0.03, scale: 1.5,
+    ...foes('cemetery'), reward: { power: 4 }, respawn: 600,
+    drop: { kind: 'weapon', def: 'bow', rarity: 2 },
   },
   gravedigger: {
     id: 'gravedigger', name: 'Могильщик', rank: 'mini',
@@ -620,7 +635,8 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['undead_king', 'death_scythe'], orc: ['undead_king', 'death_scythe'] },
     anim: 'MeleeHigh', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.1,
     ...foes('cemetery'), reward: { power: 18 }, respawn: 1200,
-    drop: { kind: 'armor', def: 'ring_swift', rarity: 3 },
+    // a better sword for the warrior
+    drop: { kind: 'weapon', def: 'sword', rarity: 3 },
     boss: {
       ...BOSS_BASE, titles: { human: 'Смерть', orc: 'Смерть' }, zone: 'cemetery', unlocks: ['cemetery-peaks'],
       slamRadius: 5, slamMul: 4.7, noSlam: true, chaseMul: 2.6, phase2Dmg: 1.3,
@@ -957,8 +973,10 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
   ]).map((id) => spawner(id, FOREST_CHARGES)),
   // one endless charge with the mob's own respawn time
   cemetery: ([
-    'skeleton_worker', 'undead_boar', 'skeleton_worker', 'ghost', 'bone_guard', 'skeleton_warrior', 'undead_boar',
-    'skeleton_worker', 'ghost', 'gravedigger', 'skeleton_warrior', 'undead_boar', 'skeleton_worker', 'shade', 'skeleton_warrior',
+    // village (Мародёр) → graves by the trail (Костяной страж) → chapel ruins (Проклятый стрелок) →
+    // grave field (Могильщик) → before the arena (Тень); CEMETERY_PINS put the specials into their areas
+    'skeleton_worker', 'undead_boar', 'skeleton_worker', 'grave_looter', 'ghost', 'bone_guard', 'skeleton_warrior', 'undead_boar',
+    'skeleton_worker', 'cursed_archer', 'ghost', 'gravedigger', 'skeleton_warrior', 'undead_boar', 'skeleton_worker', 'shade', 'skeleton_warrior',
     'skeleton_warrior', 'undead_boar',
   ]).map((id) => spawner(id)),
   hills: ([
