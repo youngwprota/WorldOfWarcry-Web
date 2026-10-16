@@ -98,24 +98,23 @@ function setRows(): [string, Action[]][] {
     ['База', 'Об', 'Необ', 'Ред', 'Эпик', 'Лег', 'Миф'].map((label, i): Action => [label, (g) => g.debugSet(c, i - 1), `set ${c} r${i - 1}`])]);
 }
 
-const SECTIONS: [string, Action[]][] = [
+/** [title, actions, `col`: shown as a column; consecutive column sections share one row]. */
+type Section = [string, Action[], boolean?];
+/** The first BUILD_ROW actions of «Бой» go into the row of the hero build fields. */
+const BUILD_ROW = 2;
+
+const SECTIONS: Section[] = [
   ['Бой', [
+    ['Бессмертие', (g) => { g.god = !g.god; }, 'god'],
+    ['Убить рядом', (g) => g.debugKillNearby(), 'wide'],
     ['ХП 10%', (g) => g.debugSetHp(0.1)],
     ['ХП 40%', (g) => g.debugSetHp(0.4)],
     ['ХП 100%', (g) => g.debugSetHp(1)],
-    ['Бессмертие', (g) => { g.god = !g.god; }, 'god'],
-    ['Убить рядом', (g) => g.debugKillNearby(), 'wide'],
     ['Уничтожить всех', (g) => g.debugKillAll(), 'wide'],
     ['Сбросить таймеры', (g) => g.debugResetTimers(), 'wide'],
     ['Восстановить всех', (g) => g.debugRestoreAll(), 'wide'],
   ]],
   ['Пресеты спавнов', (Object.keys(SPAWN_PRESETS) as SpawnPresetId[]).map((id): Action => [SPAWN_PRESETS[id].name, teleportPreset, '', id])],
-  ['Предметы', [
-    // a set's 4 pieces + ring + amulet; pressing the same set again raises the quality (common → mythic → common)
-    ['Сет класса', (g) => g.debugGiveArmor(CLASS_SET[g.heroClass]), 'wide'],
-    ['Выдать все', (g) => g.debugGiveAll(), 'wide'],
-    ['Сменить расу', (g) => g.debugSwitchFaction(), 'wide'],
-  ]],
   ['Статы (+очки)', [
     ['+10 урон', (g) => g.debugAddStat('power', 10)],
     ['+50 хп', (g) => g.debugAddStat('hp', 50)],
@@ -130,25 +129,6 @@ const SECTIONS: [string, Action[]][] = [
     ['+10% реген', (g) => g.debugAddStat('regen', 10, true)],
     ['Сбросить дебаг-статы', (g) => g.debugClearStats(), 'wide'],
   ]],
-  ...setRows(),
-  ['Горнило', [
-    ['+5 круток', (g) => g.debugAddPulls(5), 'wide'],
-  ]],
-  ['Скейл героя', [
-    ['−0.1', (g) => g.debugSetHeroScale(g.heroScale - 0.1)],
-    ['×1', (g) => g.debugSetHeroScale(1)],
-    ['+0.1', (g) => g.debugSetHeroScale(g.heroScale + 0.1)],
-  ]],
-  ['Скейл врагов', [
-    ['−0.1', (g) => g.debugSetMobScale(g.mobScale - 0.1)],
-    ['×1', (g) => g.debugSetMobScale(1)],
-    ['+0.1', (g) => g.debugSetMobScale(g.mobScale + 0.1)],
-  ]],
-  ['Угол обзора камеры', [
-    ['−5', (g) => g.debugSetFov(g.camera.fov - 5)],
-    ['54', (g) => g.debugSetFov(54)],
-    ['+5', (g) => g.debugSetFov(g.camera.fov + 5)],
-  ]],
   ['Ворота и туман войны', [
     ['Открыть все ворота', (g) => g.debugOpenGates(), 'wide'],
     ['Убрать туман войны', (g) => g.debugFog(true), 'wide'],
@@ -162,6 +142,32 @@ const SECTIONS: [string, Action[]][] = [
     ['Босс 2', (g) => g.debugTeleport('boss2')],
   ]],
   ...locationRows(),
+  ['Предметы', [
+    // a set's 4 pieces + ring + amulet; pressing the same set again raises the quality (common → mythic → common)
+    ['Сет класса', (g) => g.debugGiveArmor(CLASS_SET[g.heroClass]), 'wide'],
+    ['Выдать все', (g) => g.debugGiveAll(), 'wide'],
+    ['Сменить расу', (g) => g.debugSwitchFaction(), 'wide'],
+    ['Открыть все классы', (g) => g.debugOpenClasses(), 'wide'],
+  ]],
+  ...setRows(),
+  ['Горнило', [
+    ['+5 круток', (g) => g.debugAddPulls(5), 'wide'],
+  ]],
+  ['Скейл героя', [
+    ['−0.1', (g) => g.debugSetHeroScale(g.heroScale - 0.1)],
+    ['×1', (g) => g.debugSetHeroScale(1)],
+    ['+0.1', (g) => g.debugSetHeroScale(g.heroScale + 0.1)],
+  ], true],
+  ['Скейл врагов', [
+    ['−0.1', (g) => g.debugSetMobScale(g.mobScale - 0.1)],
+    ['×1', (g) => g.debugSetMobScale(1)],
+    ['+0.1', (g) => g.debugSetMobScale(g.mobScale + 0.1)],
+  ], true],
+  ['Обзор камеры', [
+    ['−5', (g) => g.debugSetFov(g.camera.fov - 5)],
+    ['54', (g) => g.debugSetFov(54)],
+    ['+5', (g) => g.debugSetFov(g.camera.fov + 5)],
+  ], true],
 ];
 
 export class DebugPanel {
@@ -172,13 +178,22 @@ export class DebugPanel {
   constructor(app: HTMLElement, private game: Game) {
     this.el.id = 'debug';
     this.el.className = 'ui-block hidden';
-    // the hero build fields open the first section (Бой)
-    const build = '<div class="dbg-build"><label>Атака <input data-build="power" type="number" min="0"></label>' +
-      '<label>HP <input data-build="hp" type="number" min="1"></label><button data-apply>Применить</button></div>';
-    this.el.innerHTML = `<div class="dbg-head"><b>🛠 Дебаг</b><span><button data-min title="Свернуть">–</button> <button data-close>✕</button></span></div><pre class="dbg-info"></pre>` +
-      SECTIONS.map(([title, actions], si) => `<div class="dbg-sec"><span>${title}</span>${si ? '' : build}<div class="dbg-btns">` +
-        actions.map(([label, , cls], ai) => `<button class="${cls ?? ''}" data-a="${si}:${ai}">${label}</button>`).join('') +
-        '</div></div>').join('');
+    const btn = ([label, , cls]: Action, si: number, ai: number) => `<button class="${cls ?? ''}" data-a="${si}:${ai}">${label}</button>`;
+    // the hero build fields open the first section (Бой), its first BUILD_ROW buttons beside them
+    const build = '<div class="dbg-build dbg-btns"><label>Атака <input data-build="power" type="number" min="0"></label>' +
+      '<label>HP <input data-build="hp" type="number" min="1"></label><button data-apply>Применить</button>' +
+      SECTIONS[0][1].slice(0, BUILD_ROW).map((a, ai) => btn(a, 0, ai)).join('') + '</div>';
+    let html = '';
+    SECTIONS.forEach(([title, actions, col], si) => {
+      const skip = si ? 0 : BUILD_ROW;
+      const sec = `<div class="dbg-sec"><span>${title}</span>${si ? '' : build}<div class="dbg-btns">` +
+        actions.map((a, ai) => (ai < skip ? '' : btn(a, si, ai))).join('') + '</div></div>';
+      // consecutive column sections share one row
+      if (col && !SECTIONS[si - 1]?.[2]) html += '<div class="dbg-cols">';
+      html += sec;
+      if (col && !SECTIONS[si + 1]?.[2]) html += '</div>';
+    });
+    this.el.innerHTML = `<div class="dbg-head"><b>🛠 Дебаг</b><span><button data-min title="Свернуть">–</button> <button data-close>✕</button></span></div><pre class="dbg-info"></pre>` + html;
     app.appendChild(this.el);
     this.info = this.el.querySelector('.dbg-info')!;
     this.el.addEventListener('pointerdown', this.dragStart);

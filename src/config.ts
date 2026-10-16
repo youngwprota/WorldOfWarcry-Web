@@ -1212,6 +1212,10 @@ export const CEMETERY_AREAS: { id: 'village' | 'chapel' | 'field'; name: string;
   { id: 'chapel', name: 'Руины часовни', deg: 70, d: 99, r: 10, pin: 'cursed_archer' },
   { id: 'field', name: 'Старое поле могил', deg: 113, d: 72, r: 11, pin: 'gravedigger' },
 ];
+/** Trail spawners of the cemetery (indices in SPAWNERS.cemetery) pulled together into one pack each, at their mean spot. */
+export const CEMETERY_PACKS: number[][] = [[6, 8], [10, 12], [16, 17, 18]];
+/** Boar pair by the old grave field, at a hand point (x, z). */
+export const CEMETERY_BOARS = { pack: pack(['undead_boar', 'undead_boar']), at: [72, -73] as [number, number] };
 export const LEASH = 15;
 
 /**

@@ -3,7 +3,7 @@
 // in a worker) both run it.
 import * as CONFIG from './config';
 import {
-  ATTACK_HIT, BREAKABLES, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
+  ATTACK_HIT, BREAKABLES, CEMETERY_BOARS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
   PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, START_PET, STAVES, WEAPONS, depthMul, mobImpact, packUnits, mobRank, tokenChance as zoneTokenChance,
   type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
@@ -12,7 +12,7 @@ import { ARMOR, armorStats, dropItem, itemClass, makeItem, sameItem, weaponDamag
 import { CLASSES, CLASS_IDS, classSlot, kitOf, weaponClass, type HeroClass } from './party';
 import { pull } from './gacha';
 import {
-  ARENA, BOSS_GUARDS, FORT, FOREST_PINS, GATE, GATE_GUARDS, GLOVES_PACKS, LAND_BOSSES, MID_UV, SPAWN, campToFortAt, ringSpots, inCamp, pathAt, pathDist,
+  ARENA, BOSS_GUARDS, FORT, FOREST_PINS, GATE, GATE_GUARDS, GLOVES_PACKS, GLOVES_SPREAD, LAND_BOSSES, MID_UV, SPAWN, campToFortAt, ringSpots, inCamp, pathAt, pathDist,
   progressAt, walkable, zoneIdAt,
 } from './island';
 
@@ -151,7 +151,7 @@ function buildUnits(): Unit[] {
   const gloveSpots: Spot[] = [];
   for (let i = 0; i < GLOVES_BANDITS.length; i++) {
     gloves.push(...packUnits(GLOVES_BANDITS[i]));
-    for (const q of ringSpots(GLOVES_PACKS[i][0], GLOVES_PACKS[i][1], GLOVES_BANDITS[i].slots.length, 1.6, Math.PI / 2)) gloveSpots.push(spotAt(q.x, q.z));
+    for (const q of ringSpots(GLOVES_PACKS[i][0], GLOVES_PACKS[i][1], GLOVES_BANDITS[i].slots.length, GLOVES_SPREAD, Math.PI / 2)) gloveSpots.push(spotAt(q.x, q.z));
   }
   add('mob', gloves, gloveSpots, 'forest', 'gloves', 0.3);
   // static trees: World picks trees 4–12 m off the trail, well apart — spread along it here
@@ -159,6 +159,7 @@ function buildUnits(): Unit[] {
   add('mob', packUnits(GUARD_PACKS.boss_guard), BOSS_GUARDS.map((p) => spotAt(p.x, p.z)), 'forest', 'bguard', false);
   add('mob', packUnits(GUARD_PACKS.gate_guard), GATE_GUARDS.map((p) => spotAt(p.x, p.z)), 'forest', 'gguard', false);
   add('mob', SPAWNERS.cemetery ?? [], placeAlong(cemRange, SPAWNERS.cemetery ?? [], 'cemetery', packs), 'cemetery', 'cemetery');
+  add('mob', packUnits(CEMETERY_BOARS.pack), ringSpots(...CEMETERY_BOARS.at, 2, 1.8).map((p) => spotAt(p.x, p.z)), 'cemetery', 'cboars', 0.5);
   // the fort's real tower (world.buildFort): a breakable turret south of the boss (its arrows at the hero are left out)
   const tower = OPT.faction === 'human' ? 'fort_tower_orc' : 'fort_tower_human';
   add('prop', [{ unit: 'prop', id: tower }], [spotAt(FORT.x - 1, FORT.z + 6)], 'forest', 'fort_tower', false);

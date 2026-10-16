@@ -2566,6 +2566,13 @@ export class Game {
     writeSave(this.save);
   }
 
+  /** Debug: open every closed class for good. */
+  debugOpenClasses() {
+    for (const c of CLASS_IDS) this.openClass(c);
+    this.ui.toast('Все классы открыты');
+    this.persist();
+  }
+
   /** Debug: drop every barrier between locations. */
   debugOpenGates() {
     this.save.gatesOpen = true;

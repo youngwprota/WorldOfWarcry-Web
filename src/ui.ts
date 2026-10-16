@@ -543,21 +543,34 @@ export class UI {
     this.modal.querySelector(sel)?.addEventListener('click', () => { sfx.click(); fn(); });
   }
 
-  settings(muted: boolean, lowGfx: boolean, toggleMute: () => void, toggleGfx: () => void, reset: () => void, close: () => void, showLog: () => void) {
+  /** `reset(skipPrologue)`: wipe the progress; with true the new game skips the tutorial. */
+  settings(muted: boolean, lowGfx: boolean, toggleMute: () => void, toggleGfx: () => void, reset: (skipPrologue: boolean) => void, close: () => void, showLog: () => void) {
     this.open(`<div class="panel"><h2>Настройки</h2>
       <p>Управление: тяни палец в любом месте экрана (или WASD). Атака — автоматически. Смена класса — кнопки справа внизу или 1 / 2 / 3.</p>
       <div class="row"><button class="btn" id="m-mute">${muted ? '🔇 Звук выкл' : '🔊 Звук вкл'}</button>
       <button class="btn" id="m-gfx">${lowGfx ? '🖥 Графика: низкая' : '🖥 Графика: высокая'}</button></div>
       <div class="row"><button class="btn purple" id="m-debug">🛠 Дебаг-меню</button></div>
-      <div class="row"><button class="btn" id="m-log">📊 Лог баланса</button><button class="btn danger" id="m-reset">Сбросить прогресс</button></div>
+      <div class="row"><button class="btn" id="m-log">📊 Лог баланса</button><button class="btn danger stack" id="m-reset">Сбросить<br>прогресс</button><button class="btn danger stack" id="m-reset-skip">Без<br>обучения</button></div>
       <div class="row"><button class="btn primary" id="m-close">Продолжить</button></div></div>`);
     this.on('#m-debug', () => { this.close(); close(); this.onDebug(); });
     this.on('#m-mute', () => { toggleMute(); this.close(); this.settings(!muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog); });
     this.on('#m-gfx', () => { toggleGfx(); this.close(); this.settings(muted, !lowGfx, toggleMute, toggleGfx, reset, close, showLog); });
     this.on('#m-reset', () => {
-      this.confirm('Сбросить весь прогресс?', 'Герой, фракция и снаряжение будут удалены.', reset, () => this.settings(muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog));
+      this.confirm('Сбросить весь прогресс?', 'Герой, фракция и снаряжение будут удалены.', () => reset(false), () => this.settings(muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog));
+    });
+    this.on('#m-reset-skip', () => {
+      this.confirm('Сбросить прогресс без обучения?', 'Герой, фракция и снаряжение будут удалены, игра начнётся с выбора фракции.', () => reset(true), () => this.settings(muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog));
     });
     this.on('#m-log', () => { this.close(); showLog(); });
+    this.on('#m-close', () => { this.close(); close(); });
+  }
+
+  /** Settings in the tutorial: only its debug skip. */
+  prologueSettings(skip: () => void, close: () => void) {
+    this.open(`<div class="panel"><h2>Настройки</h2>
+      <div class="row"><button class="btn purple" id="m-skip">🛠 Пропустить обучение</button></div>
+      <div class="row"><button class="btn primary" id="m-close">Продолжить</button></div></div>`);
+    this.on('#m-skip', () => { this.close(); close(); skip(); });
     this.on('#m-close', () => { this.close(); close(); });
   }
 
@@ -657,7 +670,7 @@ export class UI {
     next();
   }
 
-  factionSelect(onPick: (f: FactionId) => void, onConfirm: (f: FactionId) => void, lead = '') {
+  factionSelect(onPick: (f: FactionId) => void, onConfirm: (f: FactionId) => void, lead = '', cls: () => HeroClass = () => CLASS_IDS[0], onClass: (c: HeroClass) => void = () => {}) {
     let sel: FactionId | null = null;
     const card = (f: FactionId) => {
       const d = FACTIONS[f];
@@ -666,9 +679,18 @@ export class UI {
         <h3>${d.name}</h3><div class="fan">${d.fantasy}</div>
         <div class="pas">Старт: ${art(w.id, 22)} ${w.name}</div></div>`;
     };
-    this.open(`<div class="factions ui-block">${lead ? `<p class="lead">${lead}</p>` : ''}<h1>Выбери, чьим воином вернёшься</h1>
+    this.open(`<div class="squad"><p class="lead">Все персонажи из отряда будут доступны всегда и открываются постепенно во время геймплея</p><h1>Просмотр отряда</h1><div class="squad-btns">${CLASS_IDS.map((c) => {
+        const d = CLASSES[c];
+        return `<button class="cls${c === cls() ? ' on' : ''}" data-cls="${c}" style="--c1:${d.color[0]};--c2:${d.color[1]}" title="${d.name}">${art(d.icon, 30)}</button>`;
+      }).join('')}</div></div><div class="factions ui-block">${lead ? `<p class="lead">${lead}</p>` : ''}<h1>Выбери, чьим воином вернёшься</h1>
       <div class="fcards">${card('human')}${card('orc')}</div>
       <button class="btn primary" id="m-go" disabled>Воскреснуть</button></div>`, true);
+    this.modal.querySelector('.squad-btns')!.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-cls]');
+      if (!b) return;
+      this.modal.querySelectorAll('.squad .cls').forEach((x) => x.classList.toggle('on', x === b));
+      onClass(b.dataset.cls as HeroClass);
+    });
     const go = this.modal.querySelector<HTMLButtonElement>('#m-go')!;
     this.modal.querySelectorAll<HTMLElement>('.fcard').forEach((c) => c.addEventListener('click', () => {
       sfx.click();
@@ -680,7 +702,7 @@ export class UI {
     go.addEventListener('click', () => {
       if (!sel) return;
       const f = sel;
-      this.confirm(`${FACTIONS[f].name}?`, 'Выбор делается один раз и навсегда.', () => onConfirm(f), () => this.factionSelect(onPick, onConfirm, lead));
+      this.confirm(`${FACTIONS[f].name}?`, 'Выбор делается один раз и навсегда.', () => onConfirm(f), () => this.factionSelect(onPick, onConfirm, lead, cls, onClass));
     });
   }
 

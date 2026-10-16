@@ -414,8 +414,9 @@ export const FOREST_PINS: Record<string, [number, number]> = {
   // the elites spread over the whole forest (west, east, south), the gloves one by the pond
   bandit_warlord: FOREST_MINI, bandit_lumberjack: [19, -13], bandit_veteran: GLOVES_AT, bandit_brute: [-27, -61], bandit_runner_elite: [41, -62],
 };
-/** Two bandit trios in the trees by the gloves elite (GLOVES_BANDITS, one pack each). */
+/** Two bandit trios in the trees by the gloves elite (GLOVES_BANDITS): single spawners, GLOVES_SPREAD m round each point. */
 export const GLOVES_PACKS: [number, number][] = [[14, -74], [27, -76]];
+export const GLOVES_SPREAD = 5;
 /** Bandits in the wood between the settlement and the fort (MID_SPAWNERS): [along, side] m on the camp → fort line. */
 export const MID_UV: [number, number][] = [[18, 1], [24, 1.5], [27.5, 0], [20.7, 6.9], [17.5, 4.5]];
 /** A point [along, side] on the straight line from the settlement to the fort. */

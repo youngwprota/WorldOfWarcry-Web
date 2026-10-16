@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, SPAWN_PRESETS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, MID_SPAWNERS, CEMETERY_AREAS, LAND_ELITES, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PEAKS_SPAWNERS, PROP_SPAWNERS, SPAWNERS, WITHERED, ZONES, ZOO, type PackDef, type SpawnPreset, type SpawnPresetId, type SpawnerDef, type FactionId, type ZoneId } from './config';
+import { FACTIONS, SPAWN_PRESETS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, MID_SPAWNERS, CEMETERY_AREAS, CEMETERY_BOARS, CEMETERY_PACKS, LAND_ELITES, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PEAKS_SPAWNERS, packUnits, PROP_SPAWNERS, SPAWNERS, WITHERED, ZONES, ZOO, type PackDef, type SpawnPreset, type SpawnPresetId, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
-  ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, OLD_TRAIL, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, ringSpots, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
+  ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, GLOVES_SPREAD, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, OLD_TRAIL, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, ringSpots, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
   borderAway, borderRoom, pathAt, pathDist, progressAt, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
 } from './island';
 import type { Gate } from './island';
@@ -693,6 +693,16 @@ export class World {
       this.addSpawn(`${id}:${j}`, { unit: 'mob', id: s.id }, spots[j].x, spots[j].z, zone, depth, 0, { group, behavior: s.behavior });
     }
   }
+  /** Turns single spawners (by id) into one social pack `id`, standing in a ring round their mean spot. */
+  private joinPack(id: string, ids: string[]) {
+    const units = ids.map((u) => this.spawns.find((s) => s.id === u)!);
+    const x = units.reduce((t, s) => t + s.x, 0) / units.length;
+    const z = units.reduce((t, s) => t + s.z, 0) / units.length;
+    const group: SpawnGroup = { id, charges: units.map((s) => s.group.charges).sort((a, b) => b[0] - a[0])[0], link: 'social', x, z, zone: units[0].zone };
+    const spots = ringSpots(x, z, units.length, 1.8);
+    units.forEach((s, j) => Object.assign(s, { x: spots[j].x, z: spots[j].z, group }));
+    this.packCenters.push([x, z]);
+  }
   /** A breakable prop spawner from config PROP_SPAWNERS[group][i]. */
   private addProp(group: string, i: number, d: SpawnerDef, x: number, z: number, zone: ZoneId, rot: number) {
     this.addSpawn(`prop:${group}:${i}`, d, x, z, zone, 0, rot);
@@ -756,9 +766,11 @@ export class World {
     const packs = GLOVES_PACKS;
     GLOVES_BANDITS.forEach((p, i) => {
       const [px, pz] = packs[i];
-      const spots = ringSpots(px, pz, p.slots.length, 1.6, Math.PI / 2);
-      for (const q of spots) this.taken.push([q.x, q.z]);
-      this.addPack(`forest:gloves:${i}`, p, spots, 'forest', 0.3);
+      const spots = ringSpots(px, pz, p.slots.length, GLOVES_SPREAD, Math.PI / 2);
+      packUnits(p).forEach((d, j) => {
+        this.taken.push([spots[j].x, spots[j].z]);
+        this.addSpawn(`forest:gloves:${i}:${j}`, d, spots[j].x, spots[j].z, 'forest', 0.3, 0);
+      });
     });
     for (const p of packs) this.packCenters.push([p[0], p[1]]);
   }
@@ -796,12 +808,16 @@ export class World {
     const s0 = progressAt(-3, -80);
     this.hubHouses();
     // The guards come first so the roaming mobs keep away from them.
+    const loneGuards: [string, SpawnerDef][] = [];
     for (const [id, spots] of [['boss_guard', BOSS_GUARDS], ['gate_guard', GATE_GUARDS]] as const) {
       for (const p of spots) {
         this.packCenters.push([p.x, p.z]);
         this.taken.push([p.x, p.z]);
       }
-      this.addPack(`forest:${id}`, GUARD_PACKS[id], spots, 'forest', 0);
+      // a pair as one pack; the last slot leaves it for an empty part of the forest (placed once everything else stands)
+      const p = GUARD_PACKS[id];
+      this.addPack(`forest:${id}`, { ...p, slots: p.slots.slice(0, 2) }, spots.slice(0, 2), 'forest', 0);
+      loneGuards.push([`forest:${id}:lone`, packUnits(p)[2]]);
     }
     // Pinned: the mini-boss, the armour and gloves elites, «Громила» by the hills door; the rest spread along the trail up to the fort.
     this.mobsAlong([[s0, sFort - 28]], SPAWNERS.forest ?? [], 'forest', r, FOREST_PINS);
@@ -963,6 +979,25 @@ export class World {
       inForest(x, z) && !inCamp(x, z, 2) && Math.hypot(x - fx, z - fz) > FORT.r + 2 && this.free(x, z, 1) && pathDist(x, z) > PATH_W + 0.5;
     const list = PROP_SPAWNERS.forest;
     this.spread(list.length, 6, nearTrail, okProp, true).forEach(({ x, z }, i) => this.addProp('forest', i, list[i], x, z, 'forest', r() * 6));
+    for (const [id, d] of loneGuards) {
+      const p = this.emptySpot((x, z) => inForest(x, z) && !inCamp(x, z, 4) && Math.hypot(x - fx, z - fz) > FORT.r + 4 && this.free(x, z, 1.2));
+      if (p) this.addSpawn(id, d, p.x, p.z, 'forest', 0, 0);
+    }
+  }
+
+  /** The spot passing `ok` farthest from every spawn so far (2 m grid over the island). */
+  private emptySpot(ok: (x: number, z: number) => boolean) {
+    let best: { x: number; z: number } | null = null;
+    let bestD = -1;
+    for (let x = MAP_BOX.x; x < MAP_BOX.x + MAP_BOX.size; x += 2) {
+      for (let z = MAP_BOX.z; z < MAP_BOX.z + MAP_BOX.size; z += 2) {
+        if (!ok(x, z)) continue;
+        let d = Infinity;
+        for (const s of this.spawns) d = Math.min(d, (s.x - x) ** 2 + (s.z - z) ** 2);
+        if (d > bestD) { bestD = d; best = { x, z }; }
+      }
+    }
+    return best;
   }
 
   // ---------- rocky ridges round every location, a barrier in every passage ----------
@@ -1068,6 +1103,11 @@ export class World {
     this.abandonedVillage(area.village.x, area.village.z, r);
     this.chapelRuins(area.chapel.x, area.chapel.z, r);
     this.mobsAlong([[s0, s1]], SPAWNERS.cemetery ?? [], 'cemetery', r, pins);
+    CEMETERY_PACKS.forEach((ids, k) => this.joinPack(`cemetery:pack:${k}`, ids.map((i) => `cemetery:${i}`)));
+    const boars = this.spotIn('cemetery', ...CEMETERY_BOARS.at, 3);
+    this.packCenters.push([boars.x, boars.z]);
+    this.taken.push([boars.x, boars.z]);
+    this.addPack('cemetery:boars', CEMETERY_BOARS.pack, ringSpots(boars.x, boars.z, CEMETERY_BOARS.pack.slots.length, 1.8), 'cemetery', 0.5);
 
     // Mausoleums, crypts and ruins, by angle (deg) and radius in the cemetery sector (slid inside the shore if needed)
     const ins = (name: string, deg: number, d: number, scale: number, rot: number, pad = 3, collide: number | 'auto' = 'auto') => {

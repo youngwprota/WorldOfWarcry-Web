@@ -1,6 +1,6 @@
-import { RARITY_IDS, casterModel, type FactionId } from './config';
-import { ARMOR, trimModel, type Item, type VisualPart } from './items';
-import { archerSet, type HeroClass } from './party';
+import { FACTIONS, RARITY_IDS, WEAPONS, casterModel, type FactionId } from './config';
+import { ARMOR, itemModel, trimModel, type Item, type VisualPart } from './items';
+import { CLASSES, archerBow, archerSet, type HeroClass } from './party';
 
 export const BODY_PARTS: VisualPart[] = ['head', 'chest', 'arms', 'legs'];
 
@@ -45,6 +45,28 @@ export const CLASS_LOOK: Record<HeroClass, ClassLook> = {
     icon: skinIcon('caster'),
   },
 };
+
+/**
+ * How class `c` of faction `f` looks with its start weapons: bare (`rarity` null) or in its whole set of that quality
+ * (the faction screen's squad preview). `load`: parts that come on demand (assets.ensure) before setOutfit.
+ */
+export function classPreview(c: HeroClass, f: FactionId, rarity: number | null) {
+  const kit = CLASSES[c].kit;
+  const hand = kit?.hand ?? FACTIONS[f].startWeapon;
+  const w = WEAPONS[hand];
+  let main = itemModel({ kind: 'weapon', def: hand, rarity: rarity ?? 0, lvl: 1 } as Item, f);
+  if (c === 'hunter' && rarity !== null) main = archerBow(rarity, false);
+  const outfit: Partial<Record<VisualPart, string>> = rarity === null ? {} : CLASS_LOOK[c].set(f, rarity);
+  return {
+    model: CLASSES[c].model?.[f] ?? FACTIONS[f].hero,
+    // [right, left, main weapon in the left hand]: the bow is held in the left hand, the staff casts from it
+    weapon: (w.leftHand ? [null, main, false] : [main, null, !!w.staff]) as [string | null, string | null, boolean],
+    orb: kit?.left && WEAPONS[kit.left].orb ? WEAPONS[kit.left].model[f] : null,
+    outfit,
+    trims: rarity !== null && CLASS_LOOK[c].trims ? debugSetTrims(f, rarity) : [],
+    load: [...Object.values(outfit), ...(c === 'hunter' && rarity !== null ? [main] : [])] as string[],
+  };
+}
 
 /** Quality pieces of the warrior's debug look (none at common, like armorTrim). */
 export const debugSetTrims = (f: FactionId, rarity: number) =>
