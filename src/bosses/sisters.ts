@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { MOBS, type MobDef } from '../config';
-import type { Mob } from '../game';
+import type { Mob } from '../mobs/mob';
 import type { BossHost, BossKit, BossKitFactory } from './kit';
 
 // Tunables

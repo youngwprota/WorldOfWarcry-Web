@@ -414,7 +414,7 @@ export const FOREST_PINS: Record<string, [number, number]> = {
   // the elites spread over the whole forest (west, east, south), the gloves one by the pond
   bandit_warlord: FOREST_MINI, bandit_lumberjack: [19, -13], bandit_veteran: GLOVES_AT, bandit_brute: [-27, -61], bandit_runner_elite: [41, -62],
 };
-/** Two bandit pairs in the trees by the gloves elite (GLOVES_BANDITS, two per pack). */
+/** Two bandit trios in the trees by the gloves elite (GLOVES_BANDITS, one pack each). */
 export const GLOVES_PACKS: [number, number][] = [[14, -74], [27, -76]];
 /** Bandits in the wood between the settlement and the fort (MID_SPAWNERS): [along, side] m on the camp → fort line. */
 export const MID_UV: [number, number][] = [[18, 1], [24, 1.5], [27.5, 0], [20.7, 6.9], [17.5, 4.5]];
@@ -526,10 +526,19 @@ export function progressAt(x: number, z: number) {
   return bi * STEP;
 }
 
-/** Two spots flanking a trail point (`gap` m either side of it). */
+/** A guard trio at a trail point: two flanking it (`gap` m either side), the third behind their gap along the trail. */
 const flank = (x: number, z: number, tx: number, tz: number, gap: number) => [
-  { x: x + tz * gap, z: z - tx * gap }, { x: x - tz * gap, z: z + tx * gap },
+  { x: x + tz * gap, z: z - tx * gap }, { x: x - tz * gap, z: z + tx * gap }, { x: x + tx * 1.5, z: z + tz * 1.5 },
 ];
+/** n spots on a circle of radius r round (x, z), from angle a0. */
+export function ringSpots(x: number, z: number, n: number, r: number, a0 = 0) {
+  const out: { x: number; z: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = a0 + (i / n) * Math.PI * 2;
+    out.push({ x: x + Math.sin(a) * r, z: z + Math.cos(a) * r });
+  }
+  return out;
+}
 /** Guards just inside the north gate (hub → Snow Pass), either side of the door. */
 export const GATE_GUARDS = flank(DOOR_PEAKS.x - DOOR_PEAKS.tx * 8, DOOR_PEAKS.z - DOOR_PEAKS.tz * 8, DOOR_PEAKS.tx, DOOR_PEAKS.tz, 2.6);
 

@@ -1,7 +1,7 @@
 // Debug panel. Floating, does not pause the game, so fights can be watched live. Open: ` (Backquote) or ⚙ → «Дебаг-меню».
 import { sfx } from './audio';
-import { ZONES } from './config';
-import type { ZoneId } from './config';
+import { SPAWN_PRESETS, ZONES } from './config';
+import type { SpawnPreset, SpawnPresetId, ZoneId } from './config';
 import { ARENA, FOREST_MINI, FORT, GATES, ISLAND, LAND_BOSSES } from './island';
 import type { Game } from './game';
 import { CLASSES, CLASS_IDS, type HeroClass } from './party';
@@ -35,6 +35,19 @@ function teleport(g: Game, arg: string) {
   const dz = ISLAND.cz - at[1];
   const l = Math.hypot(dx, dz) || 1;
   g.debugTeleportTo(at[0] + (dx / l) * 5, at[1] + (dz / l) * 5, kind === 'fort' || kind === 'arena' || kind === 'fmini' ? undefined : gate?.id);
+}
+
+/** `arg`: SpawnPresetId; the pack centre is read at click time (World.presets is filled when the world is built). */
+function teleportPreset(g: Game, arg: string) {
+  let p: (typeof g.world.presets)[number] | undefined;
+  for (const e of g.world.presets) if (e.id === arg) p = e;
+  if (!p) return;
+  // into the middle of a horde, 6 m short of the other packs
+  const off = (SPAWN_PRESETS[p.id] as SpawnPreset).horde ? 0 : 6;
+  const dx = ISLAND.cx - p.x;
+  const dz = ISLAND.cz - p.z;
+  const l = Math.hypot(dx, dz) || 1;
+  g.debugTeleportTo(p.x + (dx / l) * off, p.z + (dz / l) * off, 'swamp-dunes');
 }
 
 /** Gear a player plausibly has by each boss: armour rarity (the class set), weapon rarity, ring and amulet. */
@@ -81,13 +94,8 @@ function locationRows(): [string, Action[]][] {
 
 /** Class looks by quality (Game.debugSet; models load on the first pick); "База" = the equipped armour. */
 function setRows(): [string, Action[]][] {
-  const rows = (['warrior', 'hunter', 'mage'] as HeroClass[]).map((c): [string, Action[]] => [`Сет: ${CLASSES[c].name.toLowerCase()}`,
+  return (['warrior', 'hunter', 'mage'] as HeroClass[]).map((c): [string, Action[]] => [`Сет: ${CLASSES[c].name.toLowerCase()}`,
     ['База', 'Об', 'Необ', 'Ред', 'Эпик', 'Лег', 'Миф'].map((label, i): Action => [label, (g) => g.debugSet(c, i - 1), `set ${c} r${i - 1}`])]);
-  rows.splice(2, 0, ['Лук охотника (от необычного)', [
-    ['Новый', (g) => g.debugSet('hunter', g.debugLooks.hunter, false), 'bowv new'],
-    ['Похожий на базовый', (g) => g.debugSet('hunter', g.debugLooks.hunter, true), 'bowv v1 wide2'],
-  ]]);
-  return rows;
 }
 
 const SECTIONS: [string, Action[]][] = [
@@ -97,23 +105,16 @@ const SECTIONS: [string, Action[]][] = [
     ['ХП 100%', (g) => g.debugSetHp(1)],
     ['Бессмертие', (g) => { g.god = !g.god; }, 'god'],
     ['Убить рядом', (g) => g.debugKillNearby(), 'wide'],
+    ['Уничтожить всех', (g) => g.debugKillAll(), 'wide'],
+    ['Сбросить таймеры', (g) => g.debugResetTimers(), 'wide'],
+    ['Восстановить всех', (g) => g.debugRestoreAll(), 'wide'],
   ]],
-  ['Оружие', [
-    ['Меч', (g) => g.debugGiveWeapon('sword')],
-    ['Топор', (g) => g.debugGiveWeapon('axe')],
-    ['Молот', (g) => g.debugGiveWeapon('hammer')],
-    ['Древковое', (g) => g.debugGiveWeapon('polearm')],
-  ]],
-  ['Щит', [
-    ['Шипастый', (g) => g.debugGiveWeapon('shield_spiked', 1)],
-    ['Пусто', (g) => g.debugClearLeft(), 'wide'],
-  ]],
-  // a set's 4 pieces + ring + amulet; pressing the same set again raises the quality (common → mythic → common)
-  ['Броня', [
-    ['Сет класса', (g) => g.debugGiveArmor(CLASS_SET[g.heroClass]), 'wide'],
-  ]],
+  ['Пресеты спавнов', (Object.keys(SPAWN_PRESETS) as SpawnPresetId[]).map((id): Action => [SPAWN_PRESETS[id].name, teleportPreset, '', id])],
   ['Предметы', [
+    // a set's 4 pieces + ring + amulet; pressing the same set again raises the quality (common → mythic → common)
+    ['Сет класса', (g) => g.debugGiveArmor(CLASS_SET[g.heroClass]), 'wide'],
     ['Выдать все', (g) => g.debugGiveAll(), 'wide'],
+    ['Сменить расу', (g) => g.debugSwitchFaction(), 'wide'],
   ]],
   ['Статы (+очки)', [
     ['+10 урон', (g) => g.debugAddStat('power', 10)],
@@ -129,17 +130,9 @@ const SECTIONS: [string, Action[]][] = [
     ['+10% реген', (g) => g.debugAddStat('regen', 10, true)],
     ['Сбросить дебаг-статы', (g) => g.debugClearStats(), 'wide'],
   ]],
-  ['Раса', [
-    ['Сменить расу (человек ⇄ орк)', (g) => g.debugSwitchFaction(), 'wide'],
-  ]],
   ...setRows(),
   ['Горнило', [
     ['+5 круток', (g) => g.debugAddPulls(5), 'wide'],
-  ]],
-  ['Спавнеры', [
-    ['Уничтожить всех', (g) => g.debugKillAll(), 'wide'],
-    ['Сбросить таймеры', (g) => g.debugResetTimers(), 'wide'],
-    ['Восстановить всех', (g) => g.debugRestoreAll(), 'wide'],
   ]],
   ['Скейл героя', [
     ['−0.1', (g) => g.debugSetHeroScale(g.heroScale - 0.1)],
@@ -156,10 +149,8 @@ const SECTIONS: [string, Action[]][] = [
     ['54', (g) => g.debugSetFov(54)],
     ['+5', (g) => g.debugSetFov(g.camera.fov + 5)],
   ]],
-  ['Ворота', [
+  ['Ворота и туман войны', [
     ['Открыть все ворота', (g) => g.debugOpenGates(), 'wide'],
-  ]],
-  ['Туман войны', [
     ['Убрать туман войны', (g) => g.debugFog(true), 'wide'],
     ['Вернуть туман', (g) => g.debugFog(false), 'wide'],
   ]],
@@ -181,19 +172,21 @@ export class DebugPanel {
   constructor(app: HTMLElement, private game: Game) {
     this.el.id = 'debug';
     this.el.className = 'ui-block hidden';
+    // the hero build fields open the first section (Бой)
+    const build = '<div class="dbg-build"><label>Атака <input data-build="power" type="number" min="0"></label>' +
+      '<label>HP <input data-build="hp" type="number" min="1"></label><button data-apply>Применить</button></div>';
     this.el.innerHTML = `<div class="dbg-head"><b>🛠 Дебаг</b><span><button data-min title="Свернуть">–</button> <button data-close>✕</button></span></div><pre class="dbg-info"></pre>` +
-      '<div class="dbg-sec"><span>Билд героя</span><div class="dbg-build"><label>Атака <input data-build="power" type="number" min="0"></label>' +
-      '<label>HP <input data-build="hp" type="number" min="1"></label><button data-apply>Применить</button></div></div>' +
-      SECTIONS.map(([title, actions], si) => `<div class="dbg-sec"><span>${title}</span><div class="dbg-btns">` +
+      SECTIONS.map(([title, actions], si) => `<div class="dbg-sec"><span>${title}</span>${si ? '' : build}<div class="dbg-btns">` +
         actions.map(([label, , cls], ai) => `<button class="${cls ?? ''}" data-a="${si}:${ai}">${label}</button>`).join('') +
         '</div></div>').join('');
     app.appendChild(this.el);
     this.info = this.el.querySelector('.dbg-info')!;
-    // Keep taps on the panel away from the joystick and the world.
-    this.el.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.el.addEventListener('pointerdown', this.dragStart);
+    addEventListener('pointermove', this.dragMove);
+    addEventListener('pointerup', this.dragEnd);
     this.el.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
-      if (!b) return;
+      if (!b || this.dragged) return;
       sfx.click();
       if (b.dataset.close !== undefined) { this.toggle(false); return; }
       if (b.dataset.apply !== undefined) { this.applyBuild(); return; }
@@ -205,6 +198,26 @@ export class DebugPanel {
     });
     addEventListener('keydown', (e) => { if (e.code === 'Backquote') this.toggle(); });
   }
+
+  /** Drag-to-scroll with the mouse too (touch scrolls natively); a drag past a few px swallows the click. */
+  private dragY = NaN;
+  private dragTop = 0;
+  private dragged = false;
+  private dragStart = (e: PointerEvent) => {
+    // Keep taps on the panel away from the joystick and the world.
+    e.stopPropagation();
+    this.dragged = false;
+    if (e.pointerType !== 'mouse' || (e.target as HTMLElement).closest('input')) return;
+    this.dragY = e.clientY;
+    this.dragTop = this.el.scrollTop;
+  };
+  private dragMove = (e: PointerEvent) => {
+    if (Number.isNaN(this.dragY)) return;
+    const dy = e.clientY - this.dragY;
+    if (Math.abs(dy) > 4) this.dragged = true;
+    if (this.dragged) this.el.scrollTop = this.dragTop - dy;
+  };
+  private dragEnd = () => { this.dragY = NaN; };
 
   get isOpen() { return !this.el.classList.contains('hidden'); }
 
@@ -234,13 +247,24 @@ export class DebugPanel {
     this.render();
   }
 
+  /** The strip spans from the gap between the bag and the class buttons down to the weapon slots, left of the class buttons (both move with the HUD scale). */
+  private fit() {
+    const app = this.el.parentElement!.getBoundingClientRect();
+    const bag = document.getElementById('btn-bag')!.getBoundingClientRect();
+    const party = document.getElementById('party')!.getBoundingClientRect();
+    const weapons = document.getElementById('weapons')!.getBoundingClientRect();
+    this.el.style.setProperty('--dbg-top', `${(bag.bottom + party.top) / 2 - app.top}px`);
+    this.el.style.setProperty('--dbg-bottom', `${app.bottom - weapons.top + 4}px`);
+    this.el.style.setProperty('--dbg-right', `${app.right - party.left + 4}px`);
+  }
+
   private render() {
+    this.fit();
     const d = this.game.debugInfo();
     this.el.querySelector('.god')?.classList.toggle('on', d.god);
     const looks = this.game.debugLooks;
     this.el.querySelectorAll<HTMLElement>('.set').forEach((b) =>
       b.classList.toggle('on', CLASS_IDS.some((c) => b.classList.contains(c) && b.classList.contains(`r${looks[c]}`))));
-    this.el.querySelectorAll('.bowv').forEach((b) => b.classList.toggle('on', b.classList.contains(this.game.bowV1 ? 'v1' : 'new')));
     this.info.textContent = [
       `ХП ${d.hp}/${d.maxHp}${d.god ? '  [бессмертие]' : ''}`,
       `Крит ${pct(d.crit)} ×${d.critMul.toFixed(2)}  уклон ${pct(d.dodge)}  ${d.speed.toFixed(2)} м/с`,

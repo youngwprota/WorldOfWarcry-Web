@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PEAKS_SPAWNERS, PROP_SPAWNERS, SPAWNERS, WITHERED, ZONES, ZOO, type SpawnerDef, type FactionId, type ZoneId } from './config';
+import { FACTIONS, SPAWN_PRESETS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PEAKS_SPAWNERS, PROP_SPAWNERS, SPAWNERS, WITHERED, ZONES, ZOO, type PackDef, type SpawnPreset, type SpawnPresetId, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
-  ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, OLD_TRAIL, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
+  ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, OLD_TRAIL, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, ringSpots, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
   borderAway, borderRoom, pathAt, pathDist, progressAt, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
 } from './island';
 import type { Gate } from './island';
@@ -31,12 +31,18 @@ export function rng(seed: number) {
 
 export interface Obstacle { x: number; z: number; r: number; }
 /**
- * A fixed spawner of one unit — a mob or a breakable prop (config SPAWNERS / PROP_SPAWNERS).
- * `unit` + `kind`: MOBS id or BREAKABLES kind; `id` keys its saved charge state; `charges`: cooldowns per kill / break;
- * `depth` 0..1: how far along its zone's stretch of the trail a mob sits (DEPTH scaling); `rot`: a prop's facing.
+ * A spawn: one unit (config SPAWNERS / PROP_SPAWNERS) or a pack (PackDef). `id` keys its saved charge state;
+ * `charges`: cooldowns per clear; (x, z): its centre.
+ */
+export interface SpawnGroup { id: string; charges: number[]; link: PackDef['link']; x: number; z: number; zone: ZoneId }
+/**
+ * One unit of a spawn — a mob or a breakable prop. `unit` + `kind`: MOBS id or BREAKABLES kind;
+ * `depth` 0..1: how far along its zone's stretch of the trail a mob sits (DEPTH scaling); `rot`: a prop's facing;
+ * `behavior`: the pack slot's override.
  */
 export interface SpawnPoint {
-  id: string; unit: 'mob' | 'prop'; kind: string; x: number; z: number; charges: number[]; zone: ZoneId; depth: number; rot: number;
+  id: string; unit: 'mob' | 'prop'; kind: string; x: number; z: number; zone: ZoneId; depth: number; rot: number;
+  group: SpawnGroup; behavior?: PackDef['slots'][number]['behavior'];
 }
 
 
@@ -188,6 +194,8 @@ export class World {
   /** Every spawner on the island: mobs and breakable props alike. */
   readonly spawns: SpawnPoint[] = [];
   readonly bosses: { mob: string; x: number; z: number }[] = [];
+  /** Spawn presets shown in the dunes (debug teleport): which preset and its centre. */
+  readonly presets: { id: SpawnPresetId; x: number; z: number }[] = [];
   /** Trail point just outside the bandit fort's entrance and the trail direction there (where reinforcements arrive). */
   readonly fortExit = { x: 0, z: 0, tx: 0, tz: 0 };
   readonly ponds: Pond[] = [{ x: 11, z: -83, r: 5 }];
@@ -632,7 +640,7 @@ export class World {
   }
 
   /** A spawner from the config; without `charges` it has one endless charge with the unit's own respawn time. */
-  private addSpawn(id: string, d: SpawnerDef, x: number, z: number, zone: ZoneId, depth: number, rot: number) {
+  private addSpawn(id: string, d: SpawnerDef, x: number, z: number, zone: ZoneId, depth: number, rot: number, slotOf?: { group: SpawnGroup; behavior: SpawnPoint['behavior'] }) {
     // nothing spawns in the no-walk band along the ridges: slide the spot out of it
     for (let i = 0; i < 30 && borderRoom(x, z) < 1; i++) {
       const n = borderAway(x, z);
@@ -640,7 +648,24 @@ export class World {
       z += n.z * 0.5;
     }
     const respawn = d.unit === 'mob' ? MOBS[d.id].respawn : BREAKABLES[d.id].respawn;
-    this.spawns.push({ id, unit: d.unit, kind: d.id, x, z, charges: d.charges ?? [respawn], zone, depth, rot });
+    const group = slotOf?.group ?? { id, charges: d.charges ?? [respawn], link: 'none', x, z, zone };
+    this.spawns.push({ id, unit: d.unit, kind: d.id, x, z, zone, depth, rot, group, behavior: slotOf?.behavior });
+  }
+  /** A pack (config PackDef): its mobs at `spots` (one per slot), saved under `id` as one spawn. */
+  private addPack(id: string, p: PackDef, spots: { x: number; z: number }[], zone: ZoneId, depth: number) {
+    let respawn = 0;
+    let x = 0;
+    let z = 0;
+    for (let j = 0; j < spots.length; j++) {
+      respawn = Math.max(respawn, MOBS[p.slots[j].id].respawn);
+      x += spots[j].x / spots.length;
+      z += spots[j].z / spots.length;
+    }
+    const group: SpawnGroup = { id, charges: p.charges ?? [respawn], link: p.link, x, z, zone };
+    for (let j = 0; j < p.slots.length; j++) {
+      const s = p.slots[j];
+      this.addSpawn(`${id}:${j}`, { unit: 'mob', id: s.id }, spots[j].x, spots[j].z, zone, depth, 0, { group, behavior: s.behavior });
+    }
   }
   /** A breakable prop spawner from config PROP_SPAWNERS[group][i]. */
   private addProp(group: string, i: number, d: SpawnerDef, x: number, z: number, zone: ZoneId, rot: number) {
@@ -700,14 +725,14 @@ export class World {
     }
   }
 
-  /** Two bandit pairs in the trees by the gloves elite. */
+  /** Two bandit trios in the trees by the gloves elite. */
   private glovesGuards() {
     const packs = GLOVES_PACKS;
-    GLOVES_BANDITS.forEach((d, i) => {
-      const [px, pz] = packs[i >> 1];
-      const x = px + (i & 1 ? 1.6 : -1.6);
-      this.taken.push([x, pz]);
-      this.addSpawn(`forest:gloves:b${i}`, d, x, pz, 'forest', 0.3, 0);
+    GLOVES_BANDITS.forEach((p, i) => {
+      const [px, pz] = packs[i];
+      const spots = ringSpots(px, pz, p.slots.length, 1.6, Math.PI / 2);
+      for (const q of spots) this.taken.push([q.x, q.z]);
+      this.addPack(`forest:gloves:${i}`, p, spots, 'forest', 0.3);
     });
     for (const p of packs) this.packCenters.push([p[0], p[1]]);
   }
@@ -745,13 +770,12 @@ export class World {
     const s0 = progressAt(-3, -80);
     this.hubHouses();
     // The guards come first so the roaming mobs keep away from them.
-    let gi = 0;
     for (const [id, spots] of [['boss_guard', BOSS_GUARDS], ['gate_guard', GATE_GUARDS]] as const) {
       for (const p of spots) {
         this.packCenters.push([p.x, p.z]);
         this.taken.push([p.x, p.z]);
-        this.addSpawn(`forest:guard:${gi++}`, GUARD_SPAWNERS[id], p.x, p.z, 'forest', 0, 0);
       }
+      this.addPack(`forest:${id}`, GUARD_PACKS[id], spots, 'forest', 0);
     }
     // Pinned: the mini-boss, the armour and gloves elites, «Громила» by the hills door; the rest spread along the trail up to the fort.
     this.mobsAlong([[s0, sFort - 28]], SPAWNERS.forest ?? [], 'forest', r, FOREST_PINS);
@@ -1158,7 +1182,41 @@ export class World {
     this.snowMobs(r);
     this.snowProps(r);
     this.snowBeasts(r);
+    this.dunesPresets();
     this.dressOuterLands(r);
+  }
+
+  /** One pack of each spawn preset (config SPAWN_PRESETS) on the empty dunes, as a showcase. */
+  private dunesPresets() {
+    const r = rng(53);
+    const spots: [SpawnPresetId, number, number][] = [['archer_escort', 35, 25], ['flankers', 60, 25], ['growing', 90, 35], ['skirmishers', 45, 65], ['horde', 30, 85], ['horde_mixed', 100, 62]];
+    for (const [id, x0, z0] of spots) {
+      const c = this.spotIn('dunes', x0, z0, 3);
+      const preset: SpawnPreset = SPAWN_PRESETS[id];
+      const p = preset.pack;
+      const at = preset.horde === 'scatter' ? this.scatterSpots(c.x, c.z, p.slots.length, 7, r)
+        : ringSpots(c.x, c.z, p.slots.length, preset.horde ? 3.5 : 1.8);
+      this.packCenters.push([c.x, c.z]);
+      for (const q of at) this.taken.push([q.x, q.z]);
+      this.addPack(`dunes:preset:${id}`, p, at, 'dunes', 0);
+      this.presets.push({ id, x: c.x, z: c.z });
+    }
+  }
+
+  /** n random walkable spots within `radius` of (x, z), clear of its middle (a teleport lands there) and of each other. */
+  private scatterSpots(x: number, z: number, n: number, radius: number, r: () => number) {
+    const out: { x: number; z: number }[] = [];
+    for (let t = 0; out.length < n && t < n * 40; t++) {
+      const a = r() * Math.PI * 2;
+      // sqrt: even spread over the disc, not bunched at the middle
+      const d = 2 + Math.sqrt(r()) * (radius - 2);
+      const q = { x: x + Math.sin(a) * d, z: z + Math.cos(a) * d };
+      let near = false;
+      for (const o of out) if (Math.hypot(o.x - q.x, o.z - q.z) < 1.4) near = true;
+      if (!near && walkable(q.x, q.z, 1)) out.push(q);
+    }
+    while (out.length < n) out.push({ x: x + 2, z });
+    return out;
   }
 
   /** Distance to the Snow Pass roads (its trail, the side branch and the abandoned path from the arena). */
@@ -1179,14 +1237,16 @@ export class World {
   /** Snow Pass mobs (config PEAKS_SPAWNERS): guards past the hub gate, sword packs on and beside the trail, lone assassins in the woods. */
   private snowMobs(r: () => number) {
     const g = GATES.find((t) => t.id === 'forest-peaks')!;
-    PEAKS_SPAWNERS.guards.forEach((d, i) => {
-      const side = i % 2 ? 1 : -1;
-      const x = g.x + g.tx * 7 + g.tz * side * 2.6;
-      const z = g.z + g.tz * 7 - g.tx * side * 2.6;
+    // two either side of the road, the third behind their gap
+    const guards: { x: number; z: number }[] = [];
+    for (const side of [-1, 1, 0]) {
+      const x = g.x + g.tx * (side ? 7 : 8.5) + g.tz * side * 2.6;
+      const z = g.z + g.tz * (side ? 7 : 8.5) - g.tx * side * 2.6;
+      guards.push({ x, z });
       this.packCenters.push([x, z]);
       this.taken.push([x, z]);
-      this.addSpawn(`peaks:guard:${i}`, d, x, z, 'peaks', 0, 0);
-    });
+    }
+    this.addPack('peaks:guards', PEAKS_SPAWNERS.guards, guards, 'peaks', 0);
     PEAKS_SPAWNERS.elites.forEach((e, i) => {
       const p = this.spotIn('peaks', e.x, e.z, 3);
       this.packCenters.push([p.x, p.z]);
@@ -1219,11 +1279,13 @@ export class World {
       this.packCenters.push([c.x, c.z]);
       this.taken.push([c.x, c.z]);
       const a0 = r() * Math.PI * 2;
-      pack.forEach((d, j) => {
-        const a = a0 + (j / pack.length) * Math.PI * 2 + (r() - 0.5) * 0.8;
+      const spots: { x: number; z: number }[] = [];
+      for (let j = 0; j < pack.slots.length; j++) {
+        const a = a0 + (j / pack.slots.length) * Math.PI * 2 + (r() - 0.5) * 0.8;
         const rr = 1.4 + r() * 1.2;
-        this.addSpawn(`peaks:pack:${i}:${j}`, d, c.x + Math.sin(a) * rr, c.z + Math.cos(a) * rr, 'peaks', 0, 0);
-      });
+        spots.push({ x: c.x + Math.sin(a) * rr, z: c.z + Math.cos(a) * rr });
+      }
+      this.addPack(`peaks:pack:${i}`, pack, spots, 'peaks', 0);
     });
     const inPass = () => ({ x: MAP_BOX.x + r() * MAP_BOX.size, z: MAP_BOX.z + r() * MAP_BOX.size });
     const okLone = (x: number, z: number) => {
@@ -1245,10 +1307,7 @@ export class World {
       if (zoneIdAt(x, z) !== 'peaks' || !walkable(x, z, 2.5) || this.snowRoadDist(x, z) < 3) continue;
       this.packCenters.push([x, z]);
       this.taken.push([x, z]);
-      PEAKS_SPAWNERS.bears.forEach((d, j) => {
-        const b = a + (j / 3) * Math.PI * 2;
-        this.addSpawn(`peaks:bears:${j}`, d, x + Math.sin(b) * 1.8, z + Math.cos(b) * 1.8, 'peaks', 0, 0);
-      });
+      this.addPack('peaks:bears', PEAKS_SPAWNERS.bears, ringSpots(x, z, PEAKS_SPAWNERS.bears.slots.length, 1.8, a), 'peaks', 0);
       break;
     }
     // attackable trees: one at a time along the trail, alternating sides, about a road's width off it
