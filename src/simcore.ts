@@ -3,7 +3,7 @@
 // in a worker) both run it.
 import * as CONFIG from './config';
 import {
-  ATTACK_HIT, BREAKABLES, COMBOS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
+  ATTACK_HIT, BREAKABLES, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_SPAWNERS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
   PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, START_PET, STAVES, WEAPONS, depthMul, mobImpact, mobRank, tokenChance as zoneTokenChance,
   type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
@@ -220,7 +220,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   let taken = 0, slams = 0, slamHits = 0, swings = 0;
   const pending: [number, number][] = []; // [time, damage] of telegraphed blasts
   // hands
-  const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1, combo: 0 }));
+  const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1 }));
   // class extras (game.ts staffHit / iceHit / throwGust / updatePet), single target: the hunter's pet bites what he
   // shoots; the fire staff burns (+vulnerability), the ice staff freezes every Nth hit, the wind staff throws an orb
   const pet = CLASSES[h.cls].pet ? PETS[START_PET] : null;
@@ -239,7 +239,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     if (g && weapon && t - lastCounter >= g.cd && (mean ? true : chance(g.counter[rank]))) {
       lastCounter = t;
       if (mean) hit(weapon, g.counter[rank]);
-      else strike({ i: 0, it: weapon, combo: 0 }, true);
+      else strike(weapon);
     }
   };
   const hurt = (raw: number) => {
@@ -262,12 +262,9 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     return dmg;
   };
   /** One swing of a hand (counters too). */
-  const strike = (hd: { i: number; it: Item | null; combo: number }, counter = false) => {
-    const it = hd.it!;
+  const strike = (it: Item) => {
     const w = WEAPONS[it.def];
-    const fin = !counter && hd.combo >= COMBOS[it.def].hits ? COMBOS[it.def] : null;
-    const mult = fin ? fin.mult : 1;
-    const dmg = hit(it, mult);
+    const dmg = hit(it, 1);
     if (w.staff === 'fire' && dmg > 0) { if (burn <= 0) burnTick = B.tick; burn = B.time; burnDps = dmg * B.dps; }
     if (w.staff === 'ice' && dmg > 0) {
       const f = STAVES.ice.freeze;
@@ -279,11 +276,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       windN = (windN + 1) % o.every;
       if (windN === 0 && !d.static) gusts.push(t + o.flight); // orbs skip passive units
     }
-    if (!boss) {
-      if (fin?.stun) stun = Math.max(stun, fin.stun);
-      else if (w.stun && (mean ? false : chance(w.stun))) stun = Math.max(stun, 0.9);
-    }
-    if (fin) hd.combo = 0;
+    if (!boss && w.stun && (mean ? false : chance(w.stun))) stun = Math.max(stun, 0.9);
   };
   let t = 0;
   for (; t < limit && hp > 0 && mhp > 0; t += DT) {
@@ -296,11 +289,10 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       hd.cd -= DT;
       if (hd.cd > 0 || busy > 0) continue;
       const per = 1 / w.aps;
-      // uptime: the hero spends part of the fight repositioning — swings come later and the chain may break
+      // uptime: the hero spends part of the fight repositioning — swings come later
       hd.cd = per / OPT.uptime;
-      hd.combo = w.cycle || mean || rand() < OPT.combo ? hd.combo + 1 : 1;
       swings++;
-      strike(hd);
+      strike(hd.it);
     }
     // the pet: always on the target (slams do not stop it), × the plain blow of the weapon, no crits or dodges
     if (pet && h.weapons[0]) {

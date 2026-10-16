@@ -281,6 +281,37 @@ export function tintedArt(id: string, color: string) {
   return null;
 }
 
+const whiteCache = new Map<string, HTMLCanvasElement | null>();
+/**
+ * A pack PNG icon in white for canvas drawing (map tiles on a quality colour): every lit pixel turns white, the dark
+ * ink outline stays dark, at the PNG's own resolution. Cached per id; null until the PNG has loaded.
+ */
+export function whiteArt(id: string) {
+  if (whiteCache.get(id)) return whiteCache.get(id)!;
+  if (!whiteCache.has(id)) {
+    whiteCache.set(id, null);
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const g = c.getContext('2d')!;
+      g.drawImage(img, 0, 0);
+      const px = g.getImageData(0, 0, c.width, c.height);
+      const d = px.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const l = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
+        const v = 255 * Math.min(1, Math.max(0, (l - 0.12) / 0.28));
+        d[i] = d[i + 1] = d[i + 2] = v;
+      }
+      g.putImageData(px, 0, 0);
+      whiteCache.set(id, c);
+    };
+    img.src = pngUrl(id);
+  }
+  return null;
+}
+
 /** Coloured icon; falls back to nothing for unknown ids. */
 export function art(id: string, size = 24, cls = '') {
   if (PNG[id]) return png(id, size, cls);

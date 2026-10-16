@@ -33,6 +33,11 @@ export interface ClassDef {
    * missing = the faction's start weapon.
    */
   kit?: { hand: string; left?: string; bag?: string[] };
+  /**
+   * Closed at the start: its button is greyed out and the hero cannot switch to it until a boss opens it
+   * (BossDef.unlockClass → SaveData.classes); saves on a closed class go back to the warrior.
+   */
+  locked?: boolean;
 }
 
 /** Order = order of the buttons, bottom-right of the HUD. */
@@ -44,13 +49,13 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
   hunter: {
     name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
     model: { human: 'human_archer', orc: 'orc_archer' },
-    weapons: ['bow'], off: [], offName: 'Питомец', pet: true, kit: { hand: 'bow' },
+    weapons: ['bow'], off: [], offName: 'Питомец', pet: true, kit: { hand: 'bow' }, locked: true,
   },
   mage: {
     name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
     model: { human: 'mage', orc: 'orc_shaman' },
     weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_fury', 'orb_vigor', 'orb_swift', 'orb_ward', 'orb_fortune', 'orb_demon'], offName: 'Сфера',
-    kit: { hand: 'staff_fire', left: 'orb_fury' },
+    kit: { hand: 'staff_fire', left: 'orb_fury' }, locked: true,
   },
 };
 

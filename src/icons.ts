@@ -35,13 +35,15 @@ const SVG: Record<string, string> = {
 
 /** Any UI icon: silhouette in `color` with an ink outline. */
 const imgCache = new Map<string, HTMLImageElement>();
-/** The same icon as an image for canvas drawing (cached; draws once loaded). */
-export function iconImage(id: string, color: string) {
-  const key = id + color;
+/** There is a flat icon drawn for `id`. */
+export const hasIcon = (id: string) => !!SVG[id];
+/** The same icon as an image for canvas drawing (cached; draws once loaded); `size`: pixels it is rasterised at. */
+export function iconImage(id: string, color: string, size = 64) {
+  const key = id + color + size;
   let img = imgCache.get(key);
   if (!img) {
     img = new Image();
-    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(icon(id, color, 64));
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(icon(id, color, size));
     imgCache.set(key, img);
   }
   return img;

@@ -4,8 +4,8 @@ import {
   type FactionId, type OrbKind, type PetDef, type ZoneDef,
 } from './config';
 import { ARMOR_SLOTS, EQUIP_BAR, cellHtml, petCellHtml, type ArmorSlot, type Item } from './items';
-import { DAMAGE_TYPE_ICON, fmtK, icon, iconImage, resistIcons, rewardChips } from './icons';
-import { STAT_ICON, art, hasPng, mini, tintedArt } from './art';
+import { DAMAGE_TYPE_ICON, fmtK, hasIcon, icon, iconImage, resistIcons, rewardChips } from './icons';
+import { STAT_ICON, art, hasPng, mini, tintedArt, whiteArt } from './art';
 import type { MobDef } from './config';
 import { sfx } from './audio';
 import type { World } from './world';
@@ -51,22 +51,61 @@ export interface MapMark {
   color: string;
   /** icons.ts id: skull, or the elite's drop (weapon id / armour slot) */
   icon: string;
+  /** The class the elite's drop is for: its badge at the tile's corner. */
+  cls?: HeroClass;
   name: string;
   respawnIn: number;
+  /** Dead: how far its respawn has come, 0..1 (the ring loader around the faded mark). */
+  respawnP: number;
   /** A main boss's drop: a small framed item badge at the skull's corner. */
-  drop?: { icon: string; color: string };
+  drop?: { icon: string; color: string; cls?: HeroClass };
 }
 
-/** An item icon in a quality-coloured frame (elites and bosses' drops on the maps). */
-function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number, id: string, color: string, s: number) {
-  // no backing: just the quality-coloured frame and the item itself painted in the same colour
-  g.strokeStyle = color;
-  g.lineWidth = 3 * s;
+/** An item icon on a tile of its quality colour (elites and bosses' drops on the maps); `cls`: whose item, a badge at the corner. */
+function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number, id: string, color: string, s: number, cls?: HeroClass) {
+  // the tile is filled with the quality colour (thin dark edge), the item's own icon on it in white
+  g.fillStyle = color;
+  g.strokeStyle = '#000';
+  g.lineWidth = 1.5 * s;
   g.beginPath();
   g.roundRect(x - r, y - r, r * 2, r * 2, 5 * s);
+  g.fill();
   g.stroke();
-  const img = hasPng(id) ? tintedArt(id, color) : iconImage(id, color);
-  if (img && (!(img instanceof HTMLImageElement) || img.complete)) g.drawImage(img, x - r * 0.85, y - r * 0.85, r * 1.7, r * 1.7);
+  // the bow has no plain icon: its common-quality one
+  const png = hasPng(id) ? id : !hasIcon(id) && hasPng(`${id}_common`) ? `${id}_common` : null;
+  const img = png ? whiteArt(png) : iconImage(id, '#fff', Math.max(8, Math.ceil(r * 1.6 * g.getTransform().a)));
+  const h = r * 0.8;
+  if (img && (!(img instanceof HTMLImageElement) || img.complete)) g.drawImage(img, x - h, y - h, h * 2, h * 2);
+  if (cls) classBadge(g, x + r * 0.85, y - r * 0.85, r * 0.55, cls, s);
+}
+
+/** Respawn loader on the map: a dark ring, filled clockwise from the top by `p` (0..1); no numbers. */
+function respawnRing(g: CanvasRenderingContext2D, x: number, y: number, r: number, p: number, s: number) {
+  g.lineWidth = 3.5 * s;
+  g.strokeStyle = '#000a';
+  g.beginPath();
+  g.arc(x, y, r, 0, Math.PI * 2);
+  g.stroke();
+  g.lineWidth = 2.2 * s;
+  g.strokeStyle = '#7dff6a';
+  g.beginPath();
+  g.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, Math.max(0, p)));
+  g.stroke();
+}
+
+/** Whose item it is: a round badge in the class colour with the class icon (the warrior's shield). */
+function classBadge(g: CanvasRenderingContext2D, x: number, y: number, r: number, cls: HeroClass, s: number) {
+  const d = CLASSES[cls];
+  g.fillStyle = d.color[1];
+  g.strokeStyle = '#000';
+  g.lineWidth = 1.5 * s;
+  g.beginPath();
+  g.arc(x, y, r, 0, Math.PI * 2);
+  g.fill();
+  g.stroke();
+  if (!hasIcon(d.icon)) return;
+  const img = iconImage(d.icon, '#fff', Math.max(8, Math.ceil(r * 1.6 * g.getTransform().a)));
+  if (img.complete) g.drawImage(img, x - r * 0.8, y - r * 0.8, r * 1.6, r * 1.6);
 }
 
 /**
@@ -82,20 +121,18 @@ export function drawMarks(g: CanvasRenderingContext2D, marks: MapMark[], X: (x: 
   for (const m of [...marks].sort((a, b) => order[a.kind] - order[b.kind])) {
     const x = X(m.x);
     const y = Y(m.z);
-    if (m.kind === 'boss' && !m.alive) {
-      g.font = `${Math.round(22 * s)}px sans-serif`;
-      g.fillText('⏳', x, y);
-      continue;
-    }
-    if (m.kind === 'elite') {
-      framedItem(g, x, y, 13 * s, m.icon, m.color, s);
-      continue;
-    }
     const r = (m.kind === 'boss' ? 19 : 13) * s;
-    // the main boss: the horned skull in red; a micro-boss: the round skull in orange
-    const img = tintedArt(m.kind === 'boss' ? 'boss' : 'skull', m.color);
-    if (img) g.drawImage(img, x - r, y - r, r * 2, r * 2);
-    if (m.drop) framedItem(g, x + r * 0.8, y + r * 0.7, 8 * s, m.drop.icon, m.drop.color, s * 0.7);
+    // dead: the mark stays at the spawn point, faded, inside a ring that fills up until the respawn
+    g.globalAlpha = m.alive ? 1 : 0.45;
+    if (m.kind === 'elite') framedItem(g, x, y, r, m.icon, m.color, s, m.cls);
+    else {
+      // the main boss: the horned skull in red; a micro-boss: the round skull in orange
+      const img = tintedArt(m.kind === 'boss' ? 'boss' : 'skull', m.color);
+      if (img) g.drawImage(img, x - r, y - r, r * 2, r * 2);
+      if (m.drop) framedItem(g, x + r * 0.8, y + r * 0.7, 8 * s, m.drop.icon, m.drop.color, s * 0.7, m.drop.cls);
+    }
+    g.globalAlpha = 1;
+    if (!m.alive) respawnRing(g, x, y, r * 1.35, m.respawnP, s);
   }
   g.restore();
 }
@@ -141,7 +178,7 @@ export class UI {
     const party = $('party');
     party.innerHTML = CLASS_IDS.map((c, i) => {
       const d = CLASSES[c];
-      return `<button class="ui-block round-btn cls" data-cls="${c}" style="--c1:${d.color[0]};--c2:${d.color[1]}" aria-label="${d.name} (${i + 1})">${art(d.icon, 40)}<b>${i + 1}</b></button>`;
+      return `<button class="ui-block round-btn cls${d.locked ? ' locked' : ''}" data-cls="${c}" style="--c1:${d.color[0]};--c2:${d.color[1]}" aria-label="${d.name} (${i + 1})">${art(d.icon, 40)}<b>${i + 1}</b></button>`;
     }).join('');
     party.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-cls]');
@@ -287,6 +324,11 @@ export class UI {
     $('btn-gacha').dataset.badge = n > 0 ? String(n) : '';
   }
 
+  /** Greys out the party buttons of the closed classes. */
+  lockClasses(closed: (c: HeroClass) => boolean) {
+    $('party').querySelectorAll<HTMLElement>('[data-cls]').forEach((b) => b.classList.toggle('locked', closed(b.dataset.cls as HeroClass)));
+  }
+
   /** Party buttons bottom-right: the class on the field is lit; `charge` is its staff counter badge ('' = none). */
   party(active: HeroClass, charge = '', color = '') {
     $('party').querySelectorAll<HTMLElement>('[data-cls]').forEach((b) => {
@@ -320,6 +362,15 @@ export class UI {
     }).join('');
     $('armor-l').innerHTML = side(EQUIP_BAR.left);
     $('armor-r').innerHTML = side(EQUIP_BAR.right);
+  }
+
+  /** A one-off line in the zone banner's place (the gate cutscene). */
+  banner(text: string) {
+    const el = $('zone-banner');
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(this.bannerT);
+    this.bannerT = window.setTimeout(() => el.classList.remove('show'), 2600);
   }
 
   zoneBanner(z: ZoneDef) {
@@ -635,6 +686,12 @@ export class UI {
   minimap(hero: THREE.Vector3, facing: number, units: THREE.Vector3[], world: World, marks: MapMark[]) {
     const g = this.mm;
     const S = 220;
+    // the backing store follows the on-screen size (HUD scale, expanded map) × the pixel ratio, so nothing is
+    // stretched; the drawing itself stays in S × S units
+    const c = g.canvas;
+    const px = Math.round(c.getBoundingClientRect().width * Math.min(devicePixelRatio, 2)) || S;
+    if (c.width !== px) c.width = c.height = px;
+    g.setTransform(px / S, 0, 0, px / S, 0, 0);
     const scale = S / 70; // ~70 m across
     g.clearRect(0, 0, S, S);
     g.save();

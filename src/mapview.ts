@@ -172,19 +172,7 @@ export class MapView {
     g.fillStyle = '#ff4a4a';
     for (const m of this.info.units) g.fillRect(X(m.x) - 2.5, Y(m.z) - 2.5, 5, 5);
     drawMarks(g, this.info.marks, X, Y);
-    // no boss names: only a dead boss's time until it comes back
-    g.font = '700 11px sans-serif';
-    for (const b of this.info.marks) {
-      if (b.kind === 'elite' || b.alive) continue;
-      g.fillStyle = '#bbbbbb';
-      const sec = Math.ceil(b.respawnIn);
-      g.strokeStyle = '#000a';
-      g.lineWidth = 3;
-      const text = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
-      const dy = b.kind === 'boss' ? 26 : 20;
-      g.strokeText(text, X(b.x), Y(b.z) + dy);
-      g.fillText(text, X(b.x), Y(b.z) + dy);
-    }
+    // no names and no timers: a dead one shows only its respawn ring (drawMarks)
     // hero arrow (no hint of where to go: the player finds the way himself)
     const hx = X(this.info.hero.x);
     const hy = Y(this.info.hero.z);

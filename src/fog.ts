@@ -10,6 +10,8 @@ const N = ZGRID.n;
 /** Map overlay resolution (pixels per side): 1 m per pixel. */
 const M = MAP_BOX.size;
 const ALL_ZONES = ZONE_IDS;
+/** Seconds the clouds take to melt off a location opened from afar (open). */
+const FADE = 2.2;
 
 export class FogOfWar {
   readonly grid = new Uint8Array(N * N);
@@ -25,6 +27,10 @@ export class FogOfWar {
   dirty = false;
   /** Locations the hero has been to. */
   readonly explored = new Set<ZoneId>(['forest']);
+  /** open(): the coverage fades from `fadeFrom` to the new one over FADE s (`fadeT` counts up). */
+  private fadeFrom: Uint8Array | null = null;
+  private fadeTo = new Uint8Array(N * N);
+  private fadeT = 0;
 
   constructor(time: { value: number }) {
     this.canvas.width = this.canvas.height = M;
@@ -75,7 +81,7 @@ export class FogOfWar {
   }
 
   /** Rebuilds the coverage grid from the explored set: 255 = open (explored land or sea), 0 = clouds. */
-  private rebuild() {
+  private rebuild(out = this.grid) {
     const w = zoneGrid.w;
     const open = ALL_ZONES.map((z) => (this.explored.has(z) ? 1 : 0));
     for (let k = 0; k < N * N; k++) {
@@ -84,8 +90,10 @@ export class FogOfWar {
       for (let c = 0; c < NZ; c++) { sum += w[k * NZ + c]; land += w[k * NZ + c] * open[c]; }
       land /= sum || 1;
       const sea = Math.min(1, Math.max(0, (0.9 - zoneGrid.land[k]) / 0.3));
-      this.grid[k] = 255 * Math.max(land, sea);
+      out[k] = 255 * Math.max(land, sea);
     }
+    if (out !== this.grid) return;
+    this.fadeFrom = null;
     this.texture.needsUpdate = true;
     this.dirtyMap = true;
   }
@@ -112,6 +120,29 @@ export class FogOfWar {
     this.dirty = true;
     this.rebuild();
     return true;
+  }
+
+  /** Opens locations from afar (a boss opened the way): their clouds melt away over FADE s (update). */
+  open(zones: ZoneId[]) {
+    const fresh = zones.filter((z) => !this.explored.has(z));
+    if (!fresh.length) return;
+    for (const z of fresh) this.explored.add(z);
+    this.dirty = true;
+    this.fadeFrom = this.grid.slice();
+    this.rebuild(this.fadeTo);
+    this.fadeT = 0;
+  }
+
+  update(dt: number) {
+    const from = this.fadeFrom;
+    if (!from) return;
+    this.fadeT += dt;
+    const k = Math.min(1, this.fadeT / FADE);
+    const e = k * k * (3 - 2 * k);
+    for (let i = 0; i < N * N; i++) this.grid[i] = from[i] + (this.fadeTo[i] - from[i]) * e;
+    this.texture.needsUpdate = true;
+    this.dirtyMap = true;
+    if (k >= 1) this.fadeFrom = null;
   }
 
   /** Is this spot in an explored location (labels and map markers are hidden otherwise)? */

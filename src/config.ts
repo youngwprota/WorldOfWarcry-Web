@@ -1,4 +1,5 @@
 import type { SwingKind } from './swing';
+import type { HeroClass } from './party';
 // All gameplay numbers live here (GDD: "все числа — ориентиры").
 
 /** Sword — slash (режущий), axe — chop (рубящий), hammer — crush (дробящий), mage staves — magic (магический). */
@@ -116,7 +117,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   hammer: {
     id: 'hammer', name: 'Молот', type: 'crush', dmgMul: 1.7, aps: 0.7, shape: 'circle', arc: 360, range: 2.1,
-    anim: 'AxeAttack', model: { human: 'hammer_human_paladin', orc: 'hammer_human_paladin' }, icon: '🔨', stun: 0.25,
+    anim: 'AxeAttack', model: { human: 'hammer_human_paladin', orc: 'hammer_human_paladin' }, icon: '🔨',
   },
   // board «Система оружий»: damage a bit under the sword, slow, long reach; thrust → thrust (target only) → spin 360°
   polearm: {
@@ -235,7 +236,10 @@ export const START_PET = 'boar';
 
 export const SHARPEN = { max: 10, perLevel: 0.08, cost: (lvl: number) => 40 + lvl * lvl * 25 };
 
-/** Combo finisher: the 3rd uninterrupted hit in a row (each swing must connect, no pause between). */
+/**
+ * Combo finisher: the `hits`-th uninterrupted hit in a row (each swing must connect, no pause between).
+ * No weapon has one for now: weapon abilities come from the «Эпическое» rarity up and are not implemented yet.
+ */
 export interface ComboDef {
   name: string;
   hits: number;
@@ -249,17 +253,7 @@ export interface ComboDef {
   spin: boolean;
   color: number;
 }
-export const COMBOS: Record<string, ComboDef> = {
-  sword: { name: 'Вихрь', hits: 3, window: 0.35, mult: 1.3, rangeAdd: 0.5, shape: 'circle', arc: 360, knock: 7, stun: 0, spin: true, color: 0x9fe3ff },
-  axe: { name: 'Раскол', hits: 3, window: 0.35, mult: 1.6, rangeAdd: 0.8, shape: 'arc', arc: 220, knock: 11, stun: 0.4, spin: false, color: 0xff8a5a },
-  hammer: { name: 'Землетрясение', hits: 3, window: 0.4, mult: 1.3, rangeAdd: 0.8, shape: 'circle', arc: 360, knock: 5, stun: 1.6, spin: false, color: 0xffc95a },
-  polearm: { name: 'Прокрут', hits: 3, window: 0.4, mult: 1.4, rangeAdd: 0, shape: 'circle', arc: 360, knock: 6, stun: 0, spin: true, color: 0xffe0a0 },
-  // bow: the finisher is a volley (WeaponDef.shot.volley); shape / arc unused
-  bow: { name: 'Залп', hits: 3, window: 0.45, mult: 1.4, rangeAdd: 0.5, shape: 'arc', arc: 60, knock: 4, stun: 0, spin: false, color: 0xc8f07a },
-  staff_fire: { name: 'Огненный шар', hits: 3, window: 0.6, mult: 1.4, rangeAdd: 0, shape: 'arc', arc: 70, knock: 3, stun: 0, spin: false, color: STAVES.fire.color },
-  staff_ice: { name: 'Ледяное копьё', hits: 3, window: 0.3, mult: 1.3, rangeAdd: 0, shape: 'arc', arc: 30, knock: 1, stun: 0, spin: false, color: STAVES.ice.color },
-  staff_wind: { name: 'Порыв', hits: 3, window: 0.3, mult: 1.3, rangeAdd: 0, shape: 'arc', arc: 120, knock: 8, stun: 0, spin: false, color: STAVES.wind.color },
-};
+export const COMBOS: Record<string, ComboDef> = {};
 
 export interface FactionDef {
   id: FactionId;
@@ -344,6 +338,8 @@ export interface BossDef {
   zone: ZoneId;
   /** Gate ids (src/island.ts GATES) opened by the first kill. */
   unlocks: string[];
+  /** Party class (src/party.ts, `locked`) the kill opens: shown over the boss as its drop until then. */
+  unlockClass?: HeroClass;
   slamRadius: number;
   slamMul: number; // big slam around the boss
   slamDelay: number; // telegraph time, s
@@ -447,12 +443,12 @@ export const MOBS: Record<string, MobDef> = {
     anim: 'SwordAttack', hp: 220, dmg: 6, aps: 0.8, range: 1.6, speed: 3.4, aggro: 5, regen: 0.03, scale: 1.08,
     ...foes('forest'), reward: { power: 1 }, respawn: 60,
   },
+  // ---------- the forest's elites: each drops a common piece of the warrior's kit ----------
   bandit_veteran: {
     id: 'bandit_veteran', name: 'Ветеран', rank: 'elite',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
     anim: 'SwordAttack', hp: 800, dmg: 8, aps: 0.9, range: 1.8, speed: 3.4, aggro: 5.2, regen: 0.03, scale: 1.3,
     ...foes('forest'), reward: { power: 3 }, respawn: 300,
-    // the first armour of the run: the forest's early elite dresses the hero
     drop: { kind: 'armor', def: 'plate_chest', rarity: 0 },
   },
   bandit_brute: {
@@ -460,7 +456,7 @@ export const MOBS: Record<string, MobDef> = {
     model: { human: ['orc_grunt', 'sword_orc_warrior'], orc: ['human_knight', 'sword_human_knight'] },
     anim: 'SwordAttack', hp: 1600, dmg: 14, aps: 0.7, range: 1.8, speed: 3.2, aggro: 5.2, regen: 0.03, scale: 1.35,
     ...foes('forest'), reward: { hp: 8 }, respawn: 300,
-    drop: { kind: 'weapon', def: 'sword', rarity: 1 },
+    drop: { kind: 'armor', def: 'plate_head', rarity: 0 },
   },
   bandit_lumberjack: {
     id: 'bandit_lumberjack', name: 'Лесоруб', rank: 'elite',
@@ -469,6 +465,13 @@ export const MOBS: Record<string, MobDef> = {
     ...foes('forest'), reward: { regen: 3 }, respawn: 300,
     // a copy of the hero's starting sword: it levels the sword up
     drop: { kind: 'weapon', def: 'sword', rarity: 0 },
+  },
+  bandit_runner_elite: {
+    id: 'bandit_runner_elite', name: 'Скороход', rank: 'elite',
+    model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
+    anim: 'SwordAttack', hp: 1200, dmg: 11, aps: 0.9, range: 1.8, speed: 3.8, aggro: 5.2, regen: 0.03, scale: 1.3,
+    ...foes('forest'), reward: { speed: 2 }, respawn: 300,
+    drop: { kind: 'armor', def: 'plate_legs', rarity: 0 },
   },
   // Reinforcements of the bandit chief: weak, no drops (they leave only a few orbs).
   bandit_runner: {
@@ -515,11 +518,10 @@ export const MOBS: Record<string, MobDef> = {
     // tuned to the hero after one forest cycle on the forest's own drops (no gacha there): a coin flip at ~90% of it
     anim: 'SwordAttack', hp: 10500, dmg: 34, aps: 0.6, range: 2.4, speed: 3.6, aggro: 6, regen: 0.03, scale: 1.9,
     ...foes('forest'), reward: { power: 12 }, respawn: 900,
-    // the forest's swords barely scratch him (−50%); his hammer is the key to the undead behind the gate
+    // the forest's swords barely scratch him (−50%)
     resist: { slash: 'resist' },
-    drop: { kind: 'weapon', def: 'hammer', rarity: 0 },
     boss: {
-      ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest', unlocks: ['forest-cemetery'],
+      ...BOSS_BASE, titles: { human: 'Вождь Клык', orc: 'Паладин-отступник' }, zone: 'forest', unlocks: ['forest-cemetery'], unlockClass: 'hunter',
       slamRadius: 4.2, slamMul: 2.4, chaseMul: 1.4, phase2Dmg: 1.2,
       cones: [
         { half: 0.18, len: 15, mul: 2.2, yaws: [0] }, // narrow and long
@@ -954,6 +956,8 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
     'boar', 'bandit_thug', 'bandit_thug', 'boar', 'bandit_thug', 'bandit_fighter', 'bandit_veteran',
     'bandit_thug', 'bandit_fighter', 'boar', 'bandit_warlord', 'bandit_thug', 'bandit_fighter', 'bandit_brute',
     'bandit_thug', 'boar', 'bandit_fighter', 'bandit_fighter', 'bandit_lumberjack',
+    // appended (pinned, FOREST_PINS) so the spawners before it keep their save ids
+    'bandit_runner_elite',
   ]).map((id) => spawner(id, FOREST_CHARGES)),
   // one endless charge with the mob's own respawn time
   cemetery: ([
@@ -1040,8 +1044,11 @@ export const GACHA = {
   tiers: [0, 2, 3, 4],
   rates: [0.7, 0.22, 0.074, 0.006],
   pity: 60,
-  /** Chance a kill gives one pull, by mob rank (tuned with `npm run sim` to ~1 pull per 5 min of play). */
-  token: { normal: 0.015, elite: 0.15, mini: 0.3, boss: 1 } as Record<MobRank, number>,
+  /**
+   * Chance a kill gives one pull, by mob rank. All 0 for now: a mob drops only what is shown above it (its stat
+   * orbs, an elite's / boss's own item), pulls come from elsewhere.
+   */
+  token: { normal: 0, elite: 0, mini: 0, boss: 0 } as Record<MobRank, number>,
   /** Locations whose kills never give a pull (bosses there too): the first one is beaten on the forest's own drops alone. */
   noTokens: ['forest'] as ZoneId[],
   banner: { def: 'hammer', name: 'Молот Короля-лича', subtitle: 'Выкован из костей павших королей. Шанс повышен!' },

@@ -48,6 +48,8 @@ export interface SaveData {
   fog?: string;
   /** The party member on the field (src/party.ts); missing = warrior. */
   cls?: HeroClass;
+  /** Closed classes (ClassDef.locked) a boss has opened (BossDef.unlockClass). */
+  classes?: HeroClass[];
   /**
    * Weapons of the party kits not on the field (src/party.ts kitOf); the kit on the field lives in `weapons`.
    * A kit missing here has never been on the field: it starts with its class kit (classKit).
@@ -113,7 +115,7 @@ export function loadSave(): SaveData | null {
     if ((d.scale ?? 1) < 6) migrateSources(d);
     d.src ??= {};
     d.pct ??= {};
-    if (!d.cls || !CLASSES[d.cls]) d.cls = 'warrior';
+    if (!d.cls || !CLASSES[d.cls] || (CLASSES[d.cls].locked && !d.classes?.includes(d.cls))) d.cls = 'warrior'; // the game puts the warrior's kit on
     if (d.kit && !CLASSES[d.kit]) delete d.kit;
     // saves of the mage branch kept `kits` without `kit`: the hands in play were the class on the field's
     if (!d.kit && d.kits) d.kit = kitOf(d.cls);

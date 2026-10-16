@@ -6,8 +6,8 @@ import { StaticBody } from './staticbody';
 import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
-  ATTACK_HIT, COMBOS, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
-  mobRank, type ComboDef, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
+  ATTACK_HIT, FACTIONS, PETS, tokenChance, START_PET, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
+  mobRank, type DamageType, type ResistTier, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
 import { ArenaFog, FloatingText, FogPuffs, Particles, Shockwaves, Spells, Telegraphs, type Bolt } from './fx';
 import {
@@ -22,7 +22,7 @@ import { BODY_PARTS, CLASS_LOOK, debugSetTrims, type Wearer } from './looks';
 import { assets } from './assets';
 import { Arrows } from './arrows';
 import { PET_SEEK, Pet } from './pet';
-import { GATE, ISLAND, SPAWN, inCamp, pathAt, progressAt } from './island';
+import { GATE, GATES, ISLAND, SPAWN, inCamp, pathAt, progressAt } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
 import { Ambient } from './ambient';
 import { UI, type FlyEl, type MapMark } from './ui';
@@ -52,6 +52,8 @@ const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
 /** Slack over the weapon's range for a hit to land (unit edge to hero centre); targeting and swings use the same. */
 const STRIKE_PAD = 0.35;
+/** Gate cutscene timing, s: after the boss's death, camera flight each way, hold at the gate. */
+const GATE_CUT = { wait: 1.4, fly: 1.6, hold: 2.8, past: 8 };
 
 /** Respawn timer text: 45s, 4m05s, or 11h45m from an hour up (no seconds). */
 function fmtRespawn(sec: number) {
@@ -199,7 +201,7 @@ export class Mob extends Unit {
   frozen = 0;
   chill = 0;
   constructor(public def: MobDef, spawn: THREE.Vector3, faction: 'human' | 'orc', layer: HTMLElement,
-    mul = { hp: 1, dmg: 1, reward: 1, scale: 1 }) {
+    mul = { hp: 1, dmg: 1, reward: 1, scale: 1 }, item: DropBadge | null = null) {
     // Bosses, micro-bosses and elites get a bigger HP bar with their name: a boss's is coloured by difficulty,
     // a micro-boss's is orange, an elite's has its drop's quality colour. Over the bar: the loot (lootHtml);
     // right of it: weaknesses and resistances.
@@ -210,8 +212,7 @@ export class Mob extends Unit {
       : def.rank === 'mini' ? `<div class="bname" style="color:${MARK_COLOR.mini}">${def.name}</div>`
       : def.drop ? `<div class="bname" style="color:${RARITY[def.drop.rarity].color}">${def.name}</div>`
       : '';
-    // an item drop shows only the item; a micro-boss its permanent bonus (+500 HP) instead of its orbs
-    const item = def.drop ? { icon: dropIconId(def.drop), color: RARITY[def.drop.rarity].color } : null;
+    // a drop (Game.dropBadge) shows only the item; a micro-boss its permanent bonus (+500 HP) instead of its orbs
     const loot = def.bonus ? lootHtml(def.bonus, null, true) : lootHtml(reward, item);
     super(spawn, layer, named ? 'mobui boss' : 'mobui', title + unitBar(loot, resistIcons(def, named ? 27 : 24)),
       'respawn' + (named ? ' boss' : ''));
@@ -358,7 +359,6 @@ export class Game {
   private arenas = new Map<Mob, ArenaFog>();
   /** Attack state per hand (save.weapons[0] right, [1] left). */
   private hands: [Hand, Hand] = [newHand(0), newHand(1)];
-  private comboShown = -1;
   private trails: [Trail, Trail] = [new Trail(), new Trail()];
   /** Hit-stop / slow motion: game time runs at `slowK` for `slowT` more real seconds. */
   private slowT = 0;
@@ -484,6 +484,7 @@ export class Game {
     this.scene.add(this.ambient.points);
     // (no camp NPC by the gate for now: src/npc.ts CampNpc is kept for later)
     this.camPos.copy(this.hero.position);
+    this.ui.lockClasses((c) => !this.classOpen(c));
     this.refreshHud(true);
   }
 
@@ -491,7 +492,7 @@ export class Game {
     const zone = this.world.zoneAt(at.x, at.z).id;
     const mul = def.boss || def.rank ? { hp: 1, dmg: 1, reward: 1, scale: 1 } : depthMul(zone, depth);
     const tier = ZONE_TIER[zone] ?? 1;
-    const m = new Mob(def, at, this.save.faction, labels, { ...mul, hp: mul.hp * tier, dmg: mul.dmg * tier });
+    const m = new Mob(def, at, this.save.faction, labels, { ...mul, hp: mul.hp * tier, dmg: mul.dmg * tier }, this.dropBadge(def));
     m.ch.root.scale.setScalar(this.mobScale);
     this.addUnit(m);
     return m;
@@ -516,8 +517,27 @@ export class Game {
   /** The active hero: item icons show what this hero would wear. */
   get wearer(): Wearer { return { cls: this.heroClass, faction: this.faction }; }
 
-  /** Puts another party member on the field; false while the switch cooldown runs or if it is already there. */
+  /** What a mob is shown to drop: the class its boss opens (the bow over the forest boss), or its item's own icon. */
+  private dropBadge(d: MobDef): DropBadge | null {
+    const cls = d.boss?.unlockClass;
+    if (cls) return { icon: CLASSES[cls].icon, color: CLASSES[cls].color[0] };
+    return d.drop ? { icon: dropIconId(d.drop), color: RARITY[d.drop.rarity].color } : null;
+  }
+
+  /** The class can take the field: it is not closed (ClassDef.locked) or a boss has opened it. */
+  classOpen(c: HeroClass) { return !CLASSES[c].locked || !!this.save.classes?.includes(c); }
+
+  /** Opens closed class `c` for good (saved); false if it was open already. */
+  private openClass(c: HeroClass) {
+    if (this.classOpen(c)) return false;
+    (this.save.classes ??= []).push(c);
+    this.ui.lockClasses((k) => !this.classOpen(k));
+    return true;
+  }
+
+  /** Puts another party member on the field; false while the switch cooldown runs, if it is already there or closed. */
   switchClass(c: HeroClass) {
+    if (!this.classOpen(c)) { if (c !== this.heroClass) this.ui.toast(`«${CLASSES[c].name}» пока недоступен`, 1200); return false; }
     if (c === this.heroClass || this.dead || this.time - this.classT < SWITCH_COOLDOWN) return false;
     this.classT = this.time;
     const model = this.heroModel();
@@ -708,11 +728,14 @@ export class Game {
     const played = this.save.playTime ?? 0;
     this.save.playTime = played + dt;
     if (Math.floor(this.save.playTime / 60) > Math.floor(played / 60)) this.snapshot();
-    if (this.input.pressed('KeyI') || this.input.pressed('KeyC')) { this.onOpenCharacter(); return; }
-    if (this.input.pressed('KeyB')) { this.onOpenBag(); return; }
-    if (this.input.pressed('KeyM')) { this.onOpenMap(); return; }
-    if (this.input.pressed('KeyG')) { this.onOpenGacha(); return; }
-    for (const c of CLASS_IDS) if (this.input.pressed(CLASSES[c].key)) this.switchClass(c);
+    if (this.cut) this.updateCut(dt);
+    else {
+      if (this.input.pressed('KeyI') || this.input.pressed('KeyC')) { this.onOpenCharacter(); return; }
+      if (this.input.pressed('KeyB')) { this.onOpenBag(); return; }
+      if (this.input.pressed('KeyM')) { this.onOpenMap(); return; }
+      if (this.input.pressed('KeyG')) { this.onOpenGacha(); return; }
+      for (const c of CLASS_IDS) if (this.input.pressed(CLASSES[c].key)) this.switchClass(c);
+    }
     if (this.blockers.some((b) => b.until <= this.time)) this.blockers = this.blockers.filter((b) => b.until > this.time);
     this.updateHero(dt);
     this.updateMobs(dt);
@@ -724,6 +747,7 @@ export class Game {
     this.arrows.update(dt);
     this.waves.update(dt);
     this.updateGusts(dt);
+    this.world.fog.update(dt);
     this.spells.update(dt);
     this.puffs.update(dt);
     for (const a of this.arenas.values()) a.update(dt, this.time);
@@ -733,6 +757,10 @@ export class Game {
     this.saveT += dt;
     if (this.saveT > 5) { this.saveT = 0; this.persist(); }
   }
+
+  /** Gate cutscene (startGateCut): `t` from −GATE_CUT.wait; the camera looks at `cutPos` while it runs. */
+  private cut: { t: number; at: THREE.Vector3; gates: string[]; opened: boolean; then: (() => void) | null } | null = null;
+  private cutPos = new THREE.Vector3();
 
   /** Dev: free overview camera (set from the console via window.__view). */
   camOverride: { x: number; z: number; h: number; back: number } | null = null;
@@ -754,8 +782,8 @@ export class Game {
       this.world.update(dt, this.time, this.camPos);
       return;
     }
-    // Camera is pinned to the hero's feet (no follow lag).
-    this.camPos.copy(hp);
+    // Camera is pinned to the hero's feet (no follow lag); the gate cutscene moves it.
+    this.camPos.copy(this.cut && this.cut.t >= 0 ? this.cutPos : hp);
     this.world.fog.reveal(hp.x, hp.z);
     const sh = this.shake > 0 ? this.shake : 0;
     this.shake = Math.max(0, this.shake - dt * 2.5);
@@ -803,7 +831,7 @@ export class Game {
       if (this.deadT > 1.6) this.respawnInCamp();
       return;
     }
-    const [ix, iy] = this.input.vector;
+    const [ix, iy] = this.cut ? [0, 0] : this.input.vector;
     const moving = Math.hypot(ix, iy) > 0.05;
     this.moveDir.set(ix, 0, iy);
     const p = ch.position;
@@ -867,11 +895,6 @@ export class Game {
 
     // auto attack while moving: every hand on its own timer
     for (const h of this.hands) this.updateHand(h, dt);
-    const shown = this.hands[this.save.weapons[0] ? 0 : 1];
-    if (this.comboShown !== shown.combo) {
-      this.comboShown = shown.combo;
-      this.ui.combo(shown.combo, COMBOS[this.weaponItem.def].hits);
-    }
 
     // regen; much faster in the camp
     let rate = this.regen; // HP per second
@@ -893,15 +916,8 @@ export class Game {
       // no trail for the shield and the orb (they never swing) or the bow (it shoots)
       const w = it && WEAPONS[it.def];
       const on = !!w && !w.guard && !w.orb && !w.shot && since > h.impactAt * 0.45 && since < h.impactAt * 1.5;
-      this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, (it && COMBOS[it.def]?.color) ?? 0xffffff);
+      this.trails[h.i].update(dt, h.i ? ch.weaponL : ch.weapon, on, 0xffffff);
     }
-  }
-
-  /** Freeze-frame / slow motion for `real` seconds at `k` × speed, plus an optional camera push-in. */
-  private slowMo(real: number, k: number, zoom = 0) {
-    this.slowK = this.slowT > 0 ? Math.min(this.slowK, k) : k;
-    this.slowT = Math.max(this.slowT, real);
-    this.zoom = Math.max(this.zoom, zoom);
   }
 
   /** Longest reach of the two hands. */
@@ -911,7 +927,7 @@ export class Game {
     return r;
   }
 
-  /** One hand's swing timer and combo chain; the blow lands `impact` s after the swing starts. */
+  /** One hand's swing timer; the blow lands `impact` s after the swing starts. */
   private updateHand(h: Hand, dt: number) {
     const it = this.save.weapons[h.i];
     if (!it) { h.combo = 0; h.impact = -1; return; }
@@ -920,17 +936,12 @@ export class Game {
     if (w.guard || w.orb) { h.combo = 0; return; }
     h.atkCd -= dt;
     const period = 1 / w.aps;
-    const combo = COMBOS[it.def];
-    // A pause or a whiff breaks the chain (GDD: combo = N uninterrupted attacks); the polearm's series never breaks.
-    if (!w.cycle && h.combo > 0 && h.impact < 0 && this.time - h.lastSwing > period + combo.window) h.combo = 0;
     // Swing only when the target is inside the strike shape (inShape's range + 0.35): the target is kept
     // up to 1 m further for facing, and swinging there was a whiff into thin air.
     const t = this.target;
     const inReach = !!t && this.inStrike(t, w.range);
     if (inReach && h.atkCd <= 0) {
-      const chained = w.cycle || (h.lastSwingHit && this.time - h.lastSwing <= period + combo.window);
-      h.combo = chained ? h.combo + 1 : 1;
-      h.finisher = h.combo >= combo.hits;
+      h.combo++;
       h.lastSwing = this.time;
       // the cast clip's release is late (1.13 s), so staves aren't capped: a cap would play it 3-5x too fast
       const impactAt = w.staff ? period * 0.4 : Math.min(0.42, period * 0.4);
@@ -1005,13 +1016,10 @@ export class Game {
     const it = this.save.weapons[h.i];
     if (!it) return 0;
     const w = WEAPONS[it.def];
-    const fin = h.finisher ? COMBOS[it.def] : null;
-    if (w.shot) return this.shoot(h, it, w, fin);
-    const shape = fin ? fin.shape : w.shape;
-    const arc = fin ? fin.arc : w.arc;
-    const range = w.range + (fin ? fin.rangeAdd : 0);
+    if (w.shot) return this.shoot(it, w);
+    const { shape, arc, range } = w;
     let hits = 0;
-    const only = !fin && w.single ? focus : null;
+    const only = w.single ? focus : null;
     sfx.swing();
     for (const u of this.units) {
       if (only && u !== only) continue;
@@ -1019,20 +1027,15 @@ export class Game {
       hits++;
       if (u instanceof Prop) {
         const tier = u.def.resist[w.type] ?? 'normal';
-        this.hitProp(u, (fin ? 3 : 1) * RESIST_MULT[tier], tier);
+        this.hitProp(u, RESIST_MULT[tier], tier);
         continue;
       }
       const m = u as Mob;
-      const { dmg, tier, fx } = this.damageFor(it, m.def, fin ? fin.mult : 1);
-      const f = this.fightOf(m);
-      f.hits++;
-      if (fin) f.combos++;
-      this.damageMob(m, dmg, tier, fin ? fin.knock : w.staff ? STAVES[w.staff].knock : 3.5, fx);
+      const { dmg, tier, fx } = this.damageFor(it, m.def);
+      this.fightOf(m).hits++;
+      this.damageMob(m, dmg, tier, w.staff ? STAVES[w.staff].knock : 3.5, fx);
       if (w.staff && fx !== 'miss') this.staffHit(m, w.staff, dmg, m === focus);
-      if (m.alive && !m.def.boss) {
-        if (fin?.stun) m.stun = Math.max(m.stun, fin.stun);
-        else if (w.stun && Math.random() < w.stun) m.stun = 0.9;
-      }
+      if (m.alive && !m.def.boss && w.stun && Math.random() < w.stun) m.stun = 0.9;
     }
     if (w.staff === 'fire' && hits && focus) this.fireSplash(it, focus, shape, arc, range, yaw);
     if (w.staff === 'wind' && hits) {
@@ -1044,17 +1047,6 @@ export class Game {
       this.shake = Math.max(this.shake, 0.18);
       this.particles.burst(v1.copy(this.hero.position).setY(0.2), 0x9a8a70, 8, 0.12, 5, 0.5);
     }
-    if (fin) {
-      h.finisher = false;
-      h.combo = 0;
-      if (shape === 'circle') this.waves.add(this.hero.position, range + 0.5, fin.color);
-      if (fin.spin) this.hero.spin(0.35);
-      if (hits) this.slowMo(0.07, 0.08);
-      this.shake = Math.max(this.shake, 0.35);
-      sfx.combo();
-    }
-    h.lastSwingHit = hits > 0;
-    if (!hits && !w.cycle) h.combo = 0;
     return hits;
   }
 
@@ -1167,52 +1159,29 @@ export class Game {
     this.ui.party(this.heroClass, n < 0 ? '' : String(n), el ? '#' + STAVES[el].color.toString(16).padStart(6, '0') : '');
   }
 
-  /**
-   * Bow: looses an arrow at the target (the finisher: a volley at the nearest units in range, mobs first); the damage
-   * lands when each arrow arrives (arrowHit). Returns the number of arrows.
-   */
-  private shoot(h: Hand, it: Item, w: WeaponDef, fin: ComboDef | null) {
+  /** Bow: looses an arrow at the target; the damage lands when it arrives (arrowHit). Returns the number of arrows. */
+  private shoot(it: Item, w: WeaponDef) {
     const shot = w.shot!;
-    const range = w.range + (fin ? fin.rangeAdd : 0);
-    const first = this.target && this.target.hittable && this.inStrike(this.target, range) ? this.target : null;
-    const targets: Unit[] = first ? [first] : [];
-    if (first && fin) {
-      const p = this.hero.position;
-      const score = (u: Unit) => u.pos.distanceTo(p) - u.radius + (u.passive ? 1000 : 0);
-      targets.push(...this.units.filter((u) => u !== first && u.hittable && this.inStrike(u, range))
-        .sort((a, b) => score(a) - score(b)).slice(0, shot.volley - 1));
-    }
-    if (fin) {
-      h.finisher = false;
-      h.combo = 0;
-    }
-    h.lastSwingHit = targets.length > 0;
-    if (!targets.length) { h.combo = 0; return 0; }
+    const u = this.target && this.target.hittable && this.inStrike(this.target, w.range) ? this.target : null;
+    if (!u) return 0;
     sfx.swing();
     const yaw = this.hero.facing;
     const from = v1.copy(this.hero.position).add(v2.set(Math.sin(yaw) * 0.6, 1.35, Math.cos(yaw) * 0.6));
-    for (const u of targets) this.arrows.fire(shot.arrow[this.faction], from, u, shot.speed, () => this.arrowHit(u, it, w, fin));
-    if (fin) {
-      sfx.combo();
-      this.shake = Math.max(this.shake, 0.2);
-    }
-    return targets.length;
+    this.arrows.fire(shot.arrow[this.faction], from, u, shot.speed, () => this.arrowHit(u, it, w));
+    return 1;
   }
 
   /** A bow arrow reaches its unit. */
-  private arrowHit(u: Unit, it: Item, w: WeaponDef, fin: ComboDef | null) {
+  private arrowHit(u: Unit, it: Item, w: WeaponDef) {
     if (u instanceof Prop) {
       const tier = u.def.resist[w.type] ?? 'normal';
-      this.hitProp(u, (fin ? 3 : 1) * RESIST_MULT[tier], tier);
+      this.hitProp(u, RESIST_MULT[tier], tier);
       return;
     }
     const m = u as Mob;
-    const { dmg, tier, fx } = this.damageFor(it, m.def, fin ? fin.mult : 1);
-    const f = this.fightOf(m);
-    f.hits++;
-    if (fin) f.combos++;
-    this.damageMob(m, dmg, tier, fin ? fin.knock : 1.5, fx);
-    if (fin?.stun && m.alive && !m.def.boss) m.stun = Math.max(m.stun, fin.stun);
+    const { dmg, tier, fx } = this.damageFor(it, m.def);
+    this.fightOf(m).hits++;
+    this.damageMob(m, dmg, tier, 1.5, fx);
   }
 
   /** The pet in the class's second slot (the hunter's), or null. */
@@ -1427,25 +1396,70 @@ export class Game {
     sfx.levelUp();
     // its own item on every kill (copies level it up)
     if (d.drop) m.loot.push(dropItem(d.drop));
-    if (!rec.firstKill) {
-      rec.firstKill = true;
-      // The main boss opens the way into the next location(s).
-      const opened = d.boss!.unlocks.filter((id) => this.openGate(id));
-      if (opened.length) {
-        const names = [...new Set(opened.map((id) => this.world.gateTarget(id)))].join(', ');
-        setTimeout(() => { sfx.barrier(); this.ui.toast(`Ворота открыты! Путь: ${names}`); }, 1200);
-      }
+    let classToast: (() => void) | null = null;
+    const cls = d.boss!.unlockClass;
+    if (cls && this.openClass(cls)) {
+      classToast = () => this.ui.toast(`Новый класс: ${CLASSES[cls].name}! Кнопка справа внизу или клавиша ${CLASS_IDS.indexOf(cls) + 1}`, 3500);
     }
+    // The first kill opens the way into the next location(s): saved now, shown by the gate cutscene.
+    const opened = rec.firstKill ? [] : d.boss!.unlocks.filter((id) => this.openGate(id, false, false));
+    rec.firstKill = true;
+    if (opened.length) this.startGateCut(opened, classToast);
+    else if (classToast) setTimeout(classToast, 2600);
     this.persist();
   }
 
-  /** Opens a passage for good (saved). False if it was open already. */
-  private openGate(id: string, instant = false) {
+  /** Opens a passage for good (saved; `show` = the barrier goes down now). False if it was open already. */
+  private openGate(id: string, instant = false, show = true) {
     const gates = (this.save.gates ??= []);
     if (gates.includes(id)) return false;
     gates.push(id);
-    this.world.openGate(id, instant);
+    if (show) this.world.openGate(id, instant);
     return true;
+  }
+
+  /**
+   * Gate cutscene after a main boss's first kill: the camera flies from the hero to the passage, the barrier melts
+   * and the clouds lift off the location behind it, a banner names it, then the camera flies back. The hero stands
+   * still and takes no damage; the HUD hides behind letterbox bars. `then` runs at the end.
+   */
+  private startGateCut(gates: string[], then: (() => void) | null) {
+    const at = new THREE.Vector3();
+    // a little past the passage, so the location behind it is in view when its clouds lift
+    for (const id of gates) {
+      const g = GATES.find((q) => q.id === id)!;
+      at.x += (g.x + g.tx * GATE_CUT.past) / gates.length;
+      at.z += (g.z + g.tz * GATE_CUT.past) / gates.length;
+    }
+    this.cut = { t: -GATE_CUT.wait, at, gates, opened: false, then };
+  }
+
+  private updateCut(dt: number) {
+    const c = this.cut!;
+    const C = GATE_CUT;
+    const t0 = c.t;
+    c.t += dt;
+    if (t0 < 0 && c.t >= 0) { document.body.classList.add('cutscene'); this.input.reset(); }
+    if (!c.opened && c.t >= C.fly) {
+      c.opened = true;
+      for (const id of c.gates) this.world.openGate(id);
+      this.world.fog.open(c.gates.map((id) => GATES.find((q) => q.id === id)!.to));
+      sfx.barrier();
+      this.shake = Math.max(this.shake, 0.25);
+      const names = [...new Set(c.gates.map((id) => this.world.gateTarget(id)))].join(', ');
+      this.ui.banner(`Путь открыт: ${names}`);
+    }
+    // camera: hero → gate (ease), hold, gate → hero
+    const fly = (k: number) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); };
+    const back = C.fly + C.hold;
+    const k = c.t < back ? fly(c.t / C.fly) : 1 - fly((c.t - back) / C.fly);
+    this.cutPos.copy(this.hero.position).lerp(c.at, k);
+    if (c.t >= back + C.fly) {
+      document.body.classList.remove('cutscene');
+      this.cut = null;
+      c.then?.();
+      this.persist();
+    }
   }
 
   private collect(k: OrbKind) {
@@ -2035,7 +2049,7 @@ export class Game {
 
   /** `dot`: a tick of damage over time — no dodge, no crit, no counter; defense still cuts it. */
   private hurtHero(raw: number, from: THREE.Vector3, src?: Mob, dot = false) {
-    if (this.dead) return;
+    if (this.dead || this.cut) return;
     const s = this.stats;
     const barY = 2.45 * this.heroScale;
     const lift = this.heroBar.el.offsetHeight + 14;
@@ -2097,7 +2111,7 @@ export class Game {
     this.hero.facing = yaw;
     this.hero.swing('bash', 1, 0.5, 0.12);
     this.hero.swing(w.swing?.[0] ?? 'slashRL', 0, 0.6, 0.15);
-    // a throwaway hand state: a counter neither spends nor builds the combo chain
+    // a throwaway hand state: a counter does not advance the swing series
     const h = Object.assign(this.counterHand, newHand(0));
     const hits = this.heroStrike(h, yaw, m);
     const at = v1.copy(this.hero.position).setY(1.2);
@@ -2127,7 +2141,7 @@ export class Game {
     b.shake = 0.2;
     b.flash = 0.1;
     sfx.hit();
-    // hits count in whole blows: -1, -0.5 against stone, -3 for a finisher
+    // hits count in whole blows: -1, -0.5 against stone
     const cls = tier === 'weak' ? 'dmg weak' : tier === 'resist' || tier === 'immune' ? 'dmg resist' : 'dmg';
     this.fx.spawn(this.unitTextAt(b), `-${fmtK(dmg)}`, cls, 0.8, { lift: b.uiEl.offsetHeight });
     this.particles.burst(v1.copy(b.pos).setY(0.7), b.def.color, 3, 0.1, 3, 0.4);
@@ -2322,26 +2336,29 @@ export class Game {
   }
 
   /**
-   * Special map marks, drawn where the unit is right now (they move with it): the main boss — big red skull
-   * (dead: hourglass at its spawn point), a micro-boss — smaller orange skull, an elite — its drop's icon
-   * in a frame of the drop's quality colour. Dead micro-bosses and elites are not shown.
+   * Special map marks, drawn where the unit is right now (they move with it): the main boss — big red skull,
+   * a micro-boss — smaller orange skull, an elite — its drop's icon on a tile of the drop's quality colour.
+   * A dead one stays at its spawn point, faded, with a respawn ring (none for units that never come back).
    */
   private mapMarks(near = Infinity): MapMark[] {
     const hp = this.hero.position;
     const out: MapMark[] = [];
     for (const m of this.mobs) {
       const kind = m.mark;
-      if (!kind || (!m.alive && kind !== 'boss')) continue;
+      if (!kind || (!m.alive && !Number.isFinite(m.respawnAt))) continue;
       const pos = m.alive ? m.pos : m.spawn;
       if (pos.distanceTo(hp) > near || !this.world.fog.isExplored(pos.x, pos.z)) continue;
       const d = m.def;
       out.push({
         x: pos.x, z: pos.z, kind, alive: m.alive,
         color: kind === 'elite' && d.drop ? RARITY[d.drop.rarity].color : MARK_COLOR[kind],
+        cls: kind === 'elite' && d.drop ? dropClass(d.drop) : undefined,
         icon: kind === 'elite' && d.drop ? dropIconId(d.drop) : 'skull',
         name: d.boss ? d.boss.titles[this.faction] : d.name,
         respawnIn: m.alive ? 0 : Math.max(0, m.respawnAt - this.time),
-        drop: (kind === 'boss' || kind === 'mini') && d.drop ? { icon: dropIconId(d.drop), color: RARITY[d.drop.rarity].color } : undefined,
+        respawnP: m.alive ? 1 : 1 - Math.max(0, m.respawnAt - this.time) / (m.respawnTotal || 1),
+        drop: (kind === 'boss' || kind === 'mini') && this.dropBadge(d)
+          ? { ...this.dropBadge(d)!, cls: d.drop && !d.boss?.unlockClass ? dropClass(d.drop) : undefined } : undefined,
       });
     }
     return out;
@@ -2760,6 +2777,11 @@ const rndSort = () => Math.random() - 0.5;
 const MARK_COLOR = { boss: '#ff3b3b', mini: '#ff9a2e', elite: '#ffffff' };
 
 /** The block over a unit: loot on top, the HP bar under it, weakness / resistance icons right of the bar. */
+/** Item badge over a unit and at its map mark: the item's icon in its quality colour. */
+type DropBadge = { icon: string; color: string };
+/** The class whose item a mob drops (null: anyone's, rings and amulets). */
+const dropClass = (d: MobDef['drop'] & {}) => (d.kind === 'weapon' ? weaponClass(d.def) : ARMOR[d.def].cls ?? null) ?? undefined;
+
 function unitBar(loot: string, resist: string) {
   return `<div class="mloot">${loot}</div><div class="mrow"><div class="mobhp"><div></div><span></span></div><div class="ris">${resist}</div></div>`;
 }
@@ -2777,16 +2799,16 @@ function turn(cur: number, want: number, k: number) {
 }
 
 
-/** Swing timer and combo chain of one hand. */
+/** Swing timer and swing series of one hand. */
 interface Hand {
-  i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number; lastSwingHit: boolean; finisher: boolean;
+  i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number;
   /** Staff: seconds until the bolt leaves the staff (< 0 = none pending), and its flight time. */
   launch: number; flight: number;
   /** Staff: the bolt in flight and the mob it flies at. */
   bolt: Bolt | null; aim: Unit | null;
 }
 function newHand(i: 0 | 1): Hand {
-  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, lastSwingHit: false, finisher: false, launch: -1, flight: 0, bolt: null, aim: null };
+  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, launch: -1, flight: 0, bolt: null, aim: null };
 }
 
 /** How a blow landed: a crit, dodged, or plain (''). */

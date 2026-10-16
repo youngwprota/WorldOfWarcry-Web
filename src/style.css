@@ -737,9 +737,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .mloot { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: var(--barw); min-height: 4px; margin-bottom: 2px; }
 .mloot .lt { display: inline-flex; align-items: center; gap: 3px; font-size: 22px; font-weight: 900; line-height: 1; color: #fff; text-shadow: var(--stroke); white-space: nowrap; }
 .mloot .lt .svgi { width: 26px; height: 26px; filter: drop-shadow(0 2px 0 var(--ink)); }
-.mloot .lt.item .svgi { width: 42px; height: 42px; filter: drop-shadow(0 0 4px var(--rc)) drop-shadow(0 2px 0 var(--ink)); }
+.mloot .lt.item .svgi { filter: drop-shadow(0 0 4px var(--rc)) drop-shadow(0 2px 0 var(--ink)); }
 .mobui.boss .mloot .lt { font-size: 26px; }
-.mobui.boss .mloot .lt.item .svgi { width: 50px; height: 50px; }
 /* the bar stays centred under the loot; weakness / resistance icons hang to the right of it */
 .mrow { position: relative; }
 .mrow .ris { position: absolute; left: 100%; top: 50%; transform: translateY(-50%); margin-left: 6px; gap: 3px; }
@@ -802,6 +801,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #party .cls.on { filter: none; transform: scale(1.18); box-shadow: inset 0 -5px 0 #0000002e, 0 4px 0 var(--ink), 0 0 0 3px #ffe04a, 0 0 16px #ffe04acc; }
 #party .cls:active { transform: translateY(2px); }
 #party .cls.on:active { transform: scale(1.18) translateY(2px); }
+#party .cls.locked { filter: grayscale(1) brightness(0.6); opacity: 0.7; }
+#party .cls.locked:active { transform: none; }
 #party .cls[data-charge]:not([data-charge=""])::after { content: attr(data-charge); position: absolute; left: -6px; top: -8px; min-width: 22px; height: 22px; padding: 0 4px; box-sizing: border-box; border: 3px solid var(--ink); border-radius: 11px; background: var(--cc, #fff); color: var(--ink); font-size: 13px; font-weight: 900; line-height: 16px; text-align: center; }
 .round-btn.nav { position: relative; }
 .round-btn.nav span { position: absolute; bottom: -11px; right: 0; font-size: 13px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); text-transform: uppercase; }
@@ -941,3 +942,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #clear-banner .cb-rays { position: absolute; left: 50%; top: 50%; width: 420px; height: 420px; margin: -210px 0 0 -210px; border-radius: 50%; background: repeating-conic-gradient(#ffe14a40 0 8deg, transparent 8deg 22deg); mask-image: radial-gradient(circle, #000 18%, transparent 62%); -webkit-mask-image: radial-gradient(circle, #000 18%, transparent 62%); animation: spin 14s linear infinite; }
 #clear-banner .cb-title { position: relative; font-size: 38px; font-weight: 900; color: #ffe14a; text-transform: uppercase; text-shadow: var(--stroke), 0 5px 0 var(--ink), 0 0 26px #ffb21a; }
 #clear-banner .cb-sub { position: relative; display: table; margin: 8px auto 0; padding: 4px 14px; border-radius: 10px; border: 2px solid var(--ink); background: linear-gradient(#7dff8e, #2fb84a); font-size: 16px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); }
+
+/* gate cutscene (Game.startGateCut): the HUD hides except the banner, letterbox bars slide in */
+body.cutscene #hud > :not(#zone-banner) { visibility: hidden; }
+body::before, body::after { content: ''; position: fixed; left: 0; right: 0; height: 9vh; background: #000; z-index: 1000; pointer-events: none; transition: transform 0.5s; }
+body::before { top: 0; transform: translateY(-100%); }
+body::after { bottom: 0; transform: translateY(100%); }
+body.cutscene::before, body.cutscene::after { transform: none; }

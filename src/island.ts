@@ -409,9 +409,10 @@ export const LAND_TRAILS: [number, number][][] = [
 export const FOREST_MINI: [number, number] = [-10.6, -11.6];
 /** The gloves elite (bandit_veteran): between the pond and the trail out of the settlement. */
 export const GLOVES_AT: [number, number] = [20, -77];
-/** Forest spawners pinned to a spot (the rest spread along the trail): the mini-boss and three elites. */
+/** Forest spawners pinned to a spot (the rest spread along the trail): the mini-boss and four elites. */
 export const FOREST_PINS: Record<string, [number, number]> = {
-  bandit_warlord: FOREST_MINI, bandit_lumberjack: [-28, -82], bandit_veteran: GLOVES_AT, bandit_brute: [-44, -60],
+  // the elites spread over the whole forest (west, east, south), the gloves one by the pond
+  bandit_warlord: FOREST_MINI, bandit_lumberjack: [19, -13], bandit_veteran: GLOVES_AT, bandit_brute: [-27, -61], bandit_runner_elite: [41, -62],
 };
 /** Two bandit pairs in the trees by the gloves elite (GLOVES_BANDITS, two per pack). */
 export const GLOVES_PACKS: [number, number][] = [[14, -74], [27, -76]];
