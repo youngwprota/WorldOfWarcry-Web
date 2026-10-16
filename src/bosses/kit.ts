@@ -1,7 +1,7 @@
 import type * as THREE from 'three';
 import type { MobDef } from '../config';
 import type { FloatingText, FogPuffs, Particles, Shockwaves, Telegraphs } from '../fx';
-import type { Mob } from '../game';
+import type { Mob } from '../mobs/mob';
 
 /** What a boss kit may use from the game. */
 export interface BossHost {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { BossHost, BossKit, BossKitFactory } from './kit';
-import type { Mob } from '../game';
+import type { Mob } from '../mobs/mob';
 
 // Tunables
 const STRIKE_CD = 3.6;        // s between lightning strikes

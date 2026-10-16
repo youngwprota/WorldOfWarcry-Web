@@ -1,4 +1,5 @@
 import type { SwingKind } from './swing';
+import type { MobBehavior } from './mobs/behavior';
 // All gameplay numbers live here (GDD: "все числа — ориентиры").
 
 /** Sword — slash (режущий), axe — chop (рубящий), hammer — crush (дробящий), mage staves — magic (магический). */
@@ -335,6 +336,10 @@ export interface MobDef {
   respawn: number; // seconds
   /** Below this HP fraction it throws a smoke bomb once per fight and a second one of it steps out (Game.callTwin). */
   twin?: number;
+  /** How it moves and when it fights (src/mobs/behavior.ts); a spawn slot may override it. */
+  behavior?: Partial<MobBehavior>;
+  /** Ranged: the blow is a projectile flying at the hero (`range` is then its shooting distance). */
+  shot?: { speed: number; arrow: Record<FactionId, string> };
   boss?: BossDef;
 }
 
@@ -489,7 +494,7 @@ export const MOBS: Record<string, MobDef> = {
     anim: 'SwordAttack', hp: 340, dmg: 7, aps: 0.8, range: 1.6, speed: 3.6, aggro: 8, regen: 0, scale: 1,
     ...foes('forest'), reward: { power: 1 }, respawn: 0,
   },
-  // Guards of the hub boss camp and the Snow Pass gate: late in the forest cycle (GUARD_SPAWNERS: forest charges), its biggest damage, no unlocks.
+  // Guards of the hub boss camp and the Snow Pass gate: late in the forest cycle (GUARD_PACKS: forest charges), its biggest damage, no unlocks.
   boss_guard: {
     id: 'boss_guard', name: 'Страж лагеря',
     model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] },
@@ -728,6 +733,14 @@ export const MOBS: Record<string, MobDef> = {
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
     },
   },
+  // Dunes: a ranged mob, the arrow is its blow (MobDef.shot)
+  archer: {
+    id: 'archer', name: 'Лучник',
+    model: { human: ['human_archer', 'bow_human_archer'], orc: ['orc_archer', 'bow_orc_archer'] },
+    anim: 'SwordAttack', hp: 160, dmg: 5, aps: 0.7, range: 9, speed: 3.2, aggro: 11, regen: 0.03, scale: 1,
+    shot: { speed: 24, arrow: { human: 'arrow_human_archer', orc: 'arrow_orc_archer' } },
+    ...foes('dunes'), reward: { power: 1 }, respawn: 60,
+  },
 };
 // Snow Pass look variants: the stats of the mob they copy on another elf body
 const elf = (base: string, id: string, name: string, body: string, weapon: string): MobDef =>
@@ -941,13 +954,23 @@ export const BREAKABLES: Record<string, BreakableDef> = {
  * with the unit's own `respawn`. The hero's position does not affect respawning.
  */
 export interface SpawnerDef { unit: 'mob' | 'prop'; id: string; charges?: number[] }
+/** One mob of a pack; `behavior` overrides its MobDef.behavior here only. */
+export interface SpawnSlot { id: string; behavior?: Partial<MobBehavior> }
+/**
+ * A spawn of several mobs standing together. It respawns as a whole: the charge starts once the last of them dies.
+ * `link` social: pulling one pulls the rest. Without `charges` one endless charge with the slowest slot's `respawn`.
+ */
+export interface PackDef { slots: SpawnSlot[]; charges?: number[]; link: 'social' | 'none' }
 const MIN = 60;
 const HOUR = 3600;
 /** Forest Edge: every spawner (elites and the micro-boss too) has 3 charges — 4 min, 5 min, 12 h. */
 const FOREST_CHARGES = [4 * MIN, 5 * MIN, 12 * HOUR];
 const spawner = (id: string, charges?: number[]): SpawnerDef => ({ unit: 'mob', id, charges });
+const pack = (ids: string[], charges?: number[], link: PackDef['link'] = 'social'): PackDef => ({ slots: ids.map((id) => ({ id })), charges, link });
+/** A pack as single spawners (the balance sim models units one by one). */
+export const packUnits = (p: PackDef): SpawnerDef[] => p.slots.map((sl) => spawner(sl.id, p.charges));
 /** Guards of the boss camp and the Snow Pass gate (world.buildForest): forest charges like everyone, so one clear of the forest is one cycle. */
-export const GUARD_SPAWNERS = { boss_guard: spawner('boss_guard', FOREST_CHARGES), gate_guard: spawner('gate_guard', FOREST_CHARGES) };
+export const GUARD_PACKS = { boss_guard: pack(['boss_guard', 'boss_guard', 'boss_guard'], FOREST_CHARGES), gate_guard: pack(['gate_guard', 'gate_guard', 'gate_guard'], FOREST_CHARGES) };
 /** Mob spawners by location, placed along the trail in list order (first = nearest the location's entrance). */
 export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
   forest: ([
@@ -973,13 +996,13 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
 /** Snow Pass (world.snowMobs): sword packs on and beside its roads, lone assassins in the woods, guards past the hub gate. */
 export const PEAKS_SPAWNERS = {
   packs: [
-    ['elf_sentinel', 'elf_swordsman'], ['elf_swordsman', 'elf_lumberjack', 'elf_sentinel'], ['elf_sentinel', 'elf_swordsman', 'elf_swordsman'],
-    ['elf_lumberjack', 'elf_sentinel'], ['elf_swordsman', 'elf_sentinel', 'elf_lumberjack'], ['elf_sentinel', 'elf_swordsman'],
+    ['elf_sentinel', 'elf_swordsman', 'elf_swordsman'], ['elf_swordsman', 'elf_lumberjack', 'elf_sentinel'], ['elf_sentinel', 'elf_swordsman', 'elf_swordsman'],
+    ['elf_lumberjack', 'elf_sentinel', 'elf_swordsman'], ['elf_swordsman', 'elf_sentinel', 'elf_lumberjack'], ['elf_sentinel', 'elf_swordsman', 'elf_lumberjack'],
     ['elf_swordsman', 'elf_sentinel', 'elf_sentinel'],
-  ].map((pack) => pack.map((id) => spawner(id))),
+  ].map((ids) => pack(ids)),
   assassins: ['elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin']
     .map((id) => spawner(id)),
-  guards: [spawner('elf_gate_guard'), spawner('elf_gate_guard')],
+  guards: pack(['elf_gate_guard', 'elf_gate_guard', 'elf_gate_guard']),
   /** Elites at hand-picked spots (map drawing; slid onto walkable land). */
   elites: ([['elf_glovemaster', -14, -135], ['elf_champion', 59.5, -148], ['elf_bladesmith', 13, -115.5], ['elf_warden', 54.5, -92]] as const)
     .map(([id, x, z]) => ({ def: spawner(id), x, z })),
@@ -987,7 +1010,7 @@ export const PEAKS_SPAWNERS = {
   beasts: ['wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_bear', 'wild_direwolf']
     .map((id) => spawner(id)),
   /** Bears by the west mini-boss (LAND_BOSSES peaks minis[1]). */
-  bears: ['wild_bear', 'wild_bear', 'wild_bear'].map((id) => spawner(id)),
+  bears: pack(['wild_bear', 'wild_bear', 'wild_bear']),
   /** Attackable trees, one at a time a road's width off the roads. */
   trees: ['snow_tree_young', 'snow_tree_birch', 'snow_tree_young', 'snow_tree_young', 'snow_tree_birch', 'snow_tree_young', 'snow_tree_birch', 'snow_tree_young']
     .map((id) => spawner(id)),
@@ -998,8 +1021,69 @@ export const MINI_SPAWNER = spawner('bandit_warlord');
 export const MINI_SPAWNER_OF: Partial<Record<ZoneId, SpawnerDef>> = {
   hills: spawner('tauren_warlord'), peaks: spawner('frost_warden'), grove: spawner('grove_dryad'), swamp: spawner('murloc_tidehunter'),
 };
-/** Round the gloves elite (world.glovesGuards): two bandit pairs in the trees. */
-export const GLOVES_BANDITS = ['bandit_thug', 'bandit_fighter', 'bandit_fighter', 'bandit_thug'].map((id) => spawner(id, FOREST_CHARGES));
+/**
+ * Spawn presets: the words for placing mobs on a location (World.addPack places a preset's pack).
+ * Unit kinds outside packs, by MobDef:
+ * - tree / object: `static` — stands, never attacks, gives stats (reward) when broken;
+ * - mob: plain MobDef — fights, gives stats;
+ * - loot mob (elite): `rank: 'elite'` + `drop` — its item on every kill;
+ * - mini-boss: `rank: 'mini'` — permanent `bonus` stats per kill;
+ * - boss: `boss` (BossDef) — its own fight kit, unlocks gates.
+ * Packs below (behavior axes: src/mobs/behavior.ts).
+ */
+export const SPAWN_PRESETS = {
+  /** A kiting archer and two melee guards who chase the hero. */
+  archer_escort: {
+    name: 'Лучник с охраной',
+    pack: { slots: [{ id: 'archer', behavior: { combat: 'kite' } }, { id: 'bandit_fighter' }, { id: 'bandit_fighter' }], link: 'social' },
+  },
+  /** Melee who spread round the hero and strike from different sides. */
+  flankers: {
+    name: 'Окружение',
+    pack: { slots: [{ id: 'bandit_thug', behavior: { combat: 'flank' } }, { id: 'bandit_thug', behavior: { combat: 'flank' } }, { id: 'bandit_fighter', behavior: { combat: 'flank' } }], link: 'social' },
+  },
+  /** Grows in the fight: assassins call a shadow twin each (MobDef.twin). */
+  growing: {
+    name: 'Растущая группа',
+    pack: { slots: [{ id: 'elf_assassin' }, { id: 'elf_assassin' }], link: 'social' },
+  },
+  /** Two archers who run off in random directions inside their spawn zone, keeping the hero at the edge of their range. */
+  skirmishers: {
+    name: 'Отбегающие стрелки',
+    pack: { slots: [{ id: 'archer', behavior: { combat: 'kite', zone: 9 } }, { id: 'archer', behavior: { combat: 'kite', zone: 9 } }], link: 'social' },
+  },
+  /** A big melee crowd of ten that rushes the hero together. */
+  horde: {
+    name: 'Орда',
+    horde: 'ring',
+    pack: {
+      slots: [
+        { id: 'bandit_thug' }, { id: 'bandit_fighter' }, { id: 'bandit_thug' }, { id: 'bandit_fighter' }, { id: 'bandit_thug' },
+        { id: 'bandit_fighter' }, { id: 'bandit_thug' }, { id: 'bandit_fighter' }, { id: 'bandit_thug' }, { id: 'bandit_fighter' },
+      ],
+      link: 'social',
+    },
+  },
+  /** Ten scattered at random: archers kiting, bandits chasing, assassins calling twins. */
+  horde_mixed: {
+    name: 'Смешанная орда',
+    horde: 'scatter',
+    pack: {
+      slots: [
+        { id: 'archer', behavior: { combat: 'kite' } }, { id: 'bandit_thug' }, { id: 'elf_assassin' }, { id: 'bandit_fighter' },
+        { id: 'archer', behavior: { combat: 'kite' } }, { id: 'elf_assassin' }, { id: 'bandit_thug' }, { id: 'archer', behavior: { combat: 'kite' } },
+        { id: 'bandit_fighter' }, { id: 'elf_assassin' },
+      ],
+      link: 'social',
+    },
+  },
+} satisfies Record<string, SpawnPreset>;
+/** `horde`: a big pack the debug teleport drops the hero into the middle of — standing in a ring or scattered at random. */
+export interface SpawnPreset { name: string; pack: PackDef; horde?: 'ring' | 'scatter' }
+export type SpawnPresetId = keyof typeof SPAWN_PRESETS;
+
+/** Round the gloves elite (world.glovesGuards): two bandit trios in the trees. */
+export const GLOVES_BANDITS = [pack(['bandit_thug', 'bandit_fighter', 'bandit_thug'], FOREST_CHARGES), pack(['bandit_fighter', 'bandit_thug', 'bandit_fighter'], FOREST_CHARGES)];
 /** Static trees of the forest (world.buildForest turns some of its trees into them), charges like the forest mobs. */
 export const FOREST_TREES = [
   'tree_young', 'tree_birch', 'tree_young', 'tree_spring', 'tree_windy',

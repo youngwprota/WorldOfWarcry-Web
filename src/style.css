@@ -692,29 +692,25 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ftext.soul { font-size: 20px; color: #9fe8ff; }
 
 /* ---------- debug panel (` or ⚙ → «Дебаг-меню»): floating, the game keeps running ---------- */
-#debug { position: absolute; left: 4px; top: 27%; z-index: 8; width: 158px; max-height: 44%; overflow-y: auto; padding: 6px; border: 3px solid var(--ink); border-radius: 12px; background: #120c08d9; box-shadow: 0 6px 20px #000a; font-family: system-ui, sans-serif; font-weight: 600; color: #fff; }
-#debug.min { max-height: none; width: auto; }
+#debug { position: absolute; left: 4px; right: var(--dbg-right, 80px); top: var(--dbg-top, 55%); bottom: var(--dbg-bottom, 130px); z-index: 8; overflow-x: hidden; overflow-y: auto; touch-action: pan-y; user-select: none; padding: 6px; border: 3px solid var(--ink); border-radius: 12px; background: #120c08d9; box-shadow: 0 6px 20px #000a; font-family: system-ui, sans-serif; font-weight: 600; color: #fff; }
+#debug.min { top: auto; right: auto; }
 #debug.min > :not(.dbg-head) { display: none; }
-.dbg-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 13px; }
+.dbg-head { position: sticky; top: -6px; z-index: 1; margin: -6px -6px 0; padding: 6px; background: #120c08; display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 13px; }
 .dbg-head button { width: 26px; height: 22px; padding: 0; border: 2px solid var(--ink); border-radius: 7px; background: #4e3f70; color: #fff; font-weight: 900; font-size: 12px; }
 .dbg-head button[data-close] { background: #e8335a; }
 .dbg-info { margin: 4px 0; padding: 4px 5px; border-radius: 7px; background: #ffffff12; font: 600 9px/1.3 ui-monospace, Consolas, monospace; white-space: pre-wrap; color: #d8ffd0; }
 .dbg-sec { margin-top: 4px; }
 .dbg-sec > span { display: block; font-size: 10px; color: #f0dcc0; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
-.dbg-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
-.dbg-btns button { min-height: 26px; padding: 1px 3px; border: 2px solid var(--ink); border-radius: 7px; background: #4e3f70; color: #fff; font: 700 10px system-ui, sans-serif; }
+.dbg-btns { display: flex; flex-wrap: wrap; gap: 3px; }
+.dbg-btns button { flex: none; min-height: 26px; padding: 1px 8px; white-space: nowrap; border: 2px solid var(--ink); border-radius: 7px; background: #4e3f70; color: #fff; font: 700 10px system-ui, sans-serif; }
 .dbg-btns button:active { transform: translateY(1px); }
-.dbg-btns button.wide { grid-column: span 3; }
-.dbg-btns button.god { grid-column: span 3; }
 .dbg-btns button.god.on { background: #2fb847; }
-.dbg-btns button.wide2 { grid-column: span 2; }
-.dbg-btns button.set.on, .dbg-btns button.bowv.on { background: #2fb847; }
+.dbg-btns button.set.on { background: #2fb847; }
 /* class set rows: 7 quality buttons in 4 columns, short labels fit the panel width */
-.dbg-btns:has(> .set) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.dbg-btns button.set { padding: 1px 0; font-size: 9px; }
-.dbg-build { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; font-size: 10px; }
-.dbg-build input { width: 100%; box-sizing: border-box; border: 2px solid var(--ink); border-radius: 6px; background: #2a2038; color: #fff; font: 700 11px system-ui, sans-serif; padding: 2px 4px; }
-.dbg-build button { grid-column: span 2; min-height: 26px; border: 2px solid var(--ink); border-radius: 7px; background: #4e3f70; color: #fff; font: 700 10px system-ui, sans-serif; }
+.dbg-btns button.set { font-size: 9px; }
+.dbg-build { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-bottom: 3px; font-size: 10px; }
+.dbg-build input { width: 72px; box-sizing: border-box; border: 2px solid var(--ink); border-radius: 6px; background: #2a2038; color: #fff; font: 700 11px system-ui, sans-serif; padding: 2px 4px; }
+.dbg-build button { min-height: 26px; padding: 1px 8px; border: 2px solid var(--ink); border-radius: 7px; background: #4e3f70; color: #fff; font: 700 10px system-ui, sans-serif; }
 .divider b { color: #ffd23f; }
 .divider b.ok { color: #8cf26a; }
 .tier-lock { margin: -4px 0 6px; text-align: center; font-size: 14px; font-weight: 900; color: #ffb3a0; text-shadow: var(--stroke-s); }

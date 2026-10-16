@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { Character } from './character';
 import { Trail } from './swing';
 import { Creature } from './creature';
-import { StaticBody } from './staticbody';
 import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
@@ -20,10 +19,14 @@ import { classKit, writeSave, type SaveData } from './save';
 import { CLASSES, CLASS_IDS, SWITCH_COOLDOWN, archerBow, classSlot, kitOf, weaponClass, type HeroClass } from './party';
 import { BODY_PARTS, CLASS_LOOK, debugSetTrims, type Wearer } from './looks';
 import { assets } from './assets';
-import { Arrows } from './arrows';
+import { Arrows, type ArrowTarget } from './arrows';
 import { PET_SEEK, Pet } from './pet';
 import { GATE, ISLAND, SPAWN, inCamp, pathAt, progressAt } from './island';
-import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnPoint } from './world';
+import { BREAKABLES, World, makeBreakable, type BreakableDef, type SpawnGroup, type SpawnPoint } from './world';
+import { MARK_COLOR, Unit, setChargeBars, unitBar } from './mobs/unit';
+import { Mob } from './mobs/mob';
+import { Spawn } from './mobs/spawn';
+import { combatGoal } from './mobs/behavior';
 import { Ambient } from './ambient';
 import { UI, type FlyEl, type MapMark } from './ui';
 import { art } from './art';
@@ -45,236 +48,12 @@ const DROP_GAP = 56;
 /** White-yellow sparks of a non-lethal hit (blood is for the kill). */
 const HIT_SPARK = 0xfff3a8;
 
-/** Running counters of one fight with a mob (balance log). */
-interface FightStat { t0: number; dealt: number; taken: number; hits: number; combos: number; slams: number; slamHits: number; hpStart: number }
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
 /** Slack over the weapon's range for a hit to land (unit edge to hero centre); targeting and swings use the same. */
 const STRIKE_PAD = 0.35;
 
-/** Respawn timer text: 45s, 4m05s, or 11h45m from an hour up (no seconds). */
-function fmtRespawn(sec: number) {
-  const s = Math.max(0, Math.ceil(sec));
-  const p2 = (n: number) => String(n).padStart(2, '0');
-  const u = (n: number | string, unit: string) => `${n}<small>${unit}</small>`; // smaller unit letters keep it inside the ring
-  return s >= 3600 ? u(Math.floor(s / 3600), 'ч') + u(p2(Math.floor(s / 60) % 60), 'м')
-    : s >= 60 ? u(Math.floor(s / 60), 'м') + u(p2(s % 60), 'с') : u(s, 'с');
-}
-
-/** Respawn loader at a spawn point: progress ring, timer and one bar per spawner charge. */
-function respawnLoader(layer: HTMLElement, cls: string) {
-  const el = document.createElement('div');
-  el.className = cls;
-  el.innerHTML = '<div class="ring"></div><span></span><div class="charges"></div>';
-  layer.appendChild(el);
-  return el;
-}
-
-/** Charge bars (green = used in the current cycle, dark = still available). */
-function setChargeBars(el: HTMLElement, used: number, total: number) {
-  const key = `${used}/${total}`;
-  const bars = el.lastChild as HTMLElement;
-  if (bars.dataset.k === key) return;
-  bars.dataset.k = key;
-  bars.innerHTML = total > 1 ? Array.from({ length: total }, (_, i) => `<i${i < used ? ' class="used"' : ''}></i>`).join('') : '';
-}
-
-/**
- * Anything that stands at a spawn point and can be destroyed: a mob or a breakable prop. Both are one type and live
- * in one list (Game.units): targeting, hits, death rewards, spawner charges, respawn, the HP bar, the respawn loader
- * and the minimap treat them alike; only the body (animated character / static model) differs.
- */
-abstract class Unit {
-  abstract readonly kind: 'mob' | 'prop';
-  hp = 0;
-  maxHp = 0;
-  respawnAt = 0;
-  respawnTotal = 0;
-  /** The fixed spawner (config SPAWNERS / PROP_SPAWNERS); null for bosses and mobs risen from graves. */
-  spawner: SpawnPoint | null = null;
-  /** Charges of the spawner used in the current cycle. */
-  chargesUsed = 0;
-  /** Dropped on death. */
-  reward: Partial<Record<OrbKind, number>> = {};
-  /** Above the unit: reward chips, weakness/resistance icons, HP bar. */
-  uiEl: HTMLDivElement;
-  hpFill: HTMLDivElement;
-  /** HP number on the bar (mobs; props have none). */
-  hpText: HTMLSpanElement | null;
-  /** Shown at the spawn point while the unit is dead. */
-  respawnEl: HTMLDivElement;
-  private lastSec = -1;
-  constructor(public spawn: THREE.Vector3, layer: HTMLElement, uiCls: string, uiHtml: string, loaderCls: string) {
-    this.uiEl = document.createElement('div');
-    this.uiEl.className = uiCls;
-    this.uiEl.innerHTML = uiHtml;
-    this.hpFill = this.uiEl.querySelector('.mobhp > div')!;
-    this.hpText = this.uiEl.querySelector('.mobhp span');
-    layer.appendChild(this.uiEl);
-    this.respawnEl = respawnLoader(layer, loaderCls);
-  }
-  abstract get alive(): boolean;
-  abstract get pos(): THREE.Vector3;
-  abstract readonly radius: number;
-  abstract get visible(): boolean;
-  /** Special units get their own map mark instead of a red dot (see Game.mapMarks). */
-  get mark(): 'boss' | 'mini' | 'elite' | null { return null; }
-  /** Can be targeted and hit right now. */
-  get hittable() { return this.alive; }
-  /** HP bar: height above the ground and how near the hero must be to see it. */
-  abstract get barY(): number;
-  abstract get barRange(): number;
-  /** Never fights back (props, static units): the hero turns to it only when no enemy is in reach. */
-  get passive() { return true; }
-  /** The respawn loader may show (a mob's corpse has to sink first). */
-  get loaderReady() { return true; }
-  /** Back at the spawn point, full HP. */
-  abstract respawn(): void;
-  /** Dead and hidden at once (a cooldown restored from the save). */
-  abstract vanish(): void;
-  setRespawnText(sec: number) {
-    const s = Math.max(0, Math.ceil(sec));
-    if (s === this.lastSec) return;
-    this.lastSec = s;
-    (this.respawnEl.children[1] as HTMLElement).innerHTML = fmtRespawn(s);
-  }
-}
-
-export class Mob extends Unit {
-  readonly kind = 'mob';
-  ch: Character | Creature | StaticBody;
-  state: 'idle' | 'chase' | 'return' | 'dead' = 'idle';
-  atkCd = 0;
-  impact = -1;
-  stun = 0;
-  deadT = 0;
-  wanderT = Math.random() * 3;
-  wander = new THREE.Vector3();
-  knock = new THREE.Vector3();
-  /** The death clip is still playing (the corpse sinks once it is over). */
-  dying = false;
-  loot: Item[] = [];
-  /** deadT when the death clip ended; the corpse sinks after that. */
-  paidAt = 0;
-  radius: number;
-  /** Spawned by a prop (grave): no respawn, removed after death. */
-  temp = false;
-  removed = false;
-  /** Seconds left of the "crawling out of the ground" intro; untargetable meanwhile. */
-  rise = 0;
-  // boss
-  special = 4;
-  /** Game time of the last hit taken (regen waits MOB_REGEN_DELAY after it). */
-  hurtAt = -99;
-  fight: FightStat | null = null;
-  casting = 0;
-  phase2 = false;
-  /** Boss: reinforcement waves already called, and which step of its attack cycle comes next. */
-  adds = 0;
-  cycle = 0;
-  /** Reinforcement of this boss: removed when the fight resets, pays no gacha pull. */
-  owner: Mob | null = null;
-  /** MobDef.twin: the shadow twin was called this fight; on the twin: the mob that called it. */
-  twinned = false;
-  twinOf: Mob | null = null;
-  /** Death's soul: the hero walks through it. */
-  passable = false;
-  /** Death: seconds since the last soul rose, and seconds left of the summoning flight (untargetable meanwhile). */
-  soulT = 0;
-  ritual = 0;
-  burstDue = false;
-  /** Boss: `animNext` starts in `animDelay` s (a cone clip timed to its telegraph); -1 = none. */
-  animDelay = -1;
-  animNext: BossAnim = 'MeleeHigh';
-  awake = true;
-  /** Depth-scaled stats (DEPTH in config): use these instead of def.dmg / def.reward. */
-  dmg: number;
-  /** Fire staff: seconds of burning left, its damage per second, seconds to the next tick. */
-  burn = 0;
-  burnDps = 0;
-  burnTick = 0;
-  /** Ice staff: seconds of the slow and of the freeze left; the tint shown (0 none, 1 slowed, 2 frozen). */
-  slow = 0;
-  frozen = 0;
-  chill = 0;
-  constructor(public def: MobDef, spawn: THREE.Vector3, faction: 'human' | 'orc', layer: HTMLElement,
-    mul = { hp: 1, dmg: 1, reward: 1, scale: 1 }) {
-    // Bosses, micro-bosses and elites get a bigger HP bar with their name: a boss's is coloured by difficulty,
-    // a micro-boss's is orange, an elite's has its drop's quality colour. Over the bar: the loot (lootHtml);
-    // right of it: weaknesses and resistances.
-    const reward: Partial<Record<OrbKind, number>> = {};
-    for (const [k, n] of Object.entries(def.reward) as [OrbKind, number][]) if (n) reward[k] = Math.round(n * mul.reward);
-    const named = !!(def.boss || def.rank);
-    const title = def.boss ? `<div class="bname">${def.boss.titles[faction]}</div>`
-      : def.rank === 'mini' ? `<div class="bname" style="color:${MARK_COLOR.mini}">${def.name}</div>`
-      : def.drop ? `<div class="bname" style="color:${RARITY[def.drop.rarity].color}">${def.name}</div>`
-      : '';
-    // an item drop shows only the item; a micro-boss its permanent bonus (+500 HP) instead of its orbs
-    const item = def.drop ? { icon: dropIconId(def.drop), color: RARITY[def.drop.rarity].color } : null;
-    const loot = def.bonus ? lootHtml(def.bonus, null, true) : lootHtml(reward, item);
-    super(spawn, layer, named ? 'mobui boss' : 'mobui', title + unitBar(loot, resistIcons(def, named ? 27 : 24)),
-      'respawn' + (named ? ' boss' : ''));
-    this.reward = reward;
-    const [model, weapon] = def.model[faction];
-    const scale = def.scale * mul.scale;
-    this.ch = def.static ? new StaticBody(model, scale, def.tint === undefined ? undefined : new THREE.Color(def.tint))
-      : def.creature ? new Creature(model, scale) : new Character(model, weapon, scale, def.skin);
-    this.dmg = def.dmg * mul.dmg;
-    this.ch.position.copy(spawn);
-    this.ch.facing = Math.random() * Math.PI * 2;
-    this.maxHp = this.hp = Math.round(def.hp * mul.hp);
-    this.radius = def.static ? 0.8 : (def.creature ? 0.7 : 0.45) * scale;
-    this.wander.copy(spawn);
-  }
-  /** Stands on its spawn point: no AI, no knockback (MobDef.static). */
-  get passive() { return !!this.def.static; }
-  get alive() { return this.state !== 'dead'; }
-  get pos() { return this.ch.position; }
-  get visible() { return this.ch.root.visible; }
-  get boss() { return !!this.def.boss; }
-  get mark() { return this.def.boss ? 'boss' as const : this.def.rank ?? null; }
-  get hittable() { return this.alive && this.awake && this.rise <= 0 && this.ritual <= 0; }
-  get barY() { return (this.ch instanceof StaticBody ? this.ch.height + 0.3 : 2.15 * this.def.scale) * this.ch.root.scale.x; }
-  get barRange() { return this.def.boss || this.def.rank ? 24 : 16; }
-  get loaderReady() { return !this.temp && ((!this.dying && this.deadT - this.paidAt > 2.2) || this.boss); }
-  /** Ice staff tint (static bodies keep their colours). */
-  setChill(k: 0 | 1 | 2) {
-    if (k === this.chill || this.ch instanceof StaticBody) return;
-    this.chill = k;
-    this.ch.setTint(k ? STAVES.ice.tint[k - 1] : 0xffffff);
-  }
-  respawn() {
-    this.burn = this.slow = this.frozen = 0;
-    this.setChill(0);
-    this.fight = null;
-    this.dying = false;
-    this.loot = [];
-    this.knock.set(0, 0, 0);
-    this.state = 'idle';
-    this.hp = this.maxHp;
-    this.phase2 = false;
-    this.adds = 0;
-    this.twinned = false;
-    this.soulT = 0;
-    this.ritual = 0;
-    this.burstDue = false;
-    this.animDelay = -1;
-    this.cycle = 0;
-    this.special = 4;
-    this.casting = 0;
-    this.impact = -1;
-    this.pos.copy(this.spawn);
-    this.ch.revive();
-    this.ch.root.visible = true;
-  }
-  vanish() {
-    this.state = 'dead';
-    this.ch.root.visible = false;
-    this.deadT = 99;
-    this.dying = false;
-  }
-}
 
 class Prop extends Unit {
   readonly kind = 'prop';
@@ -338,6 +117,8 @@ export class Game {
   private fx: FloatingText;
   private particles: Particles;
   private arrows: Arrows;
+  /** What mob projectiles fly at: the hero, unhittable while dead. */
+  private heroMark: ArrowTarget;
   /** The hunter's pet while he is on the field. */
   private pet: Pet | null = null;
   private telegraphs: Telegraphs;
@@ -433,21 +214,30 @@ export class Game {
     this.hero.position.set(SPAWN.x, 0, SPAWN.z);
     this.hero.facing = Math.PI;
     this.scene.add(this.hero.root);
+    this.heroMark = { pos: this.hero.position, radius: HERO.radius, hittable: true };
     for (const t of this.trails) this.scene.add(t.mesh);
     this.hp = this.maxHp;
 
+    const spawns = new Map<SpawnGroup, Spawn>();
     for (const s of this.world.spawns) {
-      const u = s.unit === 'mob' ? this.addMob(MOBS[s.kind], new THREE.Vector3(s.x, 0, s.z), labels, s.depth) : this.addProp(s, labels);
+      const u = s.unit === 'mob' ? this.addMob(MOBS[s.kind], new THREE.Vector3(s.x, 0, s.z), labels, s.depth, s.behavior) : this.addProp(s, labels);
       if (u instanceof Mob && u.passive) u.ch.facing = s.rot;
-      u.spawner = s;
+      let sp = spawns.get(s.group);
+      if (!sp) spawns.set(s.group, sp = new Spawn(s.group));
+      sp.units.push(u);
+      u.spawner = sp;
+    }
+    for (const sp of spawns.values()) {
       // a cooldown still running from an earlier session
-      const rec = save.spawners?.[s.id];
-      if (rec && rec.until > Date.now()) {
-        const left = (rec.until - Date.now()) / 1000;
+      const rec = save.spawners?.[sp.def.id];
+      if (!rec || rec.until <= Date.now()) continue;
+      const left = (rec.until - Date.now()) / 1000;
+      const ch = sp.def.charges;
+      for (const u of sp.units) {
         u.vanish();
         u.respawnAt = this.time + left;
-        u.respawnTotal = s.charges[(rec.n + s.charges.length - 1) % s.charges.length] || left;
-        u.chargesUsed = rec.n || s.charges.length;
+        u.respawnTotal = ch[(rec.n + ch.length - 1) % ch.length] || left;
+        u.chargesUsed = rec.n || ch.length;
       }
     }
     for (const b of this.world.bosses) {
@@ -462,7 +252,7 @@ export class Game {
 
     for (const m of this.mobs) {
       if (!m.spawner && !m.def.boss) continue;
-      const zone = m.spawner?.zone ?? this.world.zoneAt(m.spawn.x, m.spawn.z).id;
+      const zone = m.spawner?.def.zone ?? this.world.zoneAt(m.spawn.x, m.spawn.z).id;
       if (!this.clearOf.has(zone)) this.clearOf.set(zone, []);
       this.clearOf.get(zone)!.push(m);
     }
@@ -487,11 +277,11 @@ export class Game {
     this.refreshHud(true);
   }
 
-  private addMob(def: MobDef, at: THREE.Vector3, labels: HTMLElement, depth = 0) {
+  private addMob(def: MobDef, at: THREE.Vector3, labels: HTMLElement, depth = 0, behavior?: SpawnPoint['behavior']) {
     const zone = this.world.zoneAt(at.x, at.z).id;
     const mul = def.boss || def.rank ? { hp: 1, dmg: 1, reward: 1, scale: 1 } : depthMul(zone, depth);
     const tier = ZONE_TIER[zone] ?? 1;
-    const m = new Mob(def, at, this.save.faction, labels, { ...mul, hp: mul.hp * tier, dmg: mul.dmg * tier });
+    const m = new Mob(def, at, this.save.faction, labels, { ...mul, hp: mul.hp * tier, dmg: mul.dmg * tier }, behavior);
     m.ch.root.scale.setScalar(this.mobScale);
     this.addUnit(m);
     return m;
@@ -1378,9 +1168,18 @@ export class Game {
     u.uiEl.classList.remove('show');
     if (this.target === u) this.target = null;
     if (pay) this.payRewards(u);
-    if (!u.spawner) return;
-    [u.respawnTotal, u.chargesUsed] = this.useCharge(u.spawner);
-    u.respawnAt = this.time + u.respawnTotal;
+    if (u.spawner) this.spawnLost(u, u.spawner);
+  }
+
+  /** A spawn comes back as a whole: its next charge starts when its last unit is down, the dead wait till then. */
+  private spawnLost(u: Unit, sp: Spawn) {
+    if (!sp.cleared) { u.respawnAt = Infinity; return; }
+    const [total, used] = this.useCharge(sp.def);
+    for (const o of sp.units) {
+      o.respawnTotal = total;
+      o.chargesUsed = used;
+      o.respawnAt = this.time + total;
+    }
   }
 
   /** Stats of a dead unit go straight to the hero (a mob's wait for its death clip, see grantKillRewards). */
@@ -1523,11 +1322,15 @@ export class Game {
       } else if (m.casting > 0) {
         m.casting -= dt;
       } else {
+        const b = m.behavior;
         const dSpawn = m.pos.distanceTo(m.spawn);
+        // a pack is leashed to its centre, so it gives up together
+        const home = m.spawner?.at ?? m.spawn;
         const leash = def.boss ? 16 : LEASH;
+        const sees = b.disposition === 'hostile' && dHero < def.aggro;
         if (m.state === 'idle') {
-          if (!this.dead && !heroInCamp && dHero < def.aggro) m.state = 'chase';
-          else {
+          if (!this.dead && !heroInCamp && (sees || m.spawner?.pulls(m))) m.state = 'chase';
+          else if (b.idle === 'wander') {
             m.wanderT -= dt;
             if (m.wanderT <= 0) {
               m.wanderT = 2 + Math.random() * 4;
@@ -1540,7 +1343,7 @@ export class Game {
           }
         } else if (m.state === 'chase') {
           // Death's souls have no leash: they chase the hero even after their boss gives up
-          const outOfLeash = !m.passable && (dSpawn > leash || hp.distanceTo(m.spawn) > leash + 4);
+          const outOfLeash = !m.passable && (m.pos.distanceTo(home) > leash || hp.distanceTo(home) > leash + 4);
           if (this.dead || heroInCamp || outOfLeash) {
             m.state = 'return';
             this.endFight(m, 'reset');
@@ -1559,7 +1362,13 @@ export class Game {
               if (back > 0) {
                 m.pos.x -= Math.sin(m.ch.facing) * back;
                 m.pos.z -= Math.cos(m.ch.facing) * back;
-              } else if (dHero > reach * 0.85) moving = this.stepTo(m, hp, def.speed, dt);
+              } else {
+                // a kiting archer stands still while it shoots
+                const sp = b.combat === 'flank' ? m.spawner : undefined;
+                const goal = b.combat !== 'kite' || m.impact < 0
+                  ? combatGoal(m, hp, dHero, reach, dt, v2, home, sp ? sp.fightSlot(m) : 0, sp ? sp.fightCount : 1) : null;
+                if (goal) moving = this.stepTo(m, goal, def.speed, dt);
+              }
               m.ch.facing = turn(m.ch.facing, Math.atan2(hp.x - m.pos.x, hp.z - m.pos.z), dt * 8);
               m.atkCd -= dt;
               if (dHero < reach && m.atkCd <= 0 && m.impact < 0) {
@@ -1574,7 +1383,7 @@ export class Game {
         } else if (m.state === 'return') {
           // Walks home at chase speed, no heal; re-aggros if the hero comes close again inside the leash
           // (a hit is within aggro range too). Hero outside the leash is ignored, or it would flip every frame.
-          if (!this.dead && !heroInCamp && dHero < def.aggro && hp.distanceTo(m.spawn) < leash) m.state = 'chase';
+          if (!this.dead && !heroInCamp && sees && hp.distanceTo(home) < leash) m.state = 'chase';
           else {
             moving = this.stepTo(m, m.spawn, def.speed, dt);
             if (dSpawn < 0.6) m.state = 'idle';
@@ -1585,7 +1394,8 @@ export class Game {
         m.impact -= dt;
         if (m.impact < 0 && !this.dead && m.stun <= 0) {
           const reach = def.range + m.radius * 0.5 + HERO.radius + 0.5;
-          if (m.pos.distanceTo(hp) < reach) {
+          if (def.shot) this.mobShot(m, def.shot);
+          else if (m.pos.distanceTo(hp) < reach) {
             this.hurtHero(m.dmg * (m.phase2 ? def.boss!.phase2Dmg : 1), m.pos, m);
             if (def.push) {
               this.heroKnock.set(hp.x - m.pos.x, 0, hp.z - m.pos.z).normalize().multiplyScalar(def.push);
@@ -1629,6 +1439,13 @@ export class Game {
       this.mobs = this.mobs.filter((m) => !m.removed);
       this.units = this.units.filter((u) => !(u instanceof Mob && u.removed));
     }
+  }
+
+  /** A ranged mob's blow: a projectile at the hero, the damage lands when it arrives (lost if the hero died). */
+  private mobShot(m: Mob, shot: NonNullable<MobDef['shot']>) {
+    const dmg = m.dmg * (m.phase2 ? m.def.boss!.phase2Dmg : 1);
+    v1.copy(m.pos).setY(1.3 * m.def.scale);
+    this.arrows.fire(shot.arrow[this.faction], v1, this.heroMark, shot.speed, () => this.hurtHero(dmg, m.pos, m));
   }
 
   private removeMob(m: Mob) {
@@ -2064,6 +1881,7 @@ export class Game {
         else if (m.alive && this.kitOf(m)) { this.despawnMinions(m); this.kitOf(m)!.reset?.(); }
       }
       this.dead = true;
+      this.heroMark.hittable = false;
       this.deadT = 0;
       this.target = null;
       this.hero.die();
@@ -2115,6 +1933,7 @@ export class Game {
 
   private revive() {
     this.dead = false;
+    this.heroMark.hittable = true;
     this.hp = Math.max(1, Math.round(this.maxHp * HERO.respawnHp));
     this.hero.revive();
     this.ui.flash();
@@ -2180,16 +1999,19 @@ export class Game {
         if (u instanceof Mob && u.def.boss) (u.uiEl.querySelector('.bname') as HTMLElement).style.color = this.bossColor(u);
       }
       // Respawn loader at the spawn point (for a mob, once the corpse has gone).
-      const dead = !u.alive && u.loaderReady && u.spawn.distanceTo(hp) < 30 && explored(u.spawn);
+      // a spawn shows one loader, at its centre, once all of it is down
+      const at = u.spawner?.at ?? u.spawn;
+      const dead = !u.alive && u.loaderReady && u.respawnAt < Infinity && (!u.spawner || u.spawner.leader === u)
+        && at.distanceTo(hp) < 30 && explored(at);
       if (!dead) { if (u.respawnEl.classList.contains('show')) u.respawnEl.classList.remove('show'); continue; }
-      v1.copy(u.spawn).setY(0.5).project(this.camera);
+      v1.copy(at).setY(0.5).project(this.camera);
       if (Math.abs(v1.x) > 1.1 || Math.abs(v1.y) > 1.1) { u.respawnEl.classList.remove('show'); continue; }
       const left = u.respawnAt - this.time;
       u.respawnEl.classList.add('show');
       u.respawnEl.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -50%)`;
       u.respawnEl.style.setProperty('--p', `${Math.min(1, Math.max(0, 1 - left / (u.respawnTotal || 1))) * 360}deg`);
       u.setRespawnText(left);
-      if (u.spawner) setChargeBars(u.respawnEl, u.chargesUsed, u.spawner.charges.length);
+      if (u.spawner) setChargeBars(u.respawnEl, u.chargesUsed, u.spawner.def.charges.length);
     }
   }
 
@@ -2600,10 +2422,8 @@ export class Game {
         if (u.temp) { this.removeMob(u); continue; }
       }
       u.vanish();
-      if (u.spawner) {
-        [u.respawnTotal, u.chargesUsed] = this.useCharge(u.spawner);
-        u.respawnAt = this.time + u.respawnTotal;
-      } else if (u instanceof Mob && u.boss) {
+      if (u.spawner) this.spawnLost(u, u.spawner);
+      else if (u instanceof Mob && u.boss) {
         (this.save.bosses[u.def.id] ??= { firstKill: false, deadUntil: 0 }).deadUntil = Date.now() + u.def.respawn * 1000;
         u.respawnAt = this.time + u.def.respawn;
         u.respawnTotal = u.def.respawn;
@@ -2755,14 +2575,6 @@ function inCone(c: ConeTag, p: THREE.Vector3, r: number) {
 interface ShotTag { at: THREE.Vector3; dmg: number; r: number }
 
 const rndSort = () => Math.random() - 0.5;
-
-/** Map / name colours of special mobs (an elite uses its drop's quality colour). */
-const MARK_COLOR = { boss: '#ff3b3b', mini: '#ff9a2e', elite: '#ffffff' };
-
-/** The block over a unit: loot on top, the HP bar under it, weakness / resistance icons right of the bar. */
-function unitBar(loot: string, resist: string) {
-  return `<div class="mloot">${loot}</div><div class="mrow"><div class="mobhp"><div></div><span></span></div><div class="ris">${resist}</div></div>`;
-}
 
 /** "+500 хп · +25 хп/с" */
 function bonusText(b: Partial<Record<OrbKind, number>> | undefined) {

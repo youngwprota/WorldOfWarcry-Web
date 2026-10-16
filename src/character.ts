@@ -163,7 +163,8 @@ export class Character {
         }
       }
     });
-    if (weaponName) this.setWeapon(weaponName);
+    // a bow is held in the left hand (like the hero's), the right arm draws the string with the attack clip
+    if (weaponName) this.setWeapon(weaponName, null, weaponName.startsWith('bow_'));
 
     this.swinger = new Swinger(this.model);
     const { full, upper, lower } = assets.clipsFor(modelName);
