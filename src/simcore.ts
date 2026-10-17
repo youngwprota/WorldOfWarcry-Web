@@ -4,7 +4,8 @@
 import * as CONFIG from './config';
 import {
   ATTACK_HIT, BREAKABLES, CEMETERY_BOARS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
-  PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, depthMul, mobImpact, packUnits, mobRank, tokenChance as zoneTokenChance,
+  CEMETERY_AREAS, PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, ZONE_FOES, ZONE_TIER, depthMul, mobImpact, packUnits, mobRank, zoneResist,
+  tokenChance as zoneTokenChance,
   type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
 import { addStat, heroDps, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, heroStats, type HeroBuild } from './balance';
@@ -12,8 +13,8 @@ import { ARMOR, armorStats, dropItem, itemClass, makeItem, sameItem, weaponDamag
 import { CLASSES, CLASS_IDS, classSlot, kitOf, weaponClass, type HeroClass } from './party';
 import { pull } from './gacha';
 import {
-  ARENA, BOSS_GUARDS, FORT, FOREST_PINS, GATE, GATE_GUARDS, GLOVES_PACKS, GLOVES_SPREAD, LAND_BOSSES, MID_UV, SPAWN, campToFortAt, ringSpots, inCamp, pathAt, pathDist,
-  progressAt, walkable, zoneIdAt,
+  ARENA, BOSS_GUARDS, FORT, FOREST_PINS, GATE, GATE_GUARDS, GLOVES_PACKS, GLOVES_SPREAD, ISLAND, LAND_BOSSES, MAP_BOX, MID_UV, SPAWN, campToFortAt, ringSpots, inCamp,
+  pathAt, pathDist, progressAt, walkable, zoneIdAt,
 } from './island';
 
 // ---------- options ----------
@@ -127,10 +128,34 @@ function route(a: Spot, b: Spot) {
   return pts;
 }
 
+/** A fixed-seed rng for the layout (the same map every run, like World's own rng streams). */
+function layoutRng(seed: number) {
+  let a = seed * 9973;
+  return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+/**
+ * A random walkable spot of `zone` 9+ m from the pack centres taken so far (World.spread / emptySpot pick at random
+ * among decor the sim does not have, so this is the same kind of spot, not the same one); `ok`: extra test.
+ */
+function emptyIn(zone: ZoneId, r: () => number, packs: [number, number][], ok: (x: number, z: number) => boolean = () => true) {
+  let best = { x: ISLAND.cx, z: ISLAND.cz }, bestD = -1;
+  for (let i = 0; i < 400; i++) {
+    const x = MAP_BOX.x + r() * MAP_BOX.size, z = MAP_BOX.z + r() * MAP_BOX.size;
+    if (zoneIdAt(x, z) !== zone || !walkable(x, z, 2) || !ok(x, z)) continue;
+    const d = packs.reduce((m, [px, pz]) => Math.min(m, Math.hypot(px - x, pz - z)), Infinity);
+    if (d >= 9) { best = { x, z }; bestD = d; break; }
+    if (d > bestD) { best = { x, z }; bestD = d; }
+  }
+  packs.push([best.x, best.z]);
+  return best;
+}
+
 // ---------- units ----------
 interface Unit {
   id: string; kind: 'mob' | 'prop'; def: string; zone: ZoneId; spot: Spot; depth: number; charges: number[];
   n: number; respawnAt: number; temp?: boolean;
+  /** Snow Pass: every other mob has the location's `alt` resist profile (Game.zoneDef). */
+  alt?: boolean;
 }
 /** Every spawner World builds in the forest and the cemetery (world.buildForest / campToFort / glovesGuards / land minis). */
 function buildUnits(): Unit[] {
@@ -156,9 +181,21 @@ function buildUnits(): Unit[] {
   add('mob', gloves, gloveSpots, 'forest', 'gloves', 0.3);
   // static trees: World picks trees 4–12 m off the trail, well apart — spread along it here
   add('mob', FOREST_TREES, along(forestRanges, FOREST_TREES.length).map((p) => ({ s: p.s, off: 9, side: -(p.side ?? 1) })), 'forest', 'tree', false);
-  add('mob', packUnits(GUARD_PACKS.boss_guard), BOSS_GUARDS.map((p) => spotAt(p.x, p.z)), 'forest', 'bguard', false);
-  add('mob', packUnits(GUARD_PACKS.gate_guard), GATE_GUARDS.map((p) => spotAt(p.x, p.z)), 'forest', 'gguard', false);
-  add('mob', SPAWNERS.cemetery ?? [], placeAlong(cemRange, SPAWNERS.cemetery ?? [], 'cemetery', packs), 'cemetery', 'cemetery');
+  // guards: a pair at their spots, the third one alone somewhere empty in the forest (World.buildForest loneGuards)
+  const lr = layoutRng(7);
+  const lone = () => {
+    const p = emptyIn('forest', lr, packs, (x, z) => !inCamp(x, z, 4) && Math.hypot(x - FORT.x, z - FORT.z) > FORT.r + 4);
+    return spotAt(p.x, p.z);
+  };
+  add('mob', packUnits(GUARD_PACKS.boss_guard), [...BOSS_GUARDS.slice(0, 2).map((p) => spotAt(p.x, p.z)), lone()], 'forest', 'bguard', false);
+  add('mob', packUnits(GUARD_PACKS.gate_guard), [...GATE_GUARDS.slice(0, 2).map((p) => spotAt(p.x, p.z)), lone()], 'forest', 'gguard', false);
+  // the village and chapel specials stand in their areas (World.buildCemetery: CEMETERY_AREAS pins)
+  const cemPins: Record<string, [number, number]> = {};
+  for (const a of CEMETERY_AREAS) {
+    const r = (a.deg * Math.PI) / 180;
+    if (a.pin) cemPins[a.pin] = [ISLAND.cx + Math.sin(r) * a.d, ISLAND.cz + Math.cos(r) * a.d];
+  }
+  add('mob', SPAWNERS.cemetery ?? [], placeAlong(cemRange, SPAWNERS.cemetery ?? [], 'cemetery', packs, cemPins), 'cemetery', 'cemetery');
   add('mob', packUnits(CEMETERY_BOARS.pack), ringSpots(...CEMETERY_BOARS.at, 2, 1.8).map((p) => spotAt(p.x, p.z)), 'cemetery', 'cboars', 0.5);
   // the fort's real tower (world.buildFort): a breakable turret south of the boss (its arrows at the hero are left out)
   const tower = OPT.faction === 'human' ? 'fort_tower_orc' : 'fort_tower_human';
@@ -173,6 +210,12 @@ function buildUnits(): Unit[] {
     const zone = d.boss!.zone;
     const s = zone === 'forest' ? sFort : sArena;
     us.push({ id: d.id, kind: 'mob', def: d.id, zone, spot: { s, off: 0 }, depth: 0, charges: [d.respawn], n: 0, respawnAt: 0 });
+  }
+  // Game.zoneDef: in a location with an `alt` profile every other mob (in spawn order) has it
+  const altN: Partial<Record<ZoneId, number>> = {};
+  for (const u of us) {
+    if (u.kind !== 'mob' || !ZONE_FOES[u.zone]?.alt || MOBS[u.def].static || MOBS[u.def].boss) continue;
+    u.alt = (altN[u.zone] = (altN[u.zone] ?? 0) + 1) % 2 === 0;
   }
   return us;
 }
@@ -197,10 +240,18 @@ export const BOSSES = Object.values(MOBS).filter((d) => d.boss && (d.boss.zone =
 const DT = 0.05;
 interface FightOut { win: boolean; dur: number; swings: number; dealt: number; taken: number; hpEnd: number; slams: number; slamHits: number }
 interface Foe { def: MobDef; hp: number; dmg: number }
+/** Game.zoneDef: a mob gets the resists of the location it stands in (a boss its home's boss profile). */
+function zoneDef(def: MobDef, zone: ZoneId, alt = false): MobDef {
+  if (def.static) return def;
+  const z = def.boss?.zone ?? zone;
+  return { ...def, resist: zoneResist(z, def.boss ? 'boss' : alt && ZONE_FOES[z]?.alt ? 'alt' : 'mob') };
+}
+/** The unit's numbers as Game.addMob gives them: zone resists, depth (plain mobs only), ZONE_TIER on HP and damage. */
 function foeOf(u: Unit): Foe {
-  const d = MOBS[u.def];
+  const d = zoneDef(MOBS[u.def], u.zone, u.alt);
   const mul = d.boss || d.rank ? { hp: 1, dmg: 1 } : depthMul(u.zone, u.depth);
-  return { def: d, hp: Math.round(d.hp * mul.hp), dmg: d.dmg * mul.dmg };
+  const tier = ZONE_TIER[u.zone] ?? 1;
+  return { def: d, hp: Math.round(d.hp * mul.hp * tier), dmg: d.dmg * mul.dmg * tier };
 }
 
 /**
@@ -434,8 +485,7 @@ function regear(h: Hero) {
 const DUMMY: MobDef = { ...MOBS.bandit_thug, resist: {}, dmg: 0, rank: 'elite' };
 /** Damage per second of class `c` with a loadout on a big dummy with the zone's resists (mean rolls). */
 function dummyDps(h: Hero, c: HeroClass, weapons: Kit, zone: ZoneId) {
-  const resist = MOBS[zone === 'forest' ? 'bandit_chief' : 'death'].resist;
-  const def: MobDef = { ...MOBS.bandit_thug, resist, dmg: 0, rank: 'elite' };
+  const def: MobDef = { ...MOBS.bandit_thug, resist: zoneResist(zone), dmg: 0, rank: 'elite' };
   const test: Hero = { ...h, cls: c, weapons, equip: h.gear[c], hp: 1e6, src: { ...h.src, debug: { hp: 1e6 } } };
   return fight(test, { def, hp: 1e7, dmg: 0 }, true, 20).dealt / 20;
 }
@@ -530,7 +580,7 @@ function run(seed: number): RunOut {
     return b.hp / Math.max(1, heroDps(h.weapons, st.power, st.powerMul, 1, b.resist));
   };
   const estimate = (u: Unit) => {
-    const key = `${u.def}|${u.depth.toFixed(2)}`;
+    const key = `${u.def}|${u.zone}|${u.alt ? 1 : 0}|${u.depth.toFixed(2)}`;
     let e = est.get(key);
     if (!e) {
       const boss = !!MOBS[u.def].boss;
