@@ -7,11 +7,12 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { assets } from './assets';
 import { sfx } from './audio';
 import { FORGE3D as F, GACHA, RARITY, WEAPONS, type FactionId } from './config';
 import { gachaTier } from './gacha';
-import { ARMOR, PART_PREFIXES, itemModel, trimModel, type Item } from './items';
+import { ARMOR, PART_PREFIXES, itemModel, jewelModel, type Item } from './items';
 import { CLASS_LOOK } from './looks';
 import type { HeroClass } from './party';
 
@@ -75,6 +76,43 @@ void main() {
   float fade = smoothstep(1.0, 0.0, vUv.y) * smoothstep(0.0, 0.05, vUv.y);
   gl_FragColor = vec4(color * 1.2, edge * fade * opacity * 0.45);
 }`;
+// Jewels: star twinkles stuck on the piece (each flashes now and then) and motes circling it; animated on the GPU.
+const GLINT_VS = /* glsl */ `
+attribute float phase;
+uniform float time;
+uniform float scale;
+varying float vA;
+void main() {
+  vA = pow(max(sin(phase * 6.2832 + time * (1.3 + fract(phase * 7.0) * 1.6)), 0.0), 14.0);
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  gl_PointSize = scale * 2.6 * vA / -mv.z;
+  gl_Position = projectionMatrix * mv;
+}`;
+const GLINT_FS = /* glsl */ `
+varying float vA;
+void main() {
+  vec2 p = abs(gl_PointCoord - 0.5);
+  float star = max(0.0, 1.0 - p.x * 16.0) * (1.0 - p.y * 2.0) + max(0.0, 1.0 - p.y * 16.0) * (1.0 - p.x * 2.0);
+  float core = smoothstep(0.16, 0.0, length(p));
+  gl_FragColor = vec4(vec3(1.0, 0.96, 0.88) * (1.0 + core * 2.0), clamp(star + core, 0.0, 1.0) * vA);
+}`;
+const MOTE_VS = /* glsl */ `
+attribute vec4 orbit;
+attribute vec3 tint;
+uniform float time;
+uniform float scale;
+varying float vA;
+varying vec3 vC;
+void main() {
+  float a = orbit.z + time * orbit.w;
+  vec3 p = vec3(cos(a) * orbit.x, orbit.y + sin(time * 1.1 + orbit.z * 3.0) * 0.06, sin(a) * orbit.x);
+  vA = 0.45 + 0.55 * pow(0.5 + 0.5 * sin(time * 3.0 + orbit.z * 11.0), 3.0);
+  vC = tint;
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  gl_PointSize = scale * (0.3 + 0.5 * vA) / -mv.z;
+  gl_Position = projectionMatrix * mv;
+}`;
+
 const UV_VS = /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 
 const v1 = new THREE.Vector3();
@@ -135,6 +173,15 @@ export class Forge3D {
   private shake = 0;
   private emberAcc = 0;
   private holder = new THREE.Group();
+  /** Reflections for the jewels' metal (a PMREM of three's room), made once per forge. */
+  private env: THREE.Texture | null = null;
+  private fxTime = { value: 0 };
+  private ptScale = { value: 60 };
+  private glintMat!: THREE.ShaderMaterial;
+  /** Light on the revealed item: shiny jewels take less (F.jewel.light). */
+  private itemGlow = 4;
+  private sway = false;
+  private moteMat!: THREE.ShaderMaterial;
   private onReveal: () => void = () => {};
 
   constructor(private canvas: HTMLCanvasElement, lowGfx: boolean, private faction: FactionId) {
@@ -249,6 +296,20 @@ export class Forge3D {
     s.add(this.beam);
     s.add(this.holder);
 
+    // Jewels: reflections and their sparkle materials
+    const pm = new THREE.PMREMGenerator(this.renderer);
+    const room = new RoomEnvironment();
+    this.env = pm.fromScene(room, 0.04).texture;
+    room.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
+    });
+    pm.dispose();
+    const fx = { vertexShader: GLINT_VS, fragmentShader: GLINT_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { time: this.fxTime, scale: this.ptScale } };
+    this.glintMat = this.mine(new THREE.ShaderMaterial(fx));
+    this.moteMat = this.mine(new THREE.ShaderMaterial({ ...fx, vertexShader: MOTE_VS, fragmentShader: SPARK_FS }));
+
     // Sparks
     const g = this.mine(new THREE.BufferGeometry());
     g.setAttribute('position', new THREE.BufferAttribute(this.pPos, 3).setUsage(THREE.DynamicDrawUsage));
@@ -256,7 +317,7 @@ export class Forge3D {
     g.setAttribute('alpha', new THREE.BufferAttribute(this.pAlpha, 1).setUsage(THREE.DynamicDrawUsage));
     this.pts = new THREE.Points(g, this.mine(new THREE.ShaderMaterial({
       vertexShader: SPARK_VS, fragmentShader: SPARK_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-      uniforms: { scale: { value: 60 } },
+      uniforms: { scale: this.ptScale },
     })));
     this.pts.frustumCulled = false;
     s.add(this.pts);
@@ -343,18 +404,34 @@ export class Forge3D {
     this.cls = cls;
     if (item.kind === 'weapon') return Promise.resolve();
     const slot = ARMOR[item.def].slot;
-    if (slot === 'ring' || slot === 'amulet') return assets.gear(trimModel(slot, item.rarity, this.faction)).catch(() => undefined);
+    if (slot === 'ring' || slot === 'amulet') return assets.jewel(jewelModel(slot, item.rarity)).catch(() => undefined);
     const part = CLASS_LOOK[cls].part(this.faction, item, 'arms');
     return part ? assets.ensure([part]).catch(() => undefined) : Promise.resolve();
   }
   private cls: HeroClass = 'warrior';
 
-  /** The armour item as a model: a jewel's quality GLB, or one arm of the wearer's set gloves; null = not loaded. */
+  /** The armour item as a model: a jewel's showcase GLB, or one arm of the wearer's set gloves; null = not loaded. */
   private armourModel(item: Item): THREE.Object3D | null {
     const slot = ARMOR[item.def].slot;
     if (slot === 'ring' || slot === 'amulet') {
-      const n = trimModel(slot, item.rarity, this.faction);
-      return assets.has(n) ? assets.clone(n) : null;
+      const n = jewelModel(slot, item.rarity);
+      if (!assets.has(n)) return null;
+      const m = assets.clone(n);
+      // shared materials: shiny metal from the room reflections, stones glowing into the bloom
+      m.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        for (const mat of [mesh.material].flat() as THREE.MeshStandardMaterial[]) {
+          mat.envMap = this.env;
+          mat.envMapIntensity = F.jewel.env;
+          // metal a bit darker than in the icon render, or the forge's warm lights burn it white
+          if (mat.userData.base === undefined) mat.userData.base = mat.color.getHex();
+          if (mat.name.startsWith('jewel_metal')) mat.color.setHex(mat.userData.base as number).multiplyScalar(F.jewel.metal);
+          // the main stone glows into the bloom, the small diamonds only sparkle
+          mat.emissiveIntensity = mat.name.startsWith('jewel_gem') ? F.jewel.glow : F.jewel.diamond;
+        }
+      });
+      return m;
     }
     const part = CLASS_LOOK[this.cls].part(this.faction, item, 'arms');
     if (!part || !assets.has(part)) return null;
@@ -369,6 +446,10 @@ export class Forge3D {
     const w = item.kind === 'weapon' ? WEAPONS[item.def] : null;
     // pets, mage orbs, jewels and gloves fit by their largest side; weapons by height
     const bySide = !w || !!w.pet || !!w.orb;
+    const jewel = !w && (ARMOR[item.def].slot === 'ring' || ARMOR[item.def].slot === 'amulet');
+    this.itemGlow = jewel ? F.jewel.light : 4;
+    // a jewel is all highlights: a softer bloom keeps its stones and claws readable
+    if (this.bloom) this.bloom.strength = jewel ? F.jewel.bloom : F.bloom.strength;
     if (w) {
       const name = itemModel(item, this.faction);
       // pets and mage orbs are GLB creatures (own skeleton): cloned as such
@@ -381,8 +462,9 @@ export class Forge3D {
       wrap.updateMatrixWorld(true);
       const b = new THREE.Box3().setFromObject(wrap);
       const side = Math.max(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z);
-      const h = (bySide ? side / (w?.pet ? F.petSize : F.gearSize) : b.max.y - b.min.y) || 1;
+      const h = (bySide ? side / (w?.pet ? F.petSize : jewel ? F.jewel.size : F.gearSize) : b.max.y - b.min.y) || 1;
       const k = F.itemSize / h;
+      if (jewel) this.sparkle(wrap, side * 0.012);
       wrap.scale.setScalar(k);
       const c = b.getCenter(new THREE.Vector3());
       // weapons keep their own x / z (the grip on the axis), the rest is centred on every axis
@@ -395,11 +477,68 @@ export class Forge3D {
       m.scale.set(1, 1.6, 1);
     }
     const tilt = new THREE.Group();
-    tilt.rotation.z = w?.pet ? 0 : 0.35;
+    tilt.rotation.z = w?.pet ? 0 : jewel ? 0.12 : 0.35;
+    // a ring leans its stone toward the camera; jewels sway facing it instead of spinning (no blank back)
+    if (jewel && ARMOR[item.def].slot === 'ring') tilt.rotation.x = F.jewel.lean;
+    this.sway = jewel;
     tilt.add(m);
+    if (jewel) this.addMotes(tilt);
     this.holder.add(tilt);
     this.holder.position.set(this.hitPos.x, this.top, this.hitPos.z);
     this.holder.visible = false;
+  }
+
+  /** Twinkles on random vertices of the jewel (in `wrap` space, before its scale), pushed `lift` off the surface. */
+  private sparkle(wrap: THREE.Group, lift: number) {
+    const pos: number[] = [], nrm: number[] = [];
+    const v = new THREE.Vector3(), n = new THREE.Vector3();
+    wrap.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const p = mesh.geometry.getAttribute('position'), q = mesh.geometry.getAttribute('normal');
+      for (let i = 0; i < p.count; i += 3) {
+        v.fromBufferAttribute(p, i).applyMatrix4(mesh.matrixWorld);
+        n.fromBufferAttribute(q, i).transformDirection(mesh.matrixWorld);
+        pos.push(v.x, v.y, v.z);
+        nrm.push(n.x, n.y, n.z);
+      }
+    });
+    const count = F.jewel.glints[this.rarity];
+    const out = new Float32Array(count * 3), phase = new Float32Array(count);
+    for (let i = 0; i < count && pos.length; i++) {
+      const j = Math.floor(Math.random() * (pos.length / 3)) * 3;
+      for (let c = 0; c < 3; c++) out[i * 3 + c] = pos[j + c] + nrm[j + c] * lift;
+      phase[i] = Math.random();
+    }
+    const g = this.mine(new THREE.BufferGeometry());
+    g.setAttribute('position', new THREE.BufferAttribute(out, 3));
+    g.setAttribute('phase', new THREE.BufferAttribute(phase, 1));
+    const pts = new THREE.Points(g, this.glintMat);
+    pts.frustumCulled = false;
+    wrap.add(pts);
+  }
+
+  /** Motes circling the revealed jewel in its rarity colour (some white), more for a higher tier. */
+  private addMotes(parent: THREE.Object3D) {
+    const count = F.jewel.motes[this.rarity];
+    if (!count) return;
+    const orbit = new Float32Array(count * 4), tint = new Float32Array(count * 3);
+    const S = F.itemSize * F.jewel.size;
+    for (let i = 0; i < count; i++) {
+      orbit[i * 4] = S * (0.42 + Math.random() * 0.4);
+      orbit[i * 4 + 1] = S * (Math.random() - 0.5) * 0.9;
+      orbit[i * 4 + 2] = Math.random() * Math.PI * 2;
+      orbit[i * 4 + 3] = (0.4 + Math.random() * 0.9) * (Math.random() < 0.5 ? -1 : 1);
+      c1.copy(RCOL[this.rarity]).lerp(WHITE, Math.random() * 0.6);
+      tint[i * 3] = c1.r; tint[i * 3 + 1] = c1.g; tint[i * 3 + 2] = c1.b;
+    }
+    const g = this.mine(new THREE.BufferGeometry());
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+    g.setAttribute('orbit', new THREE.BufferAttribute(orbit, 4));
+    g.setAttribute('tint', new THREE.BufferAttribute(tint, 3));
+    const pts = new THREE.Points(g, this.moteMat);
+    pts.frustumCulled = false;
+    parent.add(pts);
   }
 
   private setStage(stage: number) {
@@ -494,6 +633,7 @@ export class Forge3D {
   };
 
   private update(dt: number, time: number) {
+    this.fxTime.value = time;
     if (this.playing) {
       this.t += dt;
       if (this.struck <= this.lastBlow && this.t >= this.strikeAt[this.struck]) this.strike(this.struck++);
@@ -545,9 +685,10 @@ export class Forge3D {
       const k = Math.min(1, (t - this.revealAt) / 0.9);
       this.holder.position.y = this.top + 0.15 + F.itemRise * easeOutBack(k);
       this.holder.scale.setScalar(0.3 + 0.7 * Math.min(1, k * 1.6));
-      this.holder.rotation.y += dt * 1.6;
+      if (this.sway) this.holder.rotation.y = Math.sin((t - this.revealAt) * F.jewel.swaySpeed) * F.jewel.swing;
+      else this.holder.rotation.y += dt * 1.6;
       this.itemLight.position.set(this.holder.position.x, this.holder.position.y + 0.3, this.holder.position.z + 1);
-      this.itemLight.intensity = 4 * Math.min(1, k * 2);
+      this.itemLight.intensity = this.itemGlow * Math.min(1, k * 2);
       this.rays.position.set(this.holder.position.x, this.holder.position.y, this.holder.position.z - 0.6);
       this.rays.quaternion.copy(this.camera.quaternion);
       this.raysMat.uniforms.time.value = time;
@@ -582,7 +723,7 @@ export class Forge3D {
       // Portrait screens: widen the vertical FOV so the anvil and hammer fit across.
       this.camera.fov = Math.max(F.fov, (2 * Math.atan(Math.tan((F.fov * Math.PI) / 360) * (F.minAspect / this.camera.aspect)) * 180) / Math.PI);
       this.camera.updateProjectionMatrix();
-      (this.pts.material as THREE.ShaderMaterial).uniforms.scale.value = h * pr * 0.05;
+      this.ptScale.value = h * pr * 0.05;
     }
     if (this.composer) this.composer.render(); else this.renderer.render(this.scene, this.camera);
   }
@@ -590,6 +731,7 @@ export class Forge3D {
   dispose() {
     cancelAnimationFrame(this.raf);
     for (const x of this.own) x.dispose();
+    this.env?.dispose();
     this.composer?.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss(); // free the context now, see HeroPreview.dispose()

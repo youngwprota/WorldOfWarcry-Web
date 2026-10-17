@@ -1278,8 +1278,13 @@ export const FORGE3D = {
   anvilScale: 0.4,
   /** A pet's largest side, as a share of `itemSize`. */
   petSize: 1.3,
-  /** Largest side of a mage orb, a ring, an amulet or a glove, as a share of `itemSize`. */
+  /** Largest side of a mage orb or a glove, as a share of `itemSize`. */
   gearSize: 0.7,
+  /**
+   * Rings and amulets (showcase models, tools/blender/jewels.py): largest side (share of `itemSize`), strength of the
+   * metal's reflections, stone glow (feeds the bloom); twinkles on the piece and motes circling it, by gacha tier.
+   */
+  jewel: { size: 0.95, env: 0.4, glow: 0.8, diamond: 0.25, light: 1.2, metal: 0.75, bloom: 0.35, lean: 0.45, swing: 0.75, swaySpeed: 0.9, glints: [16, 28, 44, 64], motes: [0, 40, 80, 150] },
   anvilYaw: 0,
   ingot: [0, 0.04, 0] as [number, number, number],
   ingotYaw: 0,

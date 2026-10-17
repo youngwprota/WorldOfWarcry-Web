@@ -223,12 +223,14 @@ const PNG: Record<string, string> = {
   ...Object.fromEntries(['staff_fire', 'staff_ice', 'staff_wind', 'sword', 'axe', 'hammer', 'polearm', 'shield_tower',
     'shield_buckler', 'shield_spiked', 'bow'].flatMap((def) =>
     ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${def}_${r}`, `${def}_${r}`]))),
-  // armour item icons per rarity and faction (src/looks.ts CLASS_LOOK.icon): plate sets, hunter / caster skins, jewels
+  // armour item icons per rarity and faction (src/looks.ts CLASS_LOOK.icon): plate sets, hunter / caster skins
   ...Object.fromEntries([
     ...['guard', 'knight', 'lord', 'archer', 'caster'].flatMap((set) => ['head', 'chest', 'arms', 'legs'].map((slot) => `${set}_${slot}`)),
-    'ring', 'amulet',
   ].flatMap((piece) => ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].flatMap((r) =>
     ['human', 'orc'].map((f) => [`${piece}_${r}_${f}`, `armor/${piece}_${r}_${f}`])))),
+  // rings and amulets per rarity, rendered from their showcase models (tools/blender/jewels.py)
+  ...Object.fromEntries(['ring', 'amulet'].flatMap((s) =>
+    ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${s}_${r}`, `armor/${s}_${r}`]))),
   // pet items (WEAPONS `pet_<id>`), rendered from their creatures (tools/blender/icon_fit.py)
   pet_boar: 'pet_boar', pet_wolf: 'pet_wolf', pet_bear: 'pet_bear', pet_lion: 'pet_lion', pet_bone_boar: 'pet_bone_boar',
   orb_vigor: 'orb_vigor', orb_fury: 'orb_glass',

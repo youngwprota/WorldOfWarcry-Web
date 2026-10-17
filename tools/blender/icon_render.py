@@ -1,4 +1,5 @@
 """Item icon: blender -b --factory-startup -P icon_render.py -- in.glb out.png [contrast=1.15] [glass_darken=0] [roll=40] [yaw=0]
+[pitch=0] [world=flat|studio]  (pitch: the top tips toward the camera; studio: a bright-top gradient for shiny metal, jewels)
 Writes a 512px PNG (+ .raw.png); icon_shrink.py then boxes it down to 128px."""
 import bpy, sys, math, zlib, struct, numpy as np
 from mathutils import Vector
@@ -8,6 +9,8 @@ CONTRAST = float(args[2]) if len(args) > 2 else 1.15
 DARKEN = float(args[3]) if len(args) > 3 else 0.0  # glass darkening towards the centre (orbs)
 ROLL = float(args[4]) if len(args) > 4 else 40.0  # in-plane tilt of the item (orbs with horns: 0)
 YAW = float(args[5]) if len(args) > 5 else 0.0  # turn about the vertical axis (pets: 3/4 view)
+PITCH = float(args[6]) if len(args) > 6 else 0.0
+STUDIO = len(args) > 7 and args[7] == 'studio'
 S = 512
 K = 3  # supersample: render at S*K, outline at full res, then box-downsample
 N = S * K
@@ -22,6 +25,10 @@ root = bpy.data.objects.new('root', None); sc.collection.objects.link(root)
 for o in sc.objects:
     if o.parent is None and o is not root: o.parent = root
 root.rotation_euler = (0, math.radians(ROLL), math.radians(YAW))  # diagonal, head top-right
+if PITCH:
+    tip = bpy.data.objects.new('tip', None); sc.collection.objects.link(tip)
+    root.parent = tip
+    tip.rotation_euler = (math.radians(PITCH), 0, 0)
 bpy.context.view_layer.update()
 pts = [o.matrix_world @ v.co for o in objs for v in o.data.vertices]
 lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
@@ -38,6 +45,17 @@ for rot, e in (((50, 0, 30), 4), ((60, 0, -120), 2)):
     l.rotation_euler = [math.radians(a) for a in rot]; sc.collection.objects.link(l)
 sc.world = bpy.data.worlds.new('w'); sc.world.use_nodes = True
 sc.world.node_tree.nodes['Background'].inputs[0].default_value = (0.35, 0.35, 0.38, 1)
+if STUDIO:
+    # soft box light above, dark floor: metal shows its colour and a highlight instead of flat grey
+    nt = sc.world.node_tree
+    tc, sep, ramp = nt.nodes.new('ShaderNodeTexCoord'), nt.nodes.new('ShaderNodeSeparateXYZ'), nt.nodes.new('ShaderNodeValToRGB')
+    nt.links.new(tc.outputs['Generated'], sep.inputs[0])
+    nt.links.new(sep.outputs['Z'], ramp.inputs[0])
+    nt.links.new(ramp.outputs[0], nt.nodes['Background'].inputs[0])
+    e = ramp.color_ramp.elements
+    e[0].position, e[0].color = 0.42, (0.04, 0.035, 0.03, 1)
+    e[1].position, e[1].color = 0.9, (1.6, 1.55, 1.5, 1)
+    m = e.new(0.55); m.color = (0.35, 0.33, 0.32, 1)
 sc.render.engine = 'BLENDER_EEVEE'
 sc.render.film_transparent = True
 sc.render.resolution_x = sc.render.resolution_y = N

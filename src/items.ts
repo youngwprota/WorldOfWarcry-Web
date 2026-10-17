@@ -21,19 +21,20 @@ export function itemModel(it: Item, faction: FactionId) {
 }
 
 /**
- * Quality pieces worn over an armour item (tools/blender/armor_gear.py): body slots above common, the ring and the
- * amulet at every quality. Loaded on demand (Character.setTrims), one GLB per item, fitted per faction.
+ * Quality pieces worn over an armour item (tools/blender/armor_gear.py): body slots above common. Loaded on demand
+ * (Character.setTrims), one GLB per item, fitted per faction. Rings and amulets are not worn (see jewelModel).
  */
 export function armorTrim(it: Item, faction: FactionId): string | null {
   const d = ARMOR[it.def];
-  if (!d) return null;
-  const jewel = d.slot === 'ring' || d.slot === 'amulet';
   // pieces are fitted to the warrior's plate only (the hunter's and the mage's sets have their own textured parts)
-  if (!jewel && (it.rarity === 0 || !d.trim)) return null;
-  return trimModel(jewel ? d.slot : `${d.trim![faction]}_${d.slot}`, it.rarity, faction);
+  if (!d || it.rarity === 0 || !d.trim) return null;
+  return trimModel(`${d.trim[faction]}_${d.slot}`, it.rarity, faction);
 }
 
-/** Quality piece model of armour def (or jewel slot) `id`. */
+/** Showcase model of a ring / amulet of quality `rarity` (tools/blender/jewels.py): the forge and the icons only. */
+export const jewelModel = (slot: 'ring' | 'amulet', rarity: number) => `jewel_${slot}_${RARITY_IDS[rarity]}`;
+
+/** Quality piece model of armour def `id`. */
 export const trimModel = (id: string, rarity: number, faction: FactionId) => `armor_${id}_${RARITY_IDS[rarity]}_${faction}`;
 
 /** Every per-quality GLB model (loaded up-front by main.ts). */
@@ -204,7 +205,7 @@ export function itemName(it: Item, f: FactionId) {
 
 /**
  * Icon id for icon(): the weapon's `<def>_<rarity>` PNG when there is one, else the weapon id; armour: the piece
- * `w` would wear (jewels by rarity and faction) when it has a PNG, else the slot.
+ * `w` would wear (jewels: by rarity alone) when it has a PNG, else the slot.
  */
 export function itemIconId(it: Item, w?: Wearer) {
   if (it.kind === 'weapon') {
@@ -212,9 +213,10 @@ export function itemIconId(it: Item, w?: Wearer) {
     return hasPng(tier) ? tier : it.def;
   }
   const slot = ARMOR[it.def].slot;
+  // jewels: one icon per quality, rendered from their showcase model
+  if (slot === 'ring' || slot === 'amulet') return hasPng(`${slot}_${RARITY_IDS[it.rarity]}`) ? `${slot}_${RARITY_IDS[it.rarity]}` : slot;
   if (!w) return slot;
-  const jewel = slot === 'ring' || slot === 'amulet';
-  const id = jewel ? `${slot}_${RARITY_IDS[it.rarity]}_${w.faction}` : CLASS_LOOK[w.cls].icon(w.faction, it);
+  const id = CLASS_LOOK[w.cls].icon(w.faction, it);
   return hasPng(id) ? id : slot;
 }
 
