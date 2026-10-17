@@ -540,6 +540,16 @@ export function ringSpots(x: number, z: number, n: number, r: number, a0 = 0) {
   }
   return out;
 }
+/** n spots in a row `gap` m apart, centred on (x, z) and across the direction (fx, fz) the row faces. */
+export function lineSpots(x: number, z: number, n: number, gap: number, fx: number, fz: number) {
+  const l = Math.hypot(fx, fz) || 1;
+  const out: { x: number; z: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const o = (i - (n - 1) / 2) * gap;
+    out.push({ x: x + (fz / l) * o, z: z - (fx / l) * o });
+  }
+  return out;
+}
 /** Guards just inside the north gate (hub → Snow Pass), either side of the door. */
 export const GATE_GUARDS = flank(DOOR_PEAKS.x - DOOR_PEAKS.tx * 8, DOOR_PEAKS.z - DOOR_PEAKS.tz * 8, DOOR_PEAKS.tx, DOOR_PEAKS.tz, 2.6);
 

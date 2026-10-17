@@ -340,6 +340,13 @@ export interface MobDef {
   static?: boolean;
   /** Static unit recolour: multiplies its materials. */
   tint?: number;
+  /** Static unit: its leaves repainted this colour (atmos `recolor`), the trunk keeps its own. */
+  crown?: number;
+  /**
+   * Static unit only: while it is being hit, a `mob` rises 2-4 m around it every `every` s and attacks the hero
+   * (no cap; they pay nothing and crumble when the unit breaks or the hero leaves).
+   */
+  summon?: { mob: string; every: number };
   /** Recolour: body textures are swapped by the table SKINS[skin] (src/assets.ts). */
   skin?: string;
   /** Speed (m/s) the hit shoves the hero back with. */
@@ -352,7 +359,7 @@ export interface MobDef {
   /** Permanent stats added straight to the hero on every kill (micro-bosses), in stat units: hp 500 = +500 HP. */
   bonus?: OrbReward;
   /** Fixed power orbs dropped on death (shown above the HP bar) — one stat only. */
-  reward: OrbReward;
+  reward: OrbReward | Record<never, never>;
   respawn: number; // seconds
   /** Below this HP fraction it throws a smoke bomb once per fight and a second one of it steps out (Game.callTwin). */
   twin?: number;
@@ -817,7 +824,7 @@ MOBS.elf_swordsman = elf('elf_sentinel', 'elf_swordsman', 'Эльф-рубака
 MOBS.elf_cutthroat = elf('elf_assassin', 'elf_cutthroat', 'Эльф-головорез', 'elf_worker', 'dagger');
 MOBS.elf_gate_guard = elf('gate_guard', 'elf_gate_guard', 'Эльф-привратник', 'elf_warrior', 'sword_elf_warrior');
 // Snow Pass elites: each drops a rare (blue) piece of the warrior's armour
-const elfElite = (id: string, name: string, body: string, weapon: string, scale: number, reward: OrbReward, drop: ItemDrop): MobDef => ({
+const elfElite = (id: string, name: string, body: string, weapon: string, scale: number, reward: OrbReward, drop?: ItemDrop): MobDef => ({
   id, name, rank: 'elite', model: { human: [body, weapon], orc: [body, weapon] },
   anim: elfAnim(weapon), hp: 1600, dmg: 14, aps: 0.8, range: 1.8, speed: 3.3, aggro: 5.5, regen: 0.03, scale,
   ...foes('peaks'), reward, respawn: 600, drop,
@@ -825,10 +832,35 @@ const elfElite = (id: string, name: string, body: string, weapon: string, scale:
 MOBS.elf_glovemaster = elfElite('elf_glovemaster', 'Эльф-дозорный', 'elf_assassin', 'dagger', 1.3, { power: 4 }, { kind: 'armor', def: 'plate_head', rarity: 2 });
 MOBS.elf_champion = elfElite('elf_champion', 'Эльф-латник', 'elf_warrior', 'sword_elf_warrior', 1.4, { hp: 6 }, { kind: 'armor', def: 'plate_chest', rarity: 2 });
 MOBS.elf_bladesmith = elfElite('elf_bladesmith', 'Эльф-следопыт', 'elf_worker', 'axe', 1.35, { power: 4 }, { kind: 'armor', def: 'plate_legs', rarity: 2 });
-/** Faded grey-green crowns of the Snow Pass trees (multiply the elf tree texture: low green mutes it). */
-export const WITHERED = [0xd9c4cc, 0xccbcc4, 0xe0ccd2, 0xc4b4bc];
-MOBS.snow_tree_young = { ...MOBS.tree_young, id: 'snow_tree_young', name: 'Увядшее дерево', tint: WITHERED[0] };
-MOBS.snow_tree_birch = { ...MOBS.tree_birch, id: 'snow_tree_birch', name: 'Увядшая берёза', tint: WITHERED[1] };
+// a normal mob on purpose, but keeps the elites' high HP: it must take long to kill
+MOBS.elf_archer = {
+  ...elfElite('elf_archer', 'Эльф-лучник', 'elf_assassin', 'bow_human_archer', 1.3, { speed: 3 }),
+  rank: undefined, range: MOBS.archer.range, aggro: MOBS.archer.aggro, shot: MOBS.archer.shot, behavior: { combat: 'kite' },
+};
+// Rocky Hills mummies: undead bodies in the tauren-coloured bandage skin (SKINS.mummy)
+MOBS.mummy_archer = {
+  ...MOBS.archer, ...foes('hills'), id: 'mummy_archer', name: 'Мумия-стрелок', skin: 'mummy',
+  model: { human: ['undead_archer', 'bow_undead_archer'], orc: ['undead_archer', 'bow_undead_archer'] },
+  hp: 500, dmg: 12, scale: 1.05, shot: { speed: 24, arrow: { human: 'arrow_undead_archer', orc: 'arrow_undead_archer' } },
+  behavior: { combat: 'kite' }, reward: { power: 2 }, respawn: 60,
+};
+// raised every 2 s by the summoning snag without a cap: weak on purpose, no reward
+MOBS.mummy_skeleton = {
+  ...MOBS.skeleton_warrior, ...foes('hills'), id: 'mummy_skeleton', name: 'Мумия-скелет', skin: 'mummy',
+  hp: 250, dmg: 8, reward: {}, respawn: 0,
+};
+// Rocky Hills banners (orc_banner, ids keep the old snag name): 1000/2000 HP like the forest trees
+const snag = (id: string, name: string, hp: number, reward: OrbReward, summon?: MobDef['summon']): MobDef => ({
+  ...MOBS.tree_birch, ...foes('hills'), id, name, hp, reward, summon,
+  model: { human: ['orc_banner', null], orc: ['orc_banner', null] }, scale: 0.5,
+});
+MOBS.snag = snag('snag', 'Знамя', 1000, { power: 2 });
+// must give a lot of stats: the mummies it raises only hinder killing it (stands among snag props, world.hillsSnags)
+MOBS.snag_mummy = snag('snag_mummy', 'Проклятое знамя', 2000, { power: 12 }, { mob: 'mummy_skeleton', every: 2 });
+/** Snowy grey-blue crowns of the Snow Pass trees, in the zone's snow greys (recolor: the leaves only, by their brightness). */
+export const SNOW_CROWNS = [0xd4dbe2, 0xc8d0d8, 0xdce1e6, 0xbfc8d0];
+MOBS.snow_tree_young = { ...MOBS.tree_young, id: 'snow_tree_young', name: 'Увядшее дерево', crown: SNOW_CROWNS[0] };
+MOBS.snow_tree_birch = { ...MOBS.tree_birch, id: 'snow_tree_birch', name: 'Увядшая берёза', crown: SNOW_CROWNS[1] };
 // Local mini-bosses of the outer lands: each carries a small version of its location boss's mechanic (src/bosses).
 MOBS.frost_warden = {
   ...MOBS.bandit_warlord, ...foes('peaks'), id: 'frost_warden', name: 'Ледяной страж', drop: undefined,
@@ -1091,24 +1123,45 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
   hills: ([
     'orc_laborer', 'orc_axeman', 'orc_laborer', 'orc_blademaster', 'orc_axeman', 'orc_laborer',
     'orc_blademaster', 'orc_axeman', 'orc_laborer', 'orc_blademaster', 'orc_axeman', 'orc_blademaster',
+    'mummy_archer', 'mummy_archer', 'mummy_archer',
   ]).map((id) => spawner(id)),
   grove: ([
     'elf_lumberjack', 'elf_assassin', 'elf_lumberjack', 'elf_sentinel', 'elf_assassin', 'elf_lumberjack',
     'elf_sentinel', 'elf_assassin', 'elf_lumberjack', 'elf_sentinel', 'elf_assassin', 'elf_sentinel',
   ]).map((id) => spawner(id)),
 };
-/** Snow Pass (world.snowMobs): sword packs on and beside its roads, lone assassins in the woods, guards past the hub gate. */
+/** Trail spawners of the hills (indices in SPAWNERS.hills): neighbours along the road pulled into social pairs; the odd one stays single. */
+export const HILLS_PACKS: number[][] = [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12, 13]];
+/** Lions off the hills road (world.hillsBeasts): archer + lion packs and lone lions. */
+export const HILLS_LIONS = {
+  packs: [0, 1, 2, 3].map(() => pack(['mummy_archer', 'wild_lion'])),
+  lions: [0, 1, 2, 3, 4].map(() => spawner('wild_lion')),
+};
+/** More hills mobs at hand-picked spots (map drawing; slid onto walkable land): pairs and single ones. */
+export const HILLS_EXTRA = ([
+  [['orc_laborer'], -60.6, -92.7], [['orc_axeman', 'orc_axeman'], -74.9, -29.9],
+  [['orc_laborer'], -72.8, -98.6], [['orc_laborer'], -91.2, -76.6], [['orc_axeman'], -85.2, -79.5],
+  [['orc_axeman'], -71.8, -55.2],
+  [['orc_axeman'], -84.4, -89.2], [['orc_axeman', 'orc_laborer'], -71.3, -74.5], [['orc_laborer'], -99.3, -29.2],
+] as const).map(([ids, x, z]) => ({ def: pack([...ids]), x, z }));
+/** More plain banners at hand-picked spots (world.hillsBeasts, after HILLS_EXTRA). */
+export const HILLS_BANNERS = ([[-70.3, -106.2], [-79.9, -93.3], [-96.1, -24.4]] as const).map(([x, z]) => ({ def: spawner('snag'), x, z }));
+/** Hills road snags (world.hillsSnags): 3 plain, 2 summoning, spread along LAND_TRAILS[0]. */
+export const HILLS_SNAGS = ['snag', 'snag_mummy', 'snag', 'snag_mummy', 'snag'].map((id) => spawner(id));
+/** Snow Pass (world.snowMobs): packs at hand-picked spots, lone assassins in the woods, guards past the hub gate. */
 export const PEAKS_SPAWNERS = {
-  packs: [
-    ['elf_sentinel', 'elf_swordsman', 'elf_swordsman'], ['elf_swordsman', 'elf_lumberjack', 'elf_sentinel'], ['elf_sentinel', 'elf_swordsman', 'elf_swordsman'],
-    ['elf_lumberjack', 'elf_sentinel', 'elf_swordsman'], ['elf_swordsman', 'elf_sentinel', 'elf_lumberjack'], ['elf_sentinel', 'elf_swordsman', 'elf_lumberjack'],
-    ['elf_swordsman', 'elf_sentinel', 'elf_sentinel'],
-  ].map((ids) => pack(ids)),
+  /** Packs at hand-picked centres (map drawing; slid onto walkable land). */
+  packs: ([
+    [['elf_sentinel', 'elf_swordsman', 'elf_swordsman'], -4.9, -119.8], [['elf_swordsman', 'elf_lumberjack', 'elf_sentinel'], -0.4, -143.6],
+    [['elf_sentinel', 'elf_swordsman', 'elf_swordsman'], 14.5, -153.2], [['elf_swordsman', 'elf_sentinel', 'elf_lumberjack'], 40, -156.8],
+    [['elf_sentinel', 'elf_swordsman', 'elf_lumberjack'], 55.2, -159.5],
+    [['elf_cutthroat', 'wild_direwolf'], 23.4, -139.8], [['elf_cutthroat', 'wild_direwolf'], 20.1, -123.1],
+  ] as const).map(([ids, x, z]) => ({ def: pack([...ids]), x, z })),
   assassins: ['elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin']
     .map((id) => spawner(id)),
-  guards: pack(['elf_gate_guard', 'elf_gate_guard', 'elf_gate_guard']),
+  guards: pack(['elf_gate_guard', 'elf_gate_guard']),
   /** Elites at hand-picked spots (map drawing; slid onto walkable land). */
-  elites: ([['elf_glovemaster', -14, -135], ['elf_champion', 59.5, -148], ['elf_bladesmith', 13, -115.5]] as const)
+  elites: ([['elf_glovemaster', -14, -135], ['elf_champion', 59.5, -148], ['elf_bladesmith', 39.5, -113.5], ['elf_archer', 47, -144.5]] as const)
     .map(([id, x, z]) => ({ def: spawner(id), x, z })),
   /** Wolves and bears wandering alone through the empty woods. */
   beasts: ['wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_bear', 'wild_direwolf']
@@ -1118,6 +1171,11 @@ export const PEAKS_SPAWNERS = {
   /** Attackable trees, one at a time a road's width off the roads. */
   trees: ['snow_tree_young', 'snow_tree_birch', 'snow_tree_young', 'snow_tree_young', 'snow_tree_birch', 'snow_tree_young', 'snow_tree_birch', 'snow_tree_young']
     .map((id) => spawner(id)),
+  /** More attackable trees at hand-picked spots in the woods. */
+  woodTrees: ([['snow_tree_young', -15.9, -123.9], ['snow_tree_birch', 8, -127.7], ['snow_tree_young', 52.1, -101]] as const)
+    .map(([id, x, z]) => ({ def: spawner(id), x, z })),
+  /** Joins the east mini-boss (LAND_BOSSES peaks minis[0]) as its squad. */
+  wardenGuard: spawner('elf_assassin'),
 };
 /** «Свирепый вожак» mini-bosses of the cemetery and the outer lands. */
 export const MINI_SPAWNER = spawner('bandit_warlord');
@@ -1140,6 +1198,7 @@ export const MINI_SPAWNER_OF: Partial<Record<ZoneId, SpawnerDef>> = {
  * Spawn presets: the words for placing mobs on a location (World.addPack places a preset's pack).
  * Unit kinds outside packs, by MobDef:
  * - tree / object: `static` — stands, never attacks, gives stats (reward) when broken;
+ * - summoning tree: `static` + `summon` — while it is hit, a mob rises beside it every few seconds (it must give a lot of stats);
  * - mob: plain MobDef — fights, gives stats;
  * - loot mob (elite): `rank: 'elite'` + `drop` — its item on every kill;
  * - mini-boss: `rank: 'mini'` — permanent `bonus` stats per kill;
@@ -1192,9 +1251,24 @@ export const SPAWN_PRESETS = {
       link: 'social',
     },
   },
+  /** Three melee and an archer stand in a row (lineSpots) until the hero comes near, then fight as usual. */
+  gate_line: {
+    name: 'Строй у ворот',
+    line: true,
+    pack: {
+      slots: [
+        { id: 'orc_blademaster', behavior: { idle: 'stand' } }, { id: 'orc_blademaster', behavior: { idle: 'stand' } },
+        { id: 'mummy_archer', behavior: { idle: 'stand', combat: 'kite' } },
+      ],
+      link: 'social',
+    },
+  },
 } satisfies Record<string, SpawnPreset>;
-/** `horde`: a big pack the debug teleport drops the hero into the middle of — standing in a ring or scattered at random. */
-export interface SpawnPreset { name: string; pack: PackDef; horde?: 'ring' | 'scatter' }
+/**
+ * `horde`: a big pack the debug teleport drops the hero into the middle of — standing in a ring or scattered at random.
+ * `line`: the slots stand in a row, in slot order, facing one way.
+ */
+export interface SpawnPreset { name: string; pack: PackDef; horde?: 'ring' | 'scatter'; line?: boolean }
 export type SpawnPresetId = keyof typeof SPAWN_PRESETS;
 
 /** Round the gloves elite (world.glovesGuards): two bandit trios in the trees. */

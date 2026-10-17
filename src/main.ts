@@ -90,6 +90,7 @@ for (const w of Object.values(WEAPONS)) w.tiers?.forEach((m) => props.add(m));
 const creatures = new Set<string>();
 for (const w of Object.values(WEAPONS)) if (w.orb) Object.values(w.model).forEach((m) => creatures.add(m));
 for (const m of Object.values(MOBS)) for (const [c, w] of Object.values(m.model)) { (m.creature ? creatures : models).add(c); if (w) models.add(w); }
+for (const m of Object.values(MOBS)) if (m.shot) Object.values(m.shot.arrow).forEach((a) => models.add(a));
 for (const p of Object.values(PETS)) creatures.add(p.model);
 for (const b of Object.values(BREAKABLES)) if (b.model) models.add(b.model);
 // gacha forge scene (src/forge3d.ts): anvil and decor are cloned from here
@@ -106,7 +107,7 @@ for (const [m] of FORGE3D.decor) models.add(m);
   'orc_head_lantern', 'orc_flag_red', 'orc_drum_big', 'orc_altar', 'orc_horned_skull', 'cauldron', 'box_large_2',
   'elf_log_pile', 'saw', 'wood_pile_small', 'bucket',
   'box_small_2', 'orc_throne', 'tower_Lv2', 'throne_Lv1', 'banner', 'elf_rock_small', 'elf_tree',
-  'elf_foliage_small', 'elf_foliage_mid', 'elf_tree_root_1', 'elf_rock_big', 'undead_tusk_gate', 'undead_house_tower', 'undead_tower_small',
+  'elf_foliage_small', 'elf_foliage_mid', 'elf_tree_root_1', 'elf_rock_big', 'orc_stone_mid', 'orc_stone_small', 'elf_stone_big', 'elf_stone_small', 'orc_banner', 'orc_campfire', 'orc_stone_pillar_small_ringed', 'undead_tusk_gate', 'undead_house_tower', 'undead_tower_small',
   'undead_smithy_house', 'undead_building', 'undead_tower', 'undead_wheel_of_pain', 'undead_cauldron', 'undead_flag',
   'undead_windmill', 'undead_tower_Lv2', 'undead_throne_Lv1', 'undead_throne', 'undead_floating_stone',
   'undead_floating_coffin', 'undead_column_2', 'undead_tomb_stone_5', 'undead_tomb_stone_6', 'undead_ground_bone_1',

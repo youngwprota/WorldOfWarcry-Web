@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MOBS } from '../config';
 import type { BossHost, BossKit, BossKitFactory } from './kit';
 import type { Mob } from '../mobs/mob';
 
@@ -10,19 +11,14 @@ const MAX_STACKS = 5;
 const STACK_TIME = 6;         // s, refreshed by every new stack
 const TICK_CD = 1;            // s between Charge ticks
 const TICK_MUL = 0.07;        // tick damage = boss dmg * this * stacks
-const TOTEM_CD = 6;           // s between totem waves
-const TOTEM_LIFE = 4;
-const TOTEM_DIST = 2;         // m in front of the hero, towards the boss
-const TOTEM_R = 0.8;
-const CORNER_ANGLE = 0.6;     // rad, phase 2: each totem is turned this far off the hero-boss line
+const SUMMON = 'mummy_archer';
+const SUMMON_CD = 7;          // s between the boss's mummy archers
+const SUMMON_R = 2.5;         // m from the boss
 const BOLT_LIFE = 0.28;
 const CHARGE_COLOR = 0x9fd8ff;
-const POOL = 4;
 
 const v = new THREE.Vector3();
-const dir = new THREE.Vector3();
 
-interface Totem { mesh: THREE.Group; t: number; blocker: { remove(): void } | null }
 interface Bolt { mesh: THREE.Group; core: THREE.Mesh; glow: THREE.Mesh; flash: THREE.Mesh; t: number; step: number }
 
 const BOLT_SEGS = 9;
@@ -78,41 +74,13 @@ function shapeBolt(b: Bolt) {
   fillRibbon(b.glow.geometry, 0.28);
 }
 
-let totemGeo: { base: THREE.BufferGeometry; pole: THREE.BufferGeometry; head: THREE.BufferGeometry } | null = null;
-const matBase = new THREE.MeshLambertMaterial({ color: 0x4a3626 });
-const matPole = new THREE.MeshLambertMaterial({ color: 0x6b4a2e });
-const matHead = new THREE.MeshLambertMaterial({ color: 0x3f7a35, emissive: 0x1a4a60 });
-
-function makeTotem(): THREE.Group {
-  totemGeo ??= {
-    base: new THREE.BoxGeometry(1.1, 0.4, 1.1),
-    pole: new THREE.CylinderGeometry(0.28, 0.36, 2.2, 8),
-    head: new THREE.BoxGeometry(0.8, 0.7, 0.8),
-  };
-  const g = new THREE.Group();
-  const base = new THREE.Mesh(totemGeo.base, matBase);
-  base.position.y = 0.2;
-  const pole = new THREE.Mesh(totemGeo.pole, matPole);
-  pole.position.y = 1.5;
-  const head = new THREE.Mesh(totemGeo.head, matHead);
-  head.position.y = 2.85;
-  g.add(base, pole, head);
-  g.visible = false;
-  return g;
-}
-
-interface Opts { strikeCd: number; strikeCdP2: number; maxStacks: number; totemCd: number; corner: boolean; own: boolean }
-const FULL: Opts = { strikeCd: STRIKE_CD, strikeCdP2: STRIKE_CD_P2, maxStacks: MAX_STACKS, totemCd: TOTEM_CD, corner: true, own: true };
-const MINI: Opts = { strikeCd: 5.5, strikeCdP2: 5.5, maxStacks: 3, totemCd: 8, corner: false, own: false };
+/** `summonCd`: s between mummy archers during the fight (0: none); `opening`: archers called once as the fight starts. */
+interface Opts { strikeCd: number; strikeCdP2: number; maxStacks: number; summonCd: number; opening: number; own: boolean }
+const FULL: Opts = { strikeCd: STRIKE_CD, strikeCdP2: STRIKE_CD_P2, maxStacks: MAX_STACKS, summonCd: SUMMON_CD, opening: 0, own: true };
+const MINI: Opts = { strikeCd: 5.5, strikeCdP2: 5.5, maxStacks: 3, summonCd: 0, opening: 2, own: false };
 
 const make = (o: Opts): BossKitFactory => (host: BossHost, boss: Mob): BossKit => {
   flashGeo ??= new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2);
-  const totems: Totem[] = [];
-  for (let i = 0; i < POOL; i++) {
-    const mesh = makeTotem();
-    host.scene.add(mesh);
-    totems.push({ mesh, t: -1, blocker: null });
-  }
   const bolts: Bolt[] = [];
   for (let i = 0; i < 2; i++) {
     const add = (color: number) => new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
@@ -129,7 +97,8 @@ const make = (o: Opts): BossKitFactory => (host: BossHost, boss: Mob): BossKit =
   }
 
   let strikeT = 2;
-  let totemT = 3;
+  let summonT = o.summonCd;
+  let opened = false;
   let stacks = 0;
   let stackT = 0;
   let tickT = 0;
@@ -160,60 +129,24 @@ const make = (o: Opts): BossKitFactory => (host: BossHost, boss: Mob): BossKit =
     host.fx.spawn(v.copy(p).setY(3.2), `Charge x${stacks}`, 'bark', 1, { color: '#9fd8ff' });
   }
 
-  function placeTotem(x: number, z: number) {
-    const t = totems.find((o) => o.t < 0);
-    if (!t) return;
-    t.t = 0;
-    t.mesh.position.set(x, 0, z);
-    t.mesh.scale.set(1, 0.01, 1);
-    t.mesh.visible = true;
-    t.blocker = host.addBlocker(x, z, TOTEM_R, TOTEM_LIFE);
-    host.particles.burst(v.set(x, 0.2, z), 0x8a7a6a, 8, 0.15, 4, 0.6);
-  }
-
-  function spawnTotems(phase2: boolean) {
-    const h = host.heroPos();
-    dir.set(boss.pos.x - h.x, 0, boss.pos.z - h.z);
-    if (dir.lengthSq() < 1e-6) return;
-    dir.normalize();
-    if (!phase2) {
-      placeTotem(h.x + dir.x * TOTEM_DIST, h.z + dir.z * TOTEM_DIST);
-      return;
-    }
-    // two totems either side of the line: the hero is boxed into a corner
-    for (let s = -1; s <= 1; s += 2) {
-      const a = s * CORNER_ANGLE;
-      const c = Math.cos(a);
-      const sn = Math.sin(a);
-      placeTotem(h.x + (dir.x * c - dir.z * sn) * TOTEM_DIST * 1.2, h.z + (dir.x * sn + dir.z * c) * TOTEM_DIST * 1.2);
-    }
-  }
-
-  function clearTotem(t: Totem) {
-    t.t = -1;
-    t.mesh.visible = false;
-    t.blocker?.remove();
-    t.blocker = null;
+  function summon() {
+    const a = Math.random() * Math.PI * 2;
+    v.set(boss.pos.x + Math.cos(a) * SUMMON_R, 0, boss.pos.z + Math.sin(a) * SUMMON_R);
+    host.spawnMinion(boss, MOBS[SUMMON], v);
+    host.particles.burst(v.setY(0.3), 0xcdb080, 10, 0.14, 4, 0.6);
+    host.puffs.cloud(v.setY(0), 1, 0xcdb080, 4);
   }
 
   function clearAll() {
     stacks = 0;
     stackT = 0;
-    for (const t of totems) clearTotem(t);
     for (const b of bolts) { b.t = -1; b.mesh.visible = false; }
     strikeT = 2;
-    totemT = 3;
+    summonT = o.summonCd;
+    opened = false;
   }
 
   function animate(dt: number) {
-    for (const t of totems) {
-      if (t.t < 0) continue;
-      t.t += dt;
-      if (t.t >= TOTEM_LIFE) { clearTotem(t); continue; }
-      // rises in 0.25 s, sinks over the last 0.4 s
-      const k = Math.min(t.t / 0.25, (TOTEM_LIFE - t.t) / 0.4, 1);
-      t.mesh.scale.y = Math.max(0.01, k);
-    }
     for (const b of bolts) {
       if (b.t < 0) continue;
       b.t += dt;
@@ -237,16 +170,22 @@ const make = (o: Opts): BossKitFactory => (host: BossHost, boss: Mob): BossKit =
     fight(dt) {
       animate(dt);
       if (host.heroDead()) { clearAll(); return; }
-      const p2 = o.corner && boss.phase2;
+      const p2 = boss.phase2;
+      if (!opened) {
+        opened = true;
+        for (let i = 0; i < o.opening; i++) summon();
+      }
       strikeT -= dt;
       if (strikeT <= 0) {
         strikeT = p2 ? o.strikeCdP2 : o.strikeCd;
         strike();
       }
-      totemT -= dt;
-      if (totemT <= 0) {
-        totemT = o.totemCd;
-        spawnTotems(p2);
+      if (o.summonCd > 0) {
+        summonT -= dt;
+        if (summonT <= 0) {
+          summonT = o.summonCd;
+          summon();
+        }
       }
       if (stacks > 0) {
         stackT -= dt;
@@ -265,7 +204,6 @@ const make = (o: Opts): BossKitFactory => (host: BossHost, boss: Mob): BossKit =
     reset: clearAll,
     died() {
       clearAll();
-      for (const t of totems) host.scene.remove(t.mesh);
       for (const b of bolts) host.scene.remove(b.mesh);
     },
   };

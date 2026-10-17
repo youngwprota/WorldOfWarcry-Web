@@ -244,7 +244,7 @@ export class Game {
     const spawns = new Map<SpawnGroup, Spawn>();
     for (const s of this.world.spawns) {
       const u = s.unit === 'mob' ? this.addMob(MOBS[s.kind], new THREE.Vector3(s.x, 0, s.z), labels, s.depth, s.behavior) : this.addProp(s, labels);
-      if (u instanceof Mob && u.passive) u.ch.facing = s.rot;
+      if (u instanceof Mob && (u.passive || u.behavior.idle === 'stand')) u.ch.facing = s.rot;
       let sp = spawns.get(s.group);
       if (!sp) spawns.set(s.group, sp = new Spawn(s.group));
       sp.units.push(u);
@@ -1187,6 +1187,7 @@ export class Game {
     else {
       const kit = this.kitOf(m);
       if (kit) { kit.died?.(); this.despawnMinions(m); }
+      if (d.summon) this.despawnMinions(m);
       // elites: their own item on every kill (spawner charges limit the farming)
       if (d.drop) m.loot.push(rollDrop(d.drop));
       if (m.temp) m.respawnAt = Infinity;
@@ -1196,7 +1197,7 @@ export class Game {
 
   /** Right on the kill: stat orbs, items, a micro-boss's bonus, the gacha pull. */
   private grantKillRewards(m: Mob) {
-    this.payRewards(m);
+    if (!m.owner?.def.summon) this.payRewards(m);
     const chance = tokenChance(mobRank(m.def), this.world.zoneAt(m.spawn.x, m.spawn.z).id);
     const pull = !m.owner && Math.random() < 1 - (1 - chance) * (1 - (this.orb?.pull ?? 0));
     const n = m.loot.length + (pull ? 1 : 0);
@@ -1538,7 +1539,11 @@ export class Game {
         if (!m.alive) continue;
       }
       // a static unit only stands: no chasing, no blows, no wandering
-      if (m.passive) { m.ch.update(dt, false); continue; }
+      if (m.passive) {
+        if (def.summon) this.summonTick(m, dt, heroInCamp);
+        m.ch.update(dt, false);
+        continue;
+      }
       if (def.boss?.souls) {
         if (m.state === 'chase') this.raiseSouls(m, def.boss.souls, dt);
         let arena = this.arenas.get(m);
@@ -1905,6 +1910,28 @@ export class Game {
       m.soulT = 0;
       this.raiseSoul(m, s);
     }
+  }
+
+  /** MobDef.summon: while the unit is being hit (until its regen starts) one mob rises 2-4 m around it per `every` s. */
+  private summonTick(m: Mob, dt: number, heroInCamp: boolean) {
+    if (this.dead || heroInCamp) this.despawnMinions(m);
+    if (this.dead || heroInCamp || this.time - m.hurtAt > MOB_REGEN_DELAY) { m.summonT = 0; return; }
+    m.summonT += dt;
+    if (m.summonT < m.def.summon!.every) return;
+    m.summonT -= m.def.summon!.every;
+    const a = Math.random() * Math.PI * 2;
+    const r = 2 + Math.random() * 2;
+    const at = new THREE.Vector3(m.pos.x + Math.sin(a) * r, 0, m.pos.z + Math.cos(a) * r);
+    this.world.collide(at, 0.45);
+    const s = this.addMob(MOBS[m.def.summon!.mob], at, this.labels);
+    s.temp = true;
+    s.owner = m;
+    s.state = 'chase';
+    s.atkCd = 0.8;
+    s.rise = 1.3;
+    s.pos.y = -1.9;
+    this.waves.add(at, 1.1, SOUL_GREEN, 1.3);
+    this.particles.burst(v1.copy(at).setY(0.2), SOUL_GREEN, 10, 0.12, 4, 0.9);
   }
 
   /** One soul crawls out `ring` m from the boss, anywhere but the cone behind it; HP = `hits` weakest blows of the hero. */

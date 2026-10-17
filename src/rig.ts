@@ -48,6 +48,7 @@ export const WEAPON_GRIPS: Record<string, {
   // (also the hunter sets' bows, models/archers/bow_*)
   // `rest`: with the arm down the bow stands upright at the side, its top tipped a little forward
   bow_human_archer: { scale: 0.75, grip: 0.5, tilt: 0, out: 0, rest: { lean: 0.25, yaw: 0 } },
+  bow_undead_archer: { scale: 0.75, grip: 0.5, tilt: 0, out: 0, rest: { lean: 0.25, yaw: 0 } },
   bow_orc_archer: { scale: 0.6, grip: 0.5, tilt: 0, out: 0, rest: { lean: 0.25, yaw: 0 } },
   // per-quality models (tools/blender/rarity_gear.py, `<kind>_<quality>`): the kind's grip
   sword: { scale: 0.6, grip: 0.1 },

@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, SPAWN_PRESETS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, MID_SPAWNERS, CEMETERY_AREAS, CEMETERY_BOARS, CEMETERY_PACKS, LAND_ELITES, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, PEAKS_SPAWNERS, packUnits, PROP_SPAWNERS, SPAWNERS, WITHERED, ZONES, ZOO, type PackDef, type SpawnPreset, type SpawnPresetId, type SpawnerDef, type FactionId, type ZoneId } from './config';
+import { FACTIONS, SPAWN_PRESETS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, MID_SPAWNERS, CEMETERY_AREAS, CEMETERY_BOARS, CEMETERY_PACKS, LAND_ELITES, MINI_SPAWNER, MINI_SPAWNER_OF, HILLS_BANNERS, HILLS_EXTRA, HILLS_LIONS, HILLS_PACKS, HILLS_SNAGS, MOBS, PEAKS_SPAWNERS, packUnits, PROP_SPAWNERS, SNOW_CROWNS, SPAWNERS, ZONES, ZOO, type PackDef, type SpawnPreset, type SpawnPresetId, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
-  ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, GLOVES_SPREAD, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, OLD_TRAIL, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, ringSpots, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
+  ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, GLOVES_SPREAD, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, OLD_TRAIL, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, ringSpots, lineSpots, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
   borderAway, borderRoom, pathAt, pathDist, progressAt, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
 } from './island';
 import type { Gate } from './island';
@@ -680,7 +680,7 @@ export class World {
     this.spawns.push({ id, unit: d.unit, kind: d.id, x, z, zone, depth, rot, group, behavior: slotOf?.behavior });
   }
   /** A pack (config PackDef): its mobs at `spots` (one per slot), saved under `id` as one spawn. */
-  private addPack(id: string, p: PackDef, spots: { x: number; z: number }[], zone: ZoneId, depth: number) {
+  private addPack(id: string, p: PackDef, spots: { x: number; z: number }[], zone: ZoneId, depth: number, rot = 0) {
     let respawn = 0;
     let x = 0;
     let z = 0;
@@ -692,14 +692,14 @@ export class World {
     const group: SpawnGroup = { id, charges: p.charges ?? [respawn], link: p.link, x, z, zone };
     for (let j = 0; j < p.slots.length; j++) {
       const s = p.slots[j];
-      this.addSpawn(`${id}:${j}`, { unit: 'mob', id: s.id }, spots[j].x, spots[j].z, zone, depth, 0, { group, behavior: s.behavior });
+      this.addSpawn(`${id}:${j}`, { unit: 'mob', id: s.id }, spots[j].x, spots[j].z, zone, depth, rot, { group, behavior: s.behavior });
     }
   }
-  /** Turns single spawners (by id) into one social pack `id`, standing in a ring round their mean spot. */
-  private joinPack(id: string, ids: string[]) {
+  /** Turns single spawners (by id) into one social pack `id`, standing in a ring round their mean spot (`onFirst`: round the first one's spot). */
+  private joinPack(id: string, ids: string[], onFirst = false) {
     const units = ids.map((u) => this.spawns.find((s) => s.id === u)!);
-    const x = units.reduce((t, s) => t + s.x, 0) / units.length;
-    const z = units.reduce((t, s) => t + s.z, 0) / units.length;
+    const x = onFirst ? units[0].x : units.reduce((t, s) => t + s.x, 0) / units.length;
+    const z = onFirst ? units[0].z : units.reduce((t, s) => t + s.z, 0) / units.length;
     const group: SpawnGroup = { id, charges: units.map((s) => s.group.charges).sort((a, b) => b[0] - a[0])[0], link: 'social', x, z, zone: units[0].zone };
     const spots = ringSpots(x, z, units.length, 1.8);
     units.forEach((s, j) => Object.assign(s, { x: spots[j].x, z: spots[j].z, group }));
@@ -1320,6 +1320,11 @@ export class World {
         return { x: x0 + (x1 - x0) * k, z: z0 + (z1 - z0) * k, tx: (x1 - x0) / seg[i], tz: (z1 - z0) / seg[i] };
       };
       this.mobsOnCurve(total, at, SPAWNERS[zone] ?? [], zone, r);
+      if (zone === 'hills') {
+        // road mobs alternate sides, so their mean spot is on the road: pairs stand where the first one is
+        HILLS_PACKS.forEach((ids, k) => this.joinPack(`hills:pack:${k}`, ids.map((i) => `hills:${i}`), true));
+        this.hillsSnags(total, at);
+      }
     }
     for (const land of LAND_BOSSES) {
       if (land.boss) {
@@ -1340,6 +1345,8 @@ export class World {
         this.addSpawn(`elite:${land.zone}:${i}`, e.def, p.x, p.z, land.zone, 0, 0);
       });
     }
+    this.hillsBeasts();
+    this.hillsGateGuards();
     this.snowMobs(r);
     this.snowProps(r);
     this.snowBeasts(r);
@@ -1350,16 +1357,20 @@ export class World {
   /** One pack of each spawn preset (config SPAWN_PRESETS) on the empty dunes, as a showcase. */
   private dunesPresets() {
     const r = rng(53);
-    const spots: [SpawnPresetId, number, number][] = [['archer_escort', 35, 25], ['flankers', 60, 25], ['growing', 90, 35], ['skirmishers', 45, 65], ['horde', 30, 85], ['horde_mixed', 100, 62]];
+    const spots: [SpawnPresetId, number, number][] = [['archer_escort', 35, 25], ['flankers', 60, 25], ['growing', 90, 35], ['skirmishers', 45, 65], ['horde', 30, 85], ['horde_mixed', 100, 62], ['gate_line', 70, 50]];
     for (const [id, x0, z0] of spots) {
       const c = this.spotIn('dunes', x0, z0, 3);
       const preset: SpawnPreset = SPAWN_PRESETS[id];
       const p = preset.pack;
+      // a line faces the island centre, like the debug teleport approaches
+      const fx = ISLAND.cx - c.x;
+      const fz = ISLAND.cz - c.z;
       const at = preset.horde === 'scatter' ? this.scatterSpots(c.x, c.z, p.slots.length, 7, r)
+        : preset.line ? lineSpots(c.x, c.z, p.slots.length, 1.7, fx, fz)
         : ringSpots(c.x, c.z, p.slots.length, preset.horde ? 3.5 : 1.8);
       this.packCenters.push([c.x, c.z]);
       for (const q of at) this.taken.push([q.x, q.z]);
-      this.addPack(`dunes:preset:${id}`, p, at, 'dunes', 0);
+      this.addPack(`dunes:preset:${id}`, p, at, 'dunes', 0, preset.line ? Math.atan2(fx, fz) : 0);
       this.presets.push({ id, x: c.x, z: c.z });
     }
   }
@@ -1395,14 +1406,115 @@ export class World {
     return best;
   }
 
-  /** Snow Pass mobs (config PEAKS_SPAWNERS): guards past the hub gate, sword packs on and beside the trail, lone assassins in the woods. */
+  /** Decor round a summoning banner: two or three snag props and one skull, on free ground off the road. */
+  private bannerDress(x: number, z: number, r: () => number) {
+    const n = 2 + Math.floor(r() * 2);
+    for (let k = 0; k <= n; k++) {
+      const a = r() * Math.PI * 2;
+      const d = 1.8 + r() * 1.4;
+      const px = x + Math.sin(a) * d;
+      const pz = z + Math.cos(a) * d;
+      if (!this.free(px, pz, 0.6) || landTrailDist(px, pz) < 1.5) continue;
+      if (k === n) this.place('orc_skull', px, pz, 1 + r() * 0.4, r() * 6, 0);
+      else this.place('elf_tree_root_1', px, pz, 0.35 + r() * 0.2, r() * 6, 0);
+    }
+  }
+
+  /** The nearest hills spot to `c` that is at least `gap` m off every outer road and clear of gates and props. */
+  private offRoad(c: { x: number; z: number }, gap: number) {
+    for (let d = 0; d <= 12; d += 0.5) {
+      const n = d ? Math.ceil(d * 4) : 1;
+      for (let k = 0; k < n; k++) {
+        const a = (k / n) * Math.PI * 2;
+        const x = c.x + Math.sin(a) * d;
+        const z = c.z + Math.cos(a) * d;
+        if (zoneIdAt(x, z) === 'hills' && walkable(x, z, 1) && this.free(x, z, 1) && landTrailDist(x, z) >= gap && gateDist(x, z) > 8) return { x, z };
+      }
+    }
+    return c;
+  }
+
+  /** Snags (config HILLS_SNAGS) along the Hills road, a road's width off it, alternating sides; own rng keeps the other placement stable. */
+  private hillsSnags(total: number, at: (d: number) => { x: number; z: number; tx: number; tz: number }) {
+    const r = rng(88);
+    HILLS_SNAGS.forEach((d, i) => {
+      for (const ds of [0, 4, -4, 8, -8, 12, -12]) {
+        const p = at(Math.min(total, Math.max(0, ((i + 0.5) / HILLS_SNAGS.length) * total + ds)));
+        const side = i % 2 ? 1 : -1;
+        const x = p.x + p.tz * side * 3.2;
+        const z = p.z - p.tx * side * 3.2;
+        if (zoneIdAt(x, z) !== 'hills' || !this.free(x, z, 1) || this.nearPack(x, z, 6) || gateDist(x, z) < 8) continue;
+        this.reserved.push({ x, z, r: 0.8 });
+        this.taken.push([x, z]);
+        // rot 0: the banner cloth faces +z, toward the fixed camera
+        this.addSpawn(`hills:snag:${i}`, d, x, z, 'hills', 0, 0);
+        if (MOBS[d.id].summon) this.bannerDress(x, z, r);
+        return;
+      }
+    });
+  }
+
+  /** Lion packs and lone lions (config HILLS_LIONS) at random spots across the hills, well off the road, shrines, gates and other packs. Own rng keeps the rest stable. */
+  private hillsBeasts() {
+    const r = rng(89);
+    const gen = () => ({ x: -130 + r() * 90, z: -125 + r() * 130 });
+    const ok = (x: number, z: number) => zoneIdAt(x, z) === 'hills' && walkable(x, z, 2) && this.free(x, z, 2.5) && landTrailDist(x, z) > 7.5
+      && gateDist(x, z) > 12 && !this.nearPack(x, z, 8);
+    HILLS_LIONS.packs.forEach((p, i) => {
+      const c = this.spread(1, 14, gen, ok, true)[0];
+      if (!c) return;
+      this.packCenters.push([c.x, c.z]);
+      this.addPack(`hills:lionpack:${i}`, p, ringSpots(c.x, c.z, p.slots.length, 1.8, r() * 6), 'hills', 0);
+    });
+    HILLS_LIONS.lions.forEach((d, i) => {
+      const c = this.spread(1, 10, gen, ok, true)[0];
+      if (!c) return;
+      this.packCenters.push([c.x, c.z]);
+      this.addSpawn(`hills:lion:${i}`, d, c.x, c.z, 'hills', 0, 0);
+    });
+    HILLS_EXTRA.forEach((p, i) => {
+      const c = this.spotIn('hills', p.x, p.z, 2);
+      this.packCenters.push([c.x, c.z]);
+      this.taken.push([c.x, c.z]);
+      this.addPack(`hills:extra:${i}`, p.def, ringSpots(c.x, c.z, p.def.slots.length, 1.8), 'hills', 0);
+    });
+    HILLS_BANNERS.forEach((b, i) => {
+      const c = this.offRoad(this.spotIn('hills', b.x, b.z, 1), 3);
+      this.reserved.push({ x: c.x, z: c.z, r: 0.8 });
+      this.taken.push([c.x, c.z]);
+      this.addSpawn(`hills:banner:${i}`, b.def, c.x, c.z, 'hills', 0, 0);
+    });
+  }
+
+  /** Spawn preset `gate_line` standing in a row across each hills gate, a few metres inside the hills and facing the gate. */
+  private hillsGateGuards() {
+    const preset: SpawnPreset = SPAWN_PRESETS.gate_line;
+    const n = preset.pack.slots.length;
+    for (const g of GATES) {
+      if (!g.id.includes('hills')) continue;
+      // unit vector from the gate into the hills
+      const s = g.from === 'hills' ? -1 : 1;
+      const hx = g.tx * s;
+      const hz = g.tz * s;
+      let spots = lineSpots(g.x + hx * 6, g.z + hz * 6, n, 1.7, -hx, -hz);
+      for (const d of [5, 6, 7, 8]) {
+        const q = lineSpots(g.x + hx * d, g.z + hz * d, n, 1.7, -hx, -hz);
+        if (q.every((p) => walkable(p.x, p.z, 0.5) && zoneIdAt(p.x, p.z) === 'hills')) { spots = q; break; }
+      }
+      this.packCenters.push([g.x + hx * 6, g.z + hz * 6]);
+      for (const p of spots) this.taken.push([p.x, p.z]);
+      this.addPack(`hills:gate:${g.id}`, preset.pack, spots, 'hills', 0, Math.atan2(-hx, -hz));
+    }
+  }
+
+  /** Snow Pass mobs (config PEAKS_SPAWNERS): guards past the hub gate, packs at hand-picked spots, lone assassins in the woods. */
   private snowMobs(r: () => number) {
     const g = GATES.find((t) => t.id === 'forest-peaks')!;
-    // two either side of the road, the third behind their gap
+    // one either side of the road
     const guards: { x: number; z: number }[] = [];
-    for (const side of [-1, 1, 0]) {
-      const x = g.x + g.tx * (side ? 7 : 8.5) + g.tz * side * 2.6;
-      const z = g.z + g.tz * (side ? 7 : 8.5) - g.tx * side * 2.6;
+    for (const side of [-1, 1]) {
+      const x = g.x + g.tx * 7 + g.tz * side * 2.6;
+      const z = g.z + g.tz * 7 - g.tx * side * 2.6;
       guards.push({ x, z });
       this.packCenters.push([x, z]);
       this.taken.push([x, z]);
@@ -1425,29 +1537,15 @@ export class World {
       const [x1, z1] = line[i + 1];
       return { x: x0 + (x1 - x0) * k, z: z0 + (z1 - z0) * k, tx: (x1 - x0) / seg[i], tz: (z1 - z0) / seg[i] };
     };
-    const okPack = (x: number, z: number) => zoneIdAt(x, z) === 'peaks' && walkable(x, z, 2) && gateDist(x, z) > 9 && !this.nearPack(x, z, 12);
-    const packs = PEAKS_SPAWNERS.packs;
-    packs.forEach((pack, i) => {
-      // odd packs stand on the trail, even ones just beside it
-      let c: { x: number; z: number } | null = null;
-      for (const ds of [0, 5, -5, 10, -10]) {
-        const p = at(Math.min(total, Math.max(0, ((i + 0.3 + r() * 0.4) / packs.length) * total + ds)));
-        const off = i % 2 ? 0 : (r() < 0.5 ? -1 : 1) * (3 + r() * 2);
-        const q = { x: p.x + p.tz * off, z: p.z - p.tx * off };
-        if (okPack(q.x, q.z)) { c = q; break; }
-      }
-      if (!c) return;
+    PEAKS_SPAWNERS.packs.forEach((p, i) => {
+      const c = this.spotIn('peaks', p.x, p.z, 3);
       this.packCenters.push([c.x, c.z]);
       this.taken.push([c.x, c.z]);
-      const a0 = r() * Math.PI * 2;
-      const spots: { x: number; z: number }[] = [];
-      for (let j = 0; j < pack.slots.length; j++) {
-        const a = a0 + (j / pack.slots.length) * Math.PI * 2 + (r() - 0.5) * 0.8;
-        const rr = 1.4 + r() * 1.2;
-        spots.push({ x: c.x + Math.sin(a) * rr, z: c.z + Math.cos(a) * rr });
-      }
-      this.addPack(`peaks:pack:${i}`, pack, spots, 'peaks', 0);
+      this.addPack(`peaks:pack:${i}`, p.def, ringSpots(c.x, c.z, p.def.slots.length, 1.8), 'peaks', 0);
     });
+    const [wx, wz] = LAND_BOSSES.find((b) => b.zone === 'peaks')!.minis[0];
+    this.addSpawn('peaks:warden_guard', PEAKS_SPAWNERS.wardenGuard, wx, wz, 'peaks', 0, 0);
+    this.joinPack('peaks:warden', ['mini:peaks:0', 'peaks:warden_guard']);
     const inPass = () => ({ x: MAP_BOX.x + r() * MAP_BOX.size, z: MAP_BOX.z + r() * MAP_BOX.size });
     const okLone = (x: number, z: number) => {
       const d = this.snowRoadDist(x, z);
@@ -1477,14 +1575,20 @@ export class World {
       for (const ds of [0, 4, -4, 8, -8]) {
         const p = at(Math.min(total, Math.max(0, ((i + 0.5) / n) * total + ds + (r() - 0.5) * 6)));
         const side = i % 2 ? 1 : -1;
-        const x = p.x + p.tz * side * 2.6;
-        const z = p.z - p.tx * side * 2.6;
+        const x = p.x + p.tz * side * 3.2;
+        const z = p.z - p.tx * side * 3.2;
         if (zoneIdAt(x, z) !== 'peaks' || !this.free(x, z, 1) || this.nearPack(x, z, 6) || gateDist(x, z) < 8) continue;
         this.reserved.push({ x, z, r: 0.8 });
         this.taken.push([x, z]);
         this.addSpawn(`peaks:tree:${i}`, d, x, z, 'peaks', 0, r() * 6);
         return;
       }
+    });
+    PEAKS_SPAWNERS.woodTrees.forEach((t, i) => {
+      const p = this.spotIn('peaks', t.x, t.z, 1);
+      this.reserved.push({ x: p.x, z: p.z, r: 0.8 });
+      this.taken.push([p.x, p.z]);
+      this.addSpawn(`peaks:wood_tree:${i}`, t.def, p.x, p.z, 'peaks', 0, r() * 6);
     });
   }
 
@@ -1507,7 +1611,7 @@ export class World {
     const GREYS = [0xb4b8bd, 0xc6c9cc, 0xa3a8ae, 0xd3d5d7];
     const SNOW = [0xc9d0d6, 0xbcc4cb, 0xd2d7dc];
     const grey = () => GREYS[Math.floor(r() * GREYS.length)];
-    const withered = () => WITHERED[Math.floor(r() * WITHERED.length)];
+    const crown = () => SNOW_CROWNS[Math.floor(r() * SNOW_CROWNS.length)];
     const trees: Inst[] = [];
     const pines: Inst[] = [];
     const bare: Inst[] = [];
@@ -1539,7 +1643,7 @@ export class World {
     };
     clumps(34, 5, [1, 4], [2.2, 5], ok(4, 1.2), (x, z) => {
       const k = r();
-      if (k < 0.35) trees.push({ x, z, s: 0.5 + r() * 0.45, r: r() * 6, tint: withered() });
+      if (k < 0.35) trees.push({ x, z, s: 0.5 + r() * 0.45, r: r() * 6, tint: crown() });
       else if (k < 0.78) pines.push({ x, z, s: 0.8 + r() * 0.55, r: r() * 6, tint: grey() });
       else bare.push({ x, z, s: 0.7 + r() * 0.5, r: r() * 6 });
       this.obstacles.push({ x, z, r: 0.5 });
@@ -1558,7 +1662,7 @@ export class World {
       else smallBushes.push({ ...it, s: 0.7 + r() * 0.6 });
       this.obstacles.push({ x, z, r: 0.3 });
     });
-    this.scatter('elf_tree', trees);
+    this.scatter('elf_tree', trees, true, { recolor: true });
     this.pines(pines);
     this.deadTrees(bare, 0x6e6a66);
     this.scatter('elf_tree_root_1', stumps, false);
@@ -1659,18 +1763,207 @@ export class World {
     this.deadTrees(bleached, 0xb8a888);
     this.scatter('undead_bones_remains', bones, false);
 
-    // Rocky hills: boulders, pines, loose stones
-    const PINE = [0x3f7a32, 0x4f8a3c, 0x5c9a40, 0x37702e];
-    const hRocks: Inst[] = [], hPines: Inst[] = [], hSmall: Inst[] = [];
+    // Rocky hills dressing. Placed in this order so the hand-made bits (shrines, bones, scrub) get the room first and the boulders fill round them.
+    const bushOk = room('hills', 0.4, 3.5);
+    // the hills box (as hillsBeasts): sampling the whole island leaves too few tries inside this small, crowded zone
+    const inHills = () => ({ x: -130 + r() * 90, z: -125 + r() * 130 });
+    const hMid: Inst[] = [], hSmall: Inst[] = [];
+    /** A green bush like the shore ones (plain elf foliage, no tint, scale 0.22-0.4). */
+    const hBush = (x: number, z: number) => {
+      const s = 0.22 + r() * 0.18;
+      (r() < 0.65 ? hMid : hSmall).push({ x, z, s, r: r() * 6, y: s });
+      this.obstacles.push({ x, z, r: 1.8 * s });
+    };
+    /** Up to n bushes dropped at random round (x, z), on free ground off the road. */
+    const tufts = (x: number, z: number, n: number, rad: number) => {
+      for (let i = 0; i < n; i++) {
+        const a = r() * Math.PI * 2;
+        const d = 0.4 + Math.sqrt(r()) * rad;
+        if (bushOk(x + Math.sin(a) * d, z + Math.cos(a) * d)) hBush(x + Math.sin(a) * d, z + Math.cos(a) * d);
+      }
+    };
+    const skullO: Inst[] = [], skullH: Inst[] = [];
+    const skull = (x: number, z: number, big = 1) => {
+      if (r() < 0.5) skullO.push({ x, z, s: (1 + r() * 0.8) * big, r: r() * 6 });
+      else skullH.push({ x, z, s: (0.9 + r() * 0.6) * big, r: r() * 6 });
+    };
+
+    // Cobble patches like the starting camp's paving (terrain.buildCobbles): a round patch at c, a road stretch from c to `to`
+    const cr = rng(92);
+    const road = LAND_TRAILS[0];
+    const cobble = (c: { x: number; z: number; r: number }, to: { x: number; z: number }) => {
+      this.group.add(buildCobbles(c, to));
+      const n = Math.ceil(Math.hypot(to.x - c.x, to.z - c.z) / 1.5);
+      for (let i = 0; i <= n; i++) this.layers.clear(c.x + (to.x - c.x) * i / n, c.z + (to.z - c.z) * i / n, 1.5);
+    };
+    /** The nearest point of the hills road to (x, z). */
+    const roadNear = (x: number, z: number) => {
+      let best = { x: road[0][0], z: road[0][1] }, bd = Infinity;
+      for (let i = 0; i < road.length - 1; i++) {
+        const [ax, az] = road[i];
+        const dx = road[i + 1][0] - ax, dz = road[i + 1][1] - az;
+        const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+        const px = ax + dx * t, pz = az + dz * t;
+        if (Math.hypot(x - px, z - pz) < bd) { bd = Math.hypot(x - px, z - pz); best = { x: px, z: pz }; }
+      }
+      return best;
+    };
+    // short stretches along the road: a metre or two of stones every 15-35 m
+    let pd = 8 + cr() * 10;
+    for (let i = 0; i < road.length - 1; i++) {
+      const [ax, az] = road[i];
+      const len = Math.hypot(road[i + 1][0] - ax, road[i + 1][1] - az);
+      const ux = (road[i + 1][0] - ax) / len, uz = (road[i + 1][1] - az) / len;
+      for (; pd < len; pd += 15 + cr() * 20) {
+        const l = 4 + cr() * 5;
+        // both ends on this segment, so a stretch never cuts a corner
+        const e = Math.min(len, pd + l);
+        const a = { x: ax + ux * pd, z: az + uz * pd }, b = { x: ax + ux * e, z: az + uz * e };
+        if (zoneIdAt(a.x, a.z) === 'hills' && zoneIdAt(b.x, b.z) === 'hills' && gateDist(a.x, a.z) > 6 && gateDist(b.x, b.z) > 6) cobble({ x: a.x, z: a.z, r: 0.6 }, b);
+      }
+      pd -= len;
+    }
+
+    // Shrines: an altar with one to three tusks of uneven height, a few skulls, sometimes ringed pillars, scrub on one side
+    for (const { x, z } of this.spread(4, 26, inHills, room('hills', 4, 6), true)) {
+      const a = r() * Math.PI * 2;
+      // stones round the altar and most of the way back to the road
+      const rn = roadNear(x, z);
+      const k = 0.7 + cr() * 0.15;
+      cobble({ x, z, r: 2.4 + cr() * 0.8 }, { x: x + (rn.x - x) * k, z: z + (rn.z - z) * k });
+      const at = (side: number, fwd: number) => ({ x: x + Math.cos(a) * side + Math.sin(a) * fwd, z: z - Math.sin(a) * side + Math.cos(a) * fwd });
+      this.place('orc_altar', x, z, 0.45 + r() * 0.15, a, 0.7);
+      const tusks = 1 + Math.floor(r() * 3);
+      for (let i = 0; i < tusks; i++) {
+        const t = at((i % 2 ? 1 : -1) * (1.5 + r() * 1.5), 0.5 + r() * 1.8);
+        this.place('orc_tusk_standing', t.x, t.z, 0.45 + r() * 0.6, a + (r() - 0.5) * 1.2, 0.3);
+      }
+      const skulls = 1 + Math.floor(r() * 3);
+      for (let i = 0; i < skulls; i++) {
+        const sk = at((r() - 0.5) * 3.2, 1.1 + r() * 1.8);
+        this.place(r() < 0.5 ? 'orc_horned_skull' : 'orc_skull', sk.x, sk.z, 1 + r() * 0.4, r() * 6, 0);
+      }
+      const pillars = Math.floor(r() * 3);
+      for (let i = 0; i < pillars; i++) {
+        const t = at((i % 2 ? 3.4 : -3.4) + (r() - 0.5), -0.8 + r() * 1.6);
+        this.place('orc_stone_pillar_small_ringed', t.x, t.z, 0.4 + r() * 0.2, r() * 6, 0.35);
+      }
+      const side = r() < 0.5 ? -1 : 1;
+      const sb = at(side * (3 + r() * 1.5), -1 + r() * 2);
+      tufts(sb.x, sb.z, 2 + Math.floor(r() * 3), 1.8);
+    }
+
+    // Bone patches: now and then two or three skulls with a leaning tusk, mostly a lone skull
+    for (const { x, z } of this.spread(16, 8, inHills, room('hills', 0.8, 3), true)) {
+      skull(x, z);
+      if (r() > 0.4) continue;
+      const a = r() * Math.PI * 2;
+      const n = 1 + Math.floor(r() * 2);
+      for (let i = 0; i < n; i++) {
+        const d = 0.6 + r() * 0.8;
+        const px = x + Math.sin(a + i * 2.3) * d;
+        const pz = z + Math.cos(a + i * 2.3) * d;
+        if (this.free(px, pz, 0.3)) skull(px, pz, 0.8);
+      }
+      if (r() < 0.6) {
+        const px = x + Math.sin(a + 4) * 1.1;
+        const pz = z + Math.cos(a + 4) * 1.1;
+        if (this.free(px, pz, 0.3)) this.place('orc_tusk_standing', px, pz, 0.35 + r() * 0.35, r() * 6, 0.2);
+      }
+    }
+    // Lion lairs: a messy ring of bones and skulls round every lion, stretched one way so it is lopsided (own rng keeps the rest stable)
+    const lr = rng(90);
+    const lairBones: Record<string, Inst[]> = { undead_bones_remains: [], undead_ground_bone_1: [], undead_ground_bone_2: [], undead_ground_bone_3: [], undead_big_bone: [] };
+    const boneKeys = Object.keys(lairBones);
+    for (const sp of this.spawns) {
+      if (sp.zone !== 'hills' || sp.kind !== 'wild_lion') continue;
+      const stretch = lr() * Math.PI;
+      const sx = Math.cos(stretch), sz = Math.sin(stretch);
+      const n = 6 + Math.floor(lr() * 7);
+      for (let i = 0; i < n; i++) {
+        const a = lr() * Math.PI * 2;
+        const d = 1 + Math.sqrt(lr()) * 2;
+        // ellipse: x1.3 along the stretch axis, x0.7 across it
+        const al = Math.sin(a) * d * 1.3, ac = Math.cos(a) * d * 0.7;
+        const x = sp.x + al * sx - ac * sz;
+        const z = sp.z + al * sz + ac * sx;
+        if (zoneIdAt(x, z) !== 'hills' || !this.free(x, z, 0.3)) continue;
+        const k = lr();
+        if (k < 0.5) lairBones[boneKeys[Math.floor(lr() * boneKeys.length)]].push({ x, z, s: 0.3 + lr() * 0.3, r: lr() * 6 });
+        else if (lr() < 0.5) skullO.push({ x, z, s: 0.8 + lr() * 0.7, r: lr() * 6 });
+        else skullH.push({ x, z, s: 0.8 + lr() * 0.6, r: lr() * 6 });
+      }
+    }
+    for (const [name, list] of Object.entries(lairBones)) this.scatter(name, list, false);
+    this.scatter('orc_skull', skullO, false);
+    this.scatter('orc_horned_skull', skullH, false);
+
+    // Green scrub: clumps of two to five and loose singles, uneven spacing
+    for (const { x, z } of this.spread(10, 9, inHills, room('hills', 1, 3.5), true)) tufts(x, z, 2 + Math.floor(r() * 4), 1.3 + r() * 1.2);
+    for (const { x, z } of this.spread(14, 5, inHills, room('hills', 0.6, 3.5), true)) hBush(x, z);
+    this.scatter('elf_foliage_mid', hMid, true);
+    this.scatter('elf_foliage_small', hSmall, false);
+
+    // Rocky hills: small, medium and big boulders in the zone's own greys (ZONES.hills ground tints)
+    const HILL_ROCK = [0x9a9286, 0xaca496, 0x7c766c, 0xbab2a4];
+    const hTone = () => pick(HILL_ROCK);
+    const bigO: Inst[] = [], bigE: Inst[] = [], midO: Inst[] = [], midE: Inst[] = [], smallO: Inst[] = [], smallE: Inst[] = [];
     for (const { x, z } of this.spread(80, 6, anywhere, room('hills', 1.2))) {
       const k = r();
-      if (k < 0.4) { const s = 0.45 + r() * 0.45; rock(hRocks, x, z, s * 2.6, 1.1 * s, pick([0xc8c0b4, 0xb0a89c, 0xd8d0c4])); }
-      else if (k < 0.75) { hPines.push({ x, z, s: 0.9 + r() * 0.4, r: r() * 6, tint: pick(PINE) }); this.obstacles.push({ x, z, r: 0.5 }); }
-      else hSmall.push({ x, z, s: 0.5 + r() * 0.5, r: r() * 6 });
+      if (k < 0.18) { const s = 2.4 + r() * 1.2; rock(bigO, x, z, s, 0.42 * s, hTone(), 1.4); }
+      else if (k < 0.32) { const s = 0.9 + r() * 0.5; rock(bigE, x, z, s, 0.6 * s, hTone(), 1.4); }
+      else if (k < 0.5) { const s = 1.2 + r() * 0.6; rock(midO, x, z, s, 0.3 * s, hTone(), 1.4); }
+      else if (k < 0.62) { const s = 0.8 + r() * 0.3; rock(midE, x, z, s, 0.5 * s, hTone(), 1.4); }
+      else if (k < 0.82) smallO.push({ x, z, s: 0.6 + r() * 0.6, r: r() * 6, tint: hTone(), k: 1.4 });
+      else smallE.push({ x, z, s: 0.3 + r() * 0.3, r: r() * 6, tint: hTone(), k: 1.4 });
     }
-    this.scatter('orc_stone_big', hRocks);
-    this.pines(hPines);
-    this.scatter('elf_rock_small', hSmall, false);
+    this.scatter('orc_stone_big', bigO);
+    this.scatter('elf_stone_big', bigE);
+    this.scatter('orc_stone_mid', midO);
+    this.scatter('elf_stone_small', midE);
+    this.scatter('orc_stone_small', smallO, false);
+    this.scatter('elf_stone_small', smallE, false);
+
+    // Snags and fallen logs, well away from the trails
+    const hStumps: Inst[] = [], hLogs: Inst[] = [];
+    for (const { x, z } of this.spread(10, 8, anywhere, room('hills', 1.2, 6))) {
+      if (r() < 0.65) hStumps.push({ x, z, s: 0.3 + r() * 0.25, r: r() * 6 });
+      else { hLogs.push({ x, z, s: 0.5 + r() * 0.2, r: r() * 6 }); this.obstacles.push({ x, z, r: 0.8 }); }
+    }
+    this.scatter('elf_tree_root_1', hStumps, false);
+    this.scatter('orc_log', hLogs);
+
+    // Tauren camps: a campfire by every pair of tauren standing together (not packs with a mummy), drums by the lone ones
+    const hMobs = this.spawns.filter((sp) => sp.zone === 'hills' && sp.unit === 'mob');
+    const TAUREN = ['orc_laborer', 'orc_axeman', 'orc_blademaster'];
+    const pairs = new Set<SpawnGroup>();
+    for (const sp of hMobs) {
+      const g = sp.group;
+      if (g.link === 'social' && !pairs.has(g)) {
+        const m = hMobs.filter((o) => o.group === g);
+        if (m.length === 2 && m.every((o) => TAUREN.includes(o.kind))) pairs.add(g);
+      }
+    }
+    const nearSpot = (c: { x: number; z: number }, d: number, gap: number) => {
+      for (let i = 0; i < 16; i++) {
+        const a = r() * Math.PI * 2;
+        const dd = d + (i > 7 ? 1.5 : 0) + r() * 1;
+        const x = c.x + Math.cos(a) * dd, z = c.z + Math.sin(a) * dd;
+        if (zoneIdAt(x, z) === 'hills' && walkable(x, z, 1) && this.free(x, z, 1.2) && landTrailDist(x, z) >= gap && gateDist(x, z) > 7
+          && hMobs.every((o) => Math.hypot(o.x - x, o.z - z) > 1.5)) return { x, z, a };
+      }
+      return null;
+    };
+    for (const g of pairs) {
+      const f = nearSpot(g, 2, 3) ?? nearSpot(g, 2, 1.8);
+      if (f) this.place('orc_campfire', f.x, f.z, 0.42, f.a, 0.8);
+    }
+    const tauren = hMobs.filter((sp) => sp.kind.startsWith('tauren'));
+    for (let i = 0; i < 2 && tauren.length; i++) {
+      const sp = tauren.splice(Math.floor(r() * tauren.length), 1)[0];
+      const f = nearSpot(sp, 3, 0);
+      if (f) this.place('orc_drum_big', f.x, f.z, 0.45, f.a, 0.6);
+    }
     this.scatter('elf_tree_root_1', stumps, false);
     this.scatter('orc_log', logs);
   }

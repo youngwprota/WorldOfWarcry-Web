@@ -32,10 +32,12 @@ export class Arrows {
     if (!pellet) {
       // authored along Y with the head at −Y (fletching at the origin): lay the head along the group's +Z,
       // which lookAt() turns at the aim
-      mesh.rotation.set(-Math.PI / 2, 0, 0);
+      // (the undead arrow is authored along +Z already, head forward, 1.11 m)
+      const alongZ = model.startsWith('arrow_undead');
+      if (!alongZ) mesh.rotation.set(-Math.PI / 2, 0, 0);
       mesh.scale.multiplyScalar(SCALE);
       // the head on the flight point, the shaft trailing behind it (the hit lands when the head arrives)
-      mesh.position.z = -1.21 * SCALE;
+      mesh.position.z = (alongZ ? -1.11 : -1.21) * SCALE;
     }
     mesh.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
     obj.add(mesh);

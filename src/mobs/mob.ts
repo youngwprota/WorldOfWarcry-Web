@@ -59,6 +59,8 @@ export class Mob extends Unit {
   passable = false;
   /** Death: seconds since the last soul rose, and seconds left of the summoning flight (untargetable meanwhile). */
   soulT = 0;
+  /** Summoning snag (MobDef.summon): seconds since the last summon. */
+  summonT = 0;
   ritual = 0;
   burstDue = false;
   /** Boss: `animNext` starts in `animDelay` s (a cone clip timed to its telegraph); -1 = none. */
@@ -94,7 +96,8 @@ export class Mob extends Unit {
     this.reward = reward;
     const [model, weapon] = def.model[faction];
     const scale = def.scale * mul.scale;
-    this.ch = def.static ? new StaticBody(model, scale, def.tint === undefined ? undefined : new THREE.Color(def.tint))
+    this.ch = def.static ? new StaticBody(model, scale, def.tint === undefined ? undefined : new THREE.Color(def.tint),
+      def.crown === undefined ? undefined : new THREE.Color(def.crown))
       : def.creature ? new Creature(model, scale) : new Character(model, weapon, scale, def.skin);
     this.dmg = def.dmg * mul.dmg;
     this.ch.position.copy(spawn);

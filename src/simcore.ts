@@ -361,7 +361,7 @@ const VALUE: Record<StatId, number> = { power: 1, hp: 0.35, regen: 1.5, speed: 0
 const rewardOf = (u: Unit): OrbReward => {
   if (u.kind === 'prop') return BREAKABLES[u.def].reward as OrbReward;
   const d = MOBS[u.def];
-  if (d.boss || d.rank) return d.reward;
+  if (d.boss || d.rank) return d.reward as OrbReward;
   const k = depthMul(u.zone, u.depth).reward;
   const [s, n] = Object.entries(d.reward)[0] as [OrbKind, number];
   return { [s]: Math.round(n * k) } as unknown as OrbReward;

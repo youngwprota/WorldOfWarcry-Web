@@ -28,6 +28,7 @@ const TEXTURE_OF: Record<string, string> = {
   // party classes from the newer Unity kit (tools/import-warcry.mjs): one shared atlas per race
   human_archer: 'human_albedo', bow_human_archer: 'human_albedo', arrow_human_archer: 'human_albedo',
   orc_archer: 'orc_albedo', bow_orc_archer: 'orc_albedo', arrow_orc_archer: 'orc_albedo',
+  undead_archer: 'undead_units_texture', bow_undead_archer: 'undead_units_texture', arrow_undead_archer: 'undead_units_texture',
 };
 /** Recolours (MobDef.skin): body texture → its recoloured copy. */
 export const SKINS: Record<string, Record<string, string>> = {
@@ -35,6 +36,8 @@ export const SKINS: Record<string, Record<string, string>> = {
     orc_peon_albedo: 'tauren_peon_albedo', orc_grunt_albedo: 'tauren_grunt_albedo', orc_warrior_albedo: 'tauren_warrior_albedo',
     orc_chieftain_albedo: 'tauren_chieftain_albedo', orc_shaman_albedo: 'tauren_shaman_albedo',
   },
+  /** Bandaged mummies in tauren colours (tools/mummy_recolor.py): the undead atlas, same layout. */
+  mummy: { undead_units_texture: 'mummy_undead_units_albedo' },
 };
 
 const EMISSIVE_OF: Record<string, string> = {
