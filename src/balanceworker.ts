@@ -1,13 +1,14 @@
 // Runs the balance simulator (src/simcore.ts) off the page's thread. One worker per job: config edits
-// land on a fresh copy of the config and vanish with the worker.
-import { applySet, bench, simMap, simulate, summarize, type BenchRow, type RunOut, type SimMap, type SimOpts, type SimSummary } from './simcore';
+// land on a fresh copy of the config and vanish with the worker. The page splits a sim's runs over several
+// workers (seed ranges) and summarizes them itself.
+import { applySet, bench, simMap, simulate, type BenchRow, type RunOut, type SimMap, type SimOpts } from './simcore';
 
 export type Job =
   | { kind: 'sim'; opts: Partial<SimOpts>; sets: [string, unknown][] }
   | { kind: 'bench'; sets: [string, unknown][] };
 export type JobMsg =
   | { kind: 'progress'; done: number; total: number }
-  | { kind: 'sim'; runs: Omit<RunOut, 'fights'>[]; summary: SimSummary; map: SimMap; ms: number }
+  | { kind: 'sim'; runs: RunOut[]; map: SimMap; ms: number }
   | { kind: 'bench'; rows: BenchRow[]; ms: number }
   | { kind: 'error'; message: string };
 
@@ -24,8 +25,7 @@ self.onmessage = (e: MessageEvent<Job>) => {
     }
     const total = job.opts.runs ?? 20;
     const runs = simulate(job.opts, (done) => post({ kind: 'progress', done, total }));
-    // fights only feed the summary: the page needs the curves
-    post({ kind: 'sim', runs: runs.map(({ fights: _, ...r }) => r), summary: summarize(runs), map: simMap(), ms: performance.now() - t0 });
+    post({ kind: 'sim', runs, map: simMap(), ms: performance.now() - t0 });
   } catch (err) {
     post({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
   }

@@ -2,7 +2,7 @@
 // edits config numbers as what-ifs (the CLI's --set) and reads the game's balance log (same origin: localStorage).
 import * as CONFIG from './config';
 import { FACTIONS, MOBS, WEAPONS, type FactionId } from './config';
-import { BOSSES, DEFAULT_OPTS, pct, simMap, type BenchRow, type RunOut, type SimMap, type SimOpts, type SimSummary, type Snap } from './simcore';
+import { BOSSES, DEFAULT_OPTS, pct, simMap, summarize, type BenchRow, type RunOut, type SimMap, type SimOpts, type SimSummary, type Snap } from './simcore';
 import { renderMap } from './balancemap';
 import { load as loadGameLog, type Log } from './balancelog';
 import { CLASSES, CLASS_IDS, type HeroClass } from './party';
@@ -19,9 +19,13 @@ const store = {
 };
 const KEY = { sets: 'warcry-balance-sets', opts: 'warcry-balance-opts', tab: 'warcry-balance-tab', overlay: 'warcry-balance-overlay' };
 
-const BOSS_COLOR: Record<string, string> = { bandit_chief: '#e06a5f', death: '#a888d6' };
+const BOSS_COLOR: Record<string, string> = {
+  bandit_chief: '#e06a5f', death: '#a888d6', elf_queen: '#7fc8e8', orc_shaman: '#d08a50', elf_priestess: '#f09ac0', murloc_king: '#5fbfa8', sand_boar: '#e8c060',
+};
 const STAT_COLOR = { power: '#e0a050', maxHp: '#6fcf7f', regen: '#6f9be0', defense: '#a888d6', kills: '#ecebe6', pulls: '#e0c050' };
-const mobName = (def: string) => MOBS[def]?.name ?? def;
+/** A mob id, or a pack key (ids joined by '+', a repeat as ×n). */
+const mobName = (key: string) => key.split('+').map((p) => { const [d, n] = p.split('×'); return (MOBS[d]?.name ?? d) + (n ? ` ×${n}` : ''); }).join(' + ');
+const zoneName = (id: string) => CONFIG.ZONES.find((z) => z.id === id)?.name ?? id;
 const weaponName = (id: string) => (WEAPONS[id] ? `${WEAPONS[id].icon ?? ''} ${WEAPONS[id].name}`.trim() : id);
 
 // ---------- state ----------
@@ -29,7 +33,8 @@ let sets: Record<string, number> = store.get(KEY.sets, {});
 let opts: SimOpts = { ...DEFAULT_OPTS, ...store.get<Partial<SimOpts>>(KEY.opts, {}) };
 let tab = store.get(KEY.tab, 'sim');
 let overlay = store.get(KEY.overlay, true);
-type SimOut = Extract<JobMsg, { kind: 'sim' }>;
+/** A finished sim: its runs (fights dropped once summarized), the summary, the map. */
+interface SimOut { runs: Omit<RunOut, 'fights'>[]; summary: SimSummary; map: SimMap; ms: number }
 let sim: { cur: SimOut; base?: SimOut; opts: SimOpts } | null = null;
 let benchOut: { cur: BenchRow[]; base?: BenchRow[] } | null = null;
 let gameLog: LogView | null = null;
@@ -54,6 +59,24 @@ function runJob(job: Job, onProgress?: (done: number, total: number) => void): P
     w.onerror = (e) => { w.terminate(); reject(new Error(e.message || 'ошибка воркера')); };
     w.postMessage(job);
   });
+}
+
+/**
+ * A sim over several workers at once: run i of `opts.runs` gets seed `opts.seed + i` whichever worker plays it, so the
+ * result is the same as one worker's, only sooner.
+ */
+async function runSim(o: SimOpts, withSets: boolean, onProgress: (done: number) => void): Promise<SimOut> {
+  const t0 = performance.now();
+  const n = Math.max(1, Math.min(o.runs, (navigator.hardwareConcurrency || 4) - 1, 8));
+  const done: number[] = Array(n).fill(0);
+  const parts = Array.from({ length: n }, (_, i) => {
+    const from = Math.floor((i * o.runs) / n), to = Math.floor(((i + 1) * o.runs) / n);
+    const job: Job = { kind: 'sim', opts: { ...o, seed: o.seed + from, runs: to - from }, sets: withSets ? setList() : [] };
+    return runJob(job, (d) => { done[i] = d; onProgress(done.reduce((a, b) => a + b, 0)); }) as Promise<Extract<JobMsg, { kind: 'sim' }>>;
+  });
+  const res = await Promise.all(parts);
+  const runs = res.flatMap((r) => r.runs);
+  return { runs: runs.map(({ fights: _, ...r }) => r), summary: summarize(runs), map: res[0].map, ms: performance.now() - t0 };
 }
 
 // ---------- tabs ----------
@@ -239,11 +262,10 @@ async function startSim(root: HTMLElement) {
   const done = [0, 0];
   const total = opts.runs * (cmp ? 2 : 1);
   const tick = (i: number) => (d: number) => { done[i] = d; const s = done[0] + done[1]; prog.style.width = `${(100 * s) / total}%`; status.textContent = `${s}/${total}`; };
-  const job = (withSets: boolean): Job => ({ kind: 'sim', opts: { ...opts }, sets: withSets ? setList() : [] });
   try {
-    const [cur, base] = await Promise.all([runJob(job(true), tick(0)), cmp ? runJob(job(false), tick(1)) : Promise.resolve(undefined)]);
-    sim = { cur: cur as SimOut, base: base as SimOut | undefined, opts: { ...opts } };
-    status.textContent = `готово за ${((cur as SimOut).ms / 1000).toFixed(1)} с`;
+    const [cur, base] = await Promise.all([runSim({ ...opts }, true, tick(0)), cmp ? runSim({ ...opts }, false, tick(1)) : Promise.resolve(undefined)]);
+    sim = { cur, base, opts: { ...opts } };
+    status.textContent = `готово за ${(cur.ms / 1000).toFixed(1)} с`;
     renderSimOut($('#out', root));
   } catch (err) {
     $('#out', root).innerHTML = `<p class="err">${esc((err as Error).message)}</p>`;
@@ -279,6 +301,8 @@ function renderSimOut(out: HTMLElement) {
     <h2>Боссы и прогресс <span class="muted" style="font-weight:400;font-size:.8rem">${s.runs} прогонов · ${esc(FACTIONS[sim.opts.faction].name)}, ${sim.opts.cls === 'party' ? 'партия' : esc(CLASSES[sim.opts.cls].name)}${sim.opts.weapon ? ', ' + esc(weaponName(sim.opts.weapon)) : ''}${sim.opts.off ? ' + ' + esc(weaponName(sim.opts.off)) : ''}${base ? ' · бледные линии: без правок' : ''}</span></h2>
     <div class="cards">
       ${s.bosses.map((b) => bossCard(b, s.runs, bs?.bosses.find((x) => x.id === b.id))).join('')}
+      <div class="card"><h3>Локации открыты (медиана)</h3>
+        <div class="sub" style="font-size:.9rem;color:var(--fg)">${s.zones.map((z) => `${esc(zoneName(z.zone))}: <b>${z.n ? mmss(z.p50) : '—'}</b> <span class="muted">${z.n}/${s.runs}</span>`).join('<br>')}</div></div>
       <div class="card"><h3>Крутки (медиана)</h3>
         <div class="sub" style="font-size:.9rem;color:var(--fg)">10 мин: <b>${fmt(s.pulls[10])}</b>${pd(s.pulls[10], bs?.pulls[10])} ·
         20 мин: <b>${fmt(s.pulls[20])}</b>${pd(s.pulls[20], bs?.pulls[20])} · 30 мин: <b>${fmt(s.pulls[30])}</b>${pd(s.pulls[30], bs?.pulls[30])}</div>
@@ -312,8 +336,10 @@ function renderSimOut(out: HTMLElement) {
   );
   // run 1 table
   const r1 = cur.runs[0];
-  $('#run1', out).innerHTML = r1 ? `<table><tr><th>время</th><th class="l">зона</th><th>урон</th><th>HP</th><th>реген</th><th>защ</th><th>убийств</th><th>смертей</th><th>круток</th><th class="l">оружие</th>${BOSSES.map((b) => `<th>${esc(b.name)}</th>`).join('')}</tr>
-    ${r1.snaps.map((x) => `<tr><td>${mmss(x.t)}</td><td class="l">${x.zone}</td><td>${fmt(x.power)}</td><td>${x.maxHp}</td><td>${fmt(x.regen, 1)}</td><td>${fmt(x.defense)}</td><td>${x.kills}</td><td>${x.deaths}</td><td>${x.pulls}</td><td class="l mono">${esc(x.weapons)}</td>${BOSSES.map((b) => `<td>${Math.round((x.win[b.id] ?? 0) * 100)}%</td>`).join('')}</tr>`).join('')}</table>` : '';
+  // bosses the run ever had a chance against (the others stood behind closed passages)
+  const r1b = r1 ? BOSSES.filter((b) => r1.snaps.some((x) => (x.win[b.id] ?? 0) > 0)) : [];
+  $('#run1', out).innerHTML = r1 ? `<table><tr><th>время</th><th class="l">зона</th><th>урон</th><th>HP</th><th>реген</th><th>защ</th><th>убийств</th><th>смертей</th><th>круток</th><th class="l">оружие</th>${r1b.map((b) => `<th>${esc(b.name)}</th>`).join('')}</tr>
+    ${r1.snaps.map((x) => `<tr><td>${mmss(x.t)}</td><td class="l">${esc(zoneName(x.zone))}</td><td>${fmt(x.power)}</td><td>${x.maxHp}</td><td>${fmt(x.regen, 1)}</td><td>${fmt(x.defense)}</td><td>${x.kills}</td><td>${x.deaths}</td><td>${x.pulls}</td><td class="l mono">${esc(x.weapons)}</td>${r1b.map((b) => `<td>${Math.round((x.win[b.id] ?? 0) * 100)}%</td>`).join('')}</tr>`).join('')}</table>` : '';
   // mobs table
   $('#mobs', out).innerHTML = s.mobs.length ? `<table><tr><th class="l">моб</th><th>боёв</th><th>1-й бой: когда</th><th>ударов</th><th>с</th><th>урон % HP</th><th>все: ударов</th><th>с</th><th>урон % HP</th><th>поражений</th></tr>
     ${s.mobs.map((m) => { const [def, depth] = m.key.split('@'); const hot = (p: number) => (p >= 70 ? 'no' : p >= 50 ? 'meh' : ''); return `<tr><td class="l">${esc(mobName(def))}${depth ? ` <span class="muted">глуб. ${depth}</span>` : ''}</td><td>${m.n}</td><td>${mmss(m.first.t)}</td><td>${fmt(m.first.swings, 1)}</td><td>${fmt(m.first.dur, 1)}</td><td class="${hot(m.first.takenPct)}">${Math.round(m.first.takenPct)}%</td><td>${fmt(m.all.swings, 1)}</td><td>${fmt(m.all.dur, 1)}</td><td class="${hot(m.all.takenPct)}">${Math.round(m.all.takenPct)}%</td><td class="${m.losses ? 'no' : ''}">${m.losses}</td></tr>`; }).join('')}</table>`
@@ -373,7 +399,7 @@ function renderBenchOut(out: HTMLElement) {
 }
 
 // ---------- config editor ----------
-const GROUPS = ['HERO', 'STAT_CURVE', 'RESIST_MULT', 'WEAPONS', 'COMBOS', 'MOBS', 'ORBS', 'BREAKABLES', 'GACHA', 'DEPTH', 'SHARPEN', 'ZONE_TIER', 'PETS'];
+const GROUPS = ['HERO', 'STAT_CURVE', 'RESIST_MULT', 'WEAPONS', 'STAVES', 'COMBOS', 'MOBS', 'ORBS', 'BREAKABLES', 'GACHA', 'DEPTH', 'SHARPEN', 'ZONE_TIER', 'PETS', 'ATTACK_HIT'];
 const SKIP = /^(color|css|tint|bolt|scale|model|icon|anim|swing|knock|arc|rangeAdd|range|shape)$/;
 interface Leaf { path: string; def: number }
 const LEAVES: Record<string, Leaf[]> = {};

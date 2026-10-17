@@ -751,6 +751,8 @@ export interface BotEvent {
   t: number; dur: number; unit: string; def: string; x: number; z: number; res: 'kill' | 'death' | 'break' | 'rest'; cls: HeroClass;
   /** Orbs picked up (counts, × ORBS value = points), the mini-boss's direct stat points, the item dropped, a gacha pull. */
   gain?: Partial<Record<OrbKind, number>>; bonus?: Partial<Record<OrbKind, number>>; item?: string; pull?: boolean;
+  /** A pack fight: the other members' unit ids (`def` is then the pack key, ids joined by '+'). */
+  pack?: string[];
   /** HP lost, share of max. */
   taken?: number;
 }
@@ -1019,10 +1021,11 @@ function run(seed: number): RunOut {
       for (const x of group) n.set(x.def, (n.get(x.def) ?? 0) + 1);
       const key = [...n].sort(([a], [b]) => (a < b ? -1 : 1)).map(([d, k]) => (k > 1 ? `${d}×${k}` : d)).join('+');
       const first = !out.fights.some((f) => f.def === key && f.depth === u.depth);
+      const packInfo = group.length > 1 ? { def: key, pack: group.slice(1).map((m) => m.id) } : {};
       out.fights.push({ def: key, depth: u.depth, t, first, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: st.maxHp, win: r.win, cls: h.cls });
       out.classTime[h.cls] = (out.classTime[h.cls] ?? 0) + r.dur;
       if (!r.win) {
-        event(u, t0, 'death', { taken: r.taken / st.maxHp });
+        event(u, t0, 'death', { taken: r.taken / st.maxHp, ...packInfo });
         out.deaths++;
         t += 5;
         h.spot = camp;
@@ -1051,6 +1054,7 @@ function run(seed: number): RunOut {
       }
       event(u, t0, 'kill', {
         gain, bonus: Object.keys(bonus).length ? bonus : undefined, item: items.join(', ') || undefined, pull: pulled || undefined, taken: r.taken / st.maxHp,
+        ...packInfo,
       });
       const d = MOBS[group.find((m) => MOBS[m.def].boss)?.def ?? u.def];
       if (d.boss) {
@@ -1094,10 +1098,16 @@ export const TRAIL = { camp: sCamp, fort: sFort, gate: GATE.s, arena: sArena };
 export interface MapUnit {
   id: string; def: string; name: string; kind: 'mob' | 'prop'; zone: ZoneId; x: number; z: number; approx?: boolean;
   rank: string; depth: number; hp: number; dmg: number; charges: number[];
+  /** Social pack id: fought together with the other units of it. */
+  pack?: string;
   /** Orbs a kill drops (counts; × ORBS value = points), the mini-boss's stat points, the item, the gacha pull chance. */
   reward: Partial<Record<OrbKind, number>>; bonus?: Partial<Record<OrbKind, number>>; drop?: string; token: number;
 }
-export interface SimMap { trail: [number, number][]; marks: { id: string; label: string; x: number; z: number }[]; units: MapUnit[] }
+export interface SimMap {
+  trail: [number, number][]; marks: { id: string; label: string; x: number; z: number }[]; units: MapUnit[];
+  /** Roads of the outer locations (LAND_TRAILS). */
+  roads: [number, number][][];
+}
 
 /** The map the bot plays on, with the current config (call after applySet to see edits). */
 export function simMap(): SimMap {
@@ -1107,16 +1117,22 @@ export function simMap(): SimMap {
   const marks = [
     { id: 'camp', label: 'Лагерь', x: SPAWN.x, z: SPAWN.z }, { id: 'fort', label: 'Форт', x: FORT.x, z: FORT.z },
     { id: 'gate', label: 'Ворота кладбища', x: gp.x, z: gp.z }, { id: 'arena', label: 'Арена', x: ARENA.x, z: ARENA.z },
+    // the other passages: «→ location» on the side it leads to; the boss whose first kill opens it is on the units' tooltip
+    ...PASSES.map((p) => {
+      const g = GATES.find((x) => x.id === p.id)!;
+      const name = (z: ZoneId) => CONFIG.ZONES.find((d) => d.id === z)?.name ?? z;
+      return { id: `gate:${g.id}`, label: `${name(g.from)} ↔ ${name(g.to)}`, x: g.x, z: g.z };
+    }),
   ];
   const units = buildUnits().map((u): MapUnit => {
     const p = posOf(u.spot);
-    const base = { id: u.id, def: u.def, kind: u.kind, zone: u.zone, x: p.x, z: p.z, approx: u.approx || u.id.startsWith('tree:') || undefined, depth: u.depth, charges: u.charges, reward: rewardOf(u) };
+    const base = { id: u.id, def: u.def, kind: u.kind, zone: u.zone, x: p.x, z: p.z, approx: u.approx || u.id.startsWith('tree:') || undefined, pack: u.pack, depth: u.depth, charges: u.charges, reward: rewardOf(u) };
     if (u.kind === 'prop') return { ...base, name: u.def, rank: 'prop', hp: BREAKABLES[u.def].hp, dmg: 0, token: 0 };
     const d = MOBS[u.def];
     const f = foeOf(u);
     return { ...base, name: d.name, rank: mobRank(d), hp: f.hp, dmg: f.dmg, bonus: d.bonus, drop: d.drop ? wname(dropItem(d.drop)) : undefined, token: tokenChance(u) };
   });
-  return { trail, marks, units };
+  return { trail, marks, units, roads: LAND_TRAILS.map((l) => l.map(([x, z]) => [x, z] as [number, number])) };
 }
 
 /** `opts.runs` runs from seeds seed, seed+1, …; `onRun` after each (progress). */
