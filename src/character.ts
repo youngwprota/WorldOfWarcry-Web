@@ -70,6 +70,30 @@ const shadowMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: tru
 /** Mage orb rest point in the character's root space (right shoulder, a bit above it: the staff is in the left hand). */
 const ORB_AT = new THREE.Vector3(-0.45, 1.9, -0.1);
 
+/**
+ * Fixed generous bounds for a skinned mesh (like Unity's fixed SkinnedMeshRenderer Bounds): three would otherwise
+ * cache the sphere of whatever pose it meets first. Call with up-to-date world matrices.
+ */
+export function fixSkinBounds(m: THREE.SkinnedMesh) {
+  m.computeBoundingSphere();
+  const s = m.boundingSphere!;
+  s.radius = s.radius * 1.5 + 0.6 / (m.matrixWorld.getMaxScaleOnAxis() || 1);
+  m.frustumCulled = true;
+}
+
+/** Radius (m, at root scale 1) of a sphere around the root's origin that holds all the model's skinned meshes. */
+export function skinReach(model: THREE.Object3D) {
+  let r = 0;
+  model.traverse((o) => {
+    const m = o as THREE.SkinnedMesh;
+    if (!m.isSkinnedMesh || !m.boundingSphere) return;
+    const c = m.boundingSphere.center;
+    r = Math.max(r, wReach.copy(c).applyMatrix4(m.matrixWorld).length() + m.boundingSphere.radius * m.matrixWorld.getMaxScaleOnAxis());
+  });
+  return r;
+}
+const wReach = new THREE.Vector3();
+
 export function blobShadow(size: number): THREE.Mesh {
   const m = new THREE.Mesh(shadowGeo, shadowMat);
   m.scale.setScalar(size);
@@ -124,6 +148,11 @@ export class Character {
   private holdT = -1;
   private fullBody = false;
   dead = false;
+  /** Set by the game each frame: outside the camera view. A calm mob then skips the mixer and catches up on return. */
+  offscreen = false;
+  private lag = 0;
+  /** Radius of a sphere around the root origin that holds the whole body (for view tests). */
+  readonly cullR: number;
   facing = 0; // yaw, radians
   walkRate = 1;
   /** Ground speed (m/s) of the walk clip at walkRate 1. */
@@ -141,12 +170,13 @@ export class Character {
     this.model.scale.multiplyScalar(scale);
     this.root.add(this.model);
     this.root.add(blobShadow(1.3 * scale));
+    this.model.updateMatrixWorld(true);
     // Per-instance materials so hit flashes do not leak to other characters.
     const cache = new Map<THREE.Material, THREE.MeshLambertMaterial>();
     this.model.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
-      m.frustumCulled = false; // bind-pose bounds are unreliable after scaling/animation
+      if ((m as THREE.SkinnedMesh).isSkinnedMesh) fixSkinBounds(m as THREE.SkinnedMesh);
       m.castShadow = true;
       const src = m.material as THREE.MeshLambertMaterial;
       let c = cache.get(src);
@@ -165,6 +195,7 @@ export class Character {
       }
     });
     // a bow is held in the left hand (like the hero's), the right arm draws the string with the attack clip
+    this.cullR = skinReach(this.model);
     if (weaponName) this.setWeapon(weaponName, null, weaponName.startsWith('bow_'));
 
     this.swinger = new Swinger(this.model);
@@ -362,7 +393,8 @@ export class Character {
         sm.removeFromParent();
         parent.add(sm);
         sm.bind(skel, bind);
-        sm.frustumCulled = false;
+        this.model.updateMatrixWorld(true);
+        fixSkinBounds(sm);
         sm.castShadow = true;
         sm.material = Array.isArray(sm.material) ? sm.material.map(copy) : copy(sm.material);
       }
@@ -430,6 +462,9 @@ export class Character {
   /** The death clip has played to its end (it clamps on the last frame). */
   get deathDone() { return this.dead && !this.death.isRunning(); }
 
+  /** Mixer progress matters now (a swing, a held wind-up, the death clip), so it must not be skipped offscreen. */
+  private get busy() { return this.dead || this.atkTimer > 0 || this.atkW > 0 || this.hitW > 0 || this.holdT >= 0; }
+
   die() {
     this.dead = true;
     this.mixer.stopAllAction();
@@ -466,6 +501,9 @@ export class Character {
       if (this.orbCore) this.orbCore.rotation.y += dt * 1.5;
     }
     if (!animate) return;
+    if (this.offscreen && !this.busy) { this.lag += dt; return; }
+    dt += this.lag;
+    this.lag = 0;
     if (!this.dead) {
       const target = moving ? 1 : 0;
       this.move += (target - this.move) * Math.min(1, dt * 10);
@@ -525,6 +563,8 @@ export class Character {
     this.mixer.stopAllAction();
     this.root.removeFromParent();
     for (const m of this.materials) m.dispose();
+    // the skeletons are per instance (bone texture); the geometry and textures are shared
+    this.model.traverse((o) => (o as THREE.SkinnedMesh).skeleton?.dispose());
   }
 
   setTint(c: THREE.ColorRepresentation, opacity = 1) {

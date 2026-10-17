@@ -80,6 +80,14 @@ export function makeBreakable(kind: string): THREE.Object3D {
   return g;
 }
 
+/** World.collide grid: cell size and how far past an obstacle's edge a unit centre may start and still find it (unit radius + room for chained pushes). */
+const GRID_CELL = 8;
+const GRID_PAD = 12;
+
+/** Scratch for World.envAt (runs every frame). */
+const ENV_W: number[] = new Array(ZONES.length).fill(0);
+const ENV_TMP = new THREE.Color();
+
 /** An instanced copy: position, scale, turn, height override, tint and `k` = tint brightness (> 1 lightens a dark texture). */
 interface Inst { x: number; z: number; s: number; r?: number; y?: number; tint?: number; k?: number }
 
@@ -274,28 +282,48 @@ export class World {
     this.group.add(this.mist.group);
     this.fog = new FogOfWar(this.time);
     this.group.add(this.fog.mesh);
+    this.buildGrid();
+  }
+
+  /** World.collide's lookup: grid cell -> obstacles (in list order) whose circle, grown by GRID_PAD, touches the cell. Built once the level is complete. */
+  private grid = new Map<number, Obstacle[]>();
+  private buildGrid() {
+    for (const o of this.obstacles) {
+      const e = o.r + GRID_PAD;
+      const x1 = Math.floor((o.x + e) / GRID_CELL);
+      const z1 = Math.floor((o.z + e) / GRID_CELL);
+      for (let ix = Math.floor((o.x - e) / GRID_CELL); ix <= x1; ix++) {
+        for (let iz = Math.floor((o.z - e) / GRID_CELL); iz <= z1; iz++) {
+          const key = ix * 4096 + iz;
+          const list = this.grid.get(key);
+          if (list) list.push(o); else this.grid.set(key, [o]);
+        }
+      }
+    }
   }
 
   zoneAt(x: number, z: number) { return zoneAt(x, z); }
 
   /** Environment colours (and fog density) blended across zone borders. */
   envAt(x: number, z: number, out: { sky: THREE.Color; fog: THREE.Color; hemiSky: THREE.Color; hemiGround: THREE.Color; density: number; light: number }) {
-    const w = zoneWeights(x, z);
-    const sum = w.reduce((a, b) => a + b, 0) || 1;
-    const tmp = new THREE.Color();
+    const w = zoneWeights(x, z, ENV_W);
+    let sum = 0;
+    for (let i = 0; i < w.length; i++) sum += w[i];
+    if (!sum) sum = 1;
     out.sky.setRGB(0, 0, 0); out.fog.setRGB(0, 0, 0); out.hemiSky.setRGB(0, 0, 0); out.hemiGround.setRGB(0, 0, 0);
     out.density = 0;
     out.light = 0;
-    ZONES.forEach((zd, i) => {
+    for (let i = 0; i < ZONES.length; i++) {
+      const zd = ZONES[i];
       const k = w[i] / sum;
-      if (k <= 0) return;
-      out.sky.add(tmp.set(zd.sky).multiplyScalar(k));
-      out.fog.add(tmp.set(zd.fog).multiplyScalar(k));
-      out.hemiSky.add(tmp.set(zd.hemi[0]).multiplyScalar(k));
-      out.hemiGround.add(tmp.set(zd.hemi[1]).multiplyScalar(k));
+      if (k <= 0) continue;
+      out.sky.add(ENV_TMP.set(zd.sky).multiplyScalar(k));
+      out.fog.add(ENV_TMP.set(zd.fog).multiplyScalar(k));
+      out.hemiSky.add(ENV_TMP.set(zd.hemi[0]).multiplyScalar(k));
+      out.hemiGround.add(ENV_TMP.set(zd.hemi[1]).multiplyScalar(k));
       out.density += zd.fogDensity * k;
       out.light += (ZONE_LIGHT[zd.id] ?? 1) * k;
-    });
+    }
   }
 
   // ---------- placement helpers ----------
@@ -326,7 +354,8 @@ export class World {
   free(x: number, z: number, pad = 0.6, avoidPath = false) {
     if (!walkable(x, z, pad)) return false;
     if (avoidPath && pathDist(x, z) < PATH_W * 0.5 + 1.6) return false;
-    for (const o of [...this.obstacles, ...this.reserved]) if ((x - o.x) ** 2 + (z - o.z) ** 2 < (o.r + pad) ** 2) return false;
+    for (const o of this.obstacles) if ((x - o.x) ** 2 + (z - o.z) ** 2 < (o.r + pad) ** 2) return false;
+    for (const o of this.reserved) if ((x - o.x) ** 2 + (z - o.z) ** 2 < (o.r + pad) ** 2) return false;
     return true;
   }
 
@@ -403,23 +432,23 @@ export class World {
   private scatterBand(name: string, items: Inst[], shadow: boolean, { snow, ...lookOver }: ScatterLook) {
     if (!items.length) return;
     if (!assets.has(name)) { console.warn('level model not loaded:', name); return; }
-    const src = assets.clone(name);
-    src.updateMatrixWorld(true);
+    const parts = this.scatterParts(name);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
     const col = new THREE.Color();
     const look = { ...lookOf(name), ...lookOver };
+    const lookKey = `${snow ? 1 : 0}|${look.sway ?? 0}|${look.base ?? 1}|${look.recolor ? 1 : 0}`;
     const sz = this.size(name);
     const k = FIXED_SIZE.has(name) ? 1 : ENV;
     for (const t of items) this.groundUnder(name, t.x, t.z, sz.x * t.s * k, sz.y * t.s * k, sz.z * t.s * k);
-    src.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      const geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
-      const mat = mesh.material as THREE.Material | THREE.Material[];
-      const patch = (x: THREE.Material) => scenery(snow ? snowMat(x) : x, look);
-      const im = new THREE.InstancedMesh(geo, Array.isArray(mat) ? mat.map(patch) : patch(mat), items.length);
+    for (const part of parts) {
+      let mat = part.patched.get(lookKey);
+      if (!mat) {
+        const patch = (x: THREE.Material) => scenery(snow ? snowMat(x) : x, look);
+        part.patched.set(lookKey, (mat = Array.isArray(part.mat) ? part.mat.map(patch) : patch(part.mat)));
+      }
+      const im = new THREE.InstancedMesh(part.geo, mat, items.length);
       items.forEach((t, i) => {
         q.setFromAxisAngle(up, t.r ?? 0);
         m.compose(new THREE.Vector3(t.x, t.y ?? heightAt(t.x, t.z), t.z), q, new THREE.Vector3(t.s * k, t.s * k, t.s * k));
@@ -430,7 +459,24 @@ export class World {
       im.receiveShadow = true;
       im.computeBoundingSphere();
       this.group.add(im);
-    });
+    }
+  }
+
+  /** Baked submeshes of a model, shared by every band (geometry in model space) with their patched materials per look. */
+  private scatterCache = new Map<string, { geo: THREE.BufferGeometry; mat: THREE.Material | THREE.Material[]; patched: Map<string, THREE.Material | THREE.Material[]> }[]>();
+  private scatterParts(name: string) {
+    let parts = this.scatterCache.get(name);
+    if (!parts) {
+      parts = [];
+      const src = assets.clone(name);
+      src.updateMatrixWorld(true);
+      src.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (mesh.isMesh) parts!.push({ geo: mesh.geometry.clone().applyMatrix4(mesh.matrixWorld), mat: mesh.material, patched: new Map() });
+      });
+      this.scatterCache.set(name, parts);
+    }
+    return parts;
   }
 
   /** Cheap low-poly pines for the rim (~30 triangles each vs ~2000 for the elf trees). */
@@ -2951,7 +2997,8 @@ export class World {
         p.z = o.z + (dz / d) * rr;
       }
     };
-    for (const o of this.obstacles) push(o);
+    const cell = this.grid.get(Math.floor(p.x / GRID_CELL) * 4096 + Math.floor(p.z / GRID_CELL));
+    if (cell) for (let i = 0; i < cell.length; i++) push(cell[i]);
     for (const gt of this.gates) if (!gt.open) for (const o of gt.obstacles) push(o);
     const o = outside(p.x, p.z) + radius * 0.5;
     if (o > 0) {

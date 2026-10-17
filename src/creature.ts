@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { HIT_FLASH, addUnmaskedFlash, applyHitFlash } from './hitflash';
 import { assets } from './assets';
-import { blobShadow } from './character';
+import { blobShadow, fixSkinBounds, skinReach } from './character';
 import { ATTACK_HIT, type AttackAnim } from './config';
 
 /**
@@ -78,6 +78,11 @@ export class Creature {
   private atkW = 0;
   private atkTimer = 0;
   dead = false;
+  /** Set by the game each frame: outside the camera view. A calm mob then skips the mixer and catches up on return. */
+  offscreen = false;
+  private lag = 0;
+  /** Radius of a sphere around the root origin that holds the whole body (for view tests). */
+  readonly cullR: number;
   facing = 0;
   walkRate = 1;
   /** Ground speed (m/s) of the walk at walkRate 1: callers set walkRate = speed / stride so hooves don't slide. */
@@ -99,11 +104,12 @@ export class Creature {
     for (const n of hide) this.model.getObjectByName(n)!.visible = false;
     this.root.add(this.model);
     this.root.add(blobShadow(this.rig.shadow * scale));
+    this.model.updateMatrixWorld(true);
     const cache = new Map<THREE.Material, THREE.MeshStandardMaterial>();
     this.model.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
-      m.frustumCulled = false;
+      if ((m as THREE.SkinnedMesh).isSkinnedMesh) fixSkinBounds(m as THREE.SkinnedMesh);
       m.castShadow = true;
       const src = m.material as THREE.MeshStandardMaterial;
       let c = cache.get(src);
@@ -115,6 +121,7 @@ export class Creature {
       }
       m.material = c;
     });
+    this.cullR = skinReach(this.model);
 
     this.mixer = new THREE.AnimationMixer(this.model);
     const loop = (clip: THREE.AnimationClip, w: number) => {
@@ -176,6 +183,9 @@ export class Creature {
   /** The death clip has played to its end (it clamps on the last frame). */
   get deathDone() { return this.dead && !this.death.isRunning(); }
 
+  /** Mixer progress matters now (the ram's lunge and step back read the attack clip, the death clip), so it must not be skipped offscreen. */
+  private get busy() { return this.dead || this.atkTimer > 0 || this.atkW > 0 || this.atk.isRunning(); }
+
   die() {
     this.dead = true;
     this.model.position.z = 0;
@@ -201,6 +211,9 @@ export class Creature {
       applyHitFlash(this.materials, this.flashT);
     }
     if (!animate) return;
+    if (this.offscreen && !this.busy) { this.lag += dt; return; }
+    dt += this.lag;
+    this.lag = 0;
     if (!this.dead) {
       const back = this.backingOff;
       this.move += ((moving || back ? 1 : 0) - this.move) * Math.min(1, dt * 10);
@@ -224,6 +237,14 @@ export class Creature {
       this.model.position.z = this.rig.ram && this.atk.isRunning() ? lungeAt(this.atk.time) * this.scale : 0;
     }
     this.mixer.update(dt);
+  }
+
+  /** Removes the body; its materials and skeletons are its own (the geometry and textures are shared). */
+  dispose() {
+    this.mixer.stopAllAction();
+    this.root.removeFromParent();
+    for (const m of this.materials) m.dispose();
+    this.model.traverse((o) => (o as THREE.SkinnedMesh).skeleton?.dispose());
   }
 
   /** Multiplies the model's own colours by `c` (white = as authored). */

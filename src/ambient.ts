@@ -127,22 +127,26 @@ export class Ambient {
     u.uTime.value = time;
     u.uCenter.value.set(hero.x, 0, hero.z - AHEAD);
     u.uScale.value = viewH * 0.5;
-    if (this.fixed) this.w = ZONE_IDS.map((id) => (id === this.fixed ? 1 : 0));
-    else this.w = zoneWeights(hero.x, hero.z, this.w);
-    const sum = this.w.reduce((a, b) => a + b, 0) || 1;
+    const wt = this.w;
+    if (this.fixed) for (let i = 0; i < ZONE_IDS.length; i++) wt[i] = ZONE_IDS[i] === this.fixed ? 1 : 0;
+    else zoneWeights(hero.x, hero.z, wt);
+    let sum = 0;
+    for (let i = 0; i < wt.length; i++) sum += wt[i];
+    if (!sum) sum = 1;
     u.uColor.value.setRGB(0, 0, 0);
     let size = 0, rise = 0, wobble = 0, drift = 0, flicker = 0, amount = 0, glow = 0, streak = 0;
     this.storm = 0;
-    ZONE_IDS.forEach((id, i) => {
-      const k = this.w[i] / sum;
-      if (k <= 0) return;
+    for (let i = 0; i < ZONE_IDS.length; i++) {
+      const k = wt[i] / sum;
+      if (k <= 0) continue;
+      const id = ZONE_IDS[i];
       const s = STYLES[id];
       u.uColor.value.add(this.tmp.set(s.color).multiplyScalar(k));
       size += s.size * k; rise += s.rise * k; wobble += s.wobble * k; drift += s.drift * k;
       flicker += s.flicker * k; amount += s.amount * k; glow += s.glow * k;
       streak += (s.streak ?? 0) * k;
       if (id === 'dunes') this.storm = k;
-    });
+    }
     // dt clamped: a hidden tab or a pause must not throw the points far
     const dt = this.last < 0 ? 0 : Math.min(0.1, Math.max(0, time - this.last));
     this.last = time;

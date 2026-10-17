@@ -58,6 +58,13 @@ const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
 const fxA = new THREE.Vector3();
 const fxB = new THREE.Vector3();
+const camProj = new THREE.Matrix4();
+const camFrustum = new THREE.Frustum();
+const cullSphere = new THREE.Sphere();
+/** Extra metres around a mob's body when testing it against the camera view: the matrices are from the previous frame. */
+const CULL_PAD = 1.5;
+const sparMates: Mob[] = [];
+const isSparring = (o: Mob | null | undefined) => !!o && o.alive && o.state === 'idle' && o.behavior.idle === 'spar';
 /** RARITY colours as numbers (particles). */
 const RARITY_HEX = RARITY.map((r) => new THREE.Color(r.color).getHex());
 /** Dust kicked up by running, by location (Game.footDust). */
@@ -1563,6 +1570,12 @@ export class Game {
   private updateMobs(dt: number) {
     const hp = this.hero.position;
     const heroInCamp = inCamp(hp.x, hp.z);
+    camProj.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    camFrustum.setFromProjectionMatrix(camProj);
+    // a shadow falls away from the sun: ground metres per metre of height
+    const sunY = this.sun.position.y - this.sun.target.position.y || 1;
+    const shadowX = (this.sun.target.position.x - this.sun.position.x) / sunY;
+    const shadowZ = (this.sun.target.position.z - this.sun.position.z) / sunY;
     let removed = false;
     for (const m of this.mobs) {
       if (m.removed) { removed = true; continue; }
@@ -1746,6 +1759,18 @@ export class Game {
         m.pos.x = ISLAND.campX + dx * k;
         m.pos.z = ISLAND.campZ + dz * k;
       }
+      if (m.ch instanceof Character || m.ch instanceof Creature) {
+        // Unity's "cull update transforms": a calm mob out of view (its shadow included) skips the mixer and catches up on return
+        const r = m.ch.cullR * m.ch.root.scale.x;
+        cullSphere.set(m.pos, r + CULL_PAD);
+        let seen = camFrustum.intersectsSphere(cullSphere);
+        if (!seen) {
+          cullSphere.center.x += shadowX * r * 2;
+          cullSphere.center.z += shadowZ * r * 2;
+          seen = camFrustum.intersectsSphere(cullSphere);
+        }
+        m.ch.offscreen = !seen;
+      }
       m.ch.update(dt, moving, dHero < 34 && this.time - m.hurtAt >= HIT_FREEZE && m.frozen <= 0);
     }
     if (removed) {
@@ -1762,7 +1787,8 @@ export class Game {
   }
 
   private removeMob(m: Mob) {
-    this.scene.remove(m.ch.root);
+    if (m.ch instanceof Character || m.ch instanceof Creature) m.ch.dispose();
+    else this.scene.remove(m.ch.root);
     m.uiEl.remove();
     m.respawnEl.remove();
     m.state = 'dead';
@@ -1802,21 +1828,26 @@ export class Game {
    */
   private sparTick(m: Mob, dt: number, dSpawn: number) {
     const units = m.spawner?.units;
-    const sparring = (o: Mob | undefined) => !!o && o.alive && o.state === 'idle' && o.behavior.idle === 'spar';
     let foe: Mob | undefined;
     if (units) {
       const centre = units[0];
       if (m === centre) {
         m.sparPickT -= dt;
-        if (m.sparPickT <= 0 || !sparring(m.sparFoe ?? undefined)) {
+        if (m.sparPickT <= 0 || !isSparring(m.sparFoe)) {
           m.sparPickT = 3 + Math.random() * 2;
           // the next living mate after the current foe, in slot order
-          const mates = units.filter((u): u is Mob => u instanceof Mob && u !== m && sparring(u));
-          const i = m.sparFoe ? mates.indexOf(m.sparFoe) : -1;
-          m.sparFoe = mates.length ? mates[(i + 1) % mates.length] : null;
+          let n = 0;
+          let after = -1;
+          for (const u of units) {
+            if (!(u instanceof Mob) || u === m || !isSparring(u)) continue;
+            if (u === m.sparFoe) after = n;
+            sparMates[n++] = u;
+          }
+          m.sparFoe = n ? sparMates[(after + 1) % n] : null;
+          sparMates.length = 0;
         }
         foe = m.sparFoe ?? undefined;
-      } else if (centre instanceof Mob && sparring(centre)) foe = centre;
+      } else if (centre instanceof Mob && isSparring(centre)) foe = centre;
     }
     if (foe !== m.sparFoe) m.sparFoe = foe ?? null;
     let moving = false;
