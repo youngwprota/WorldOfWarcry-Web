@@ -277,6 +277,9 @@ export class Forge3D {
     if (!this.paused) this.resume();
   }
 
+  /** Disposed: the props finishing loading after that must not start the loop (it would run forever). */
+  private dead = false;
+
   /** Stop rendering while the banner covers the scene. */
   pause() {
     this.paused = true;
@@ -286,7 +289,7 @@ export class Forge3D {
 
   resume() {
     this.paused = false;
-    if (!this.built || this.raf) return;
+    if (!this.built || this.raf || this.dead) return;
     this.last = performance.now();
     this.loop();
   }
@@ -596,6 +599,7 @@ export class Forge3D {
   }
 
   dispose() {
+    this.dead = true;
     cancelAnimationFrame(this.raf);
     for (const x of this.own) x.dispose();
     this.jfx?.dispose();

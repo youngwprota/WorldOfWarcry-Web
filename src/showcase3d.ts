@@ -85,6 +85,8 @@ export class Showcase3D {
   private back!: THREE.Mesh;
   private backMat!: THREE.ShaderMaterial;
   private raf = 0;
+  /** Disposed: a model that finishes loading after that must not start the loop (it would run forever). */
+  private dead = false;
   private t0 = performance.now();
 
   /** Resolves false when `item` has no showcase model (not a jewel / gloves, or it failed to load): show its icon instead. */
@@ -101,7 +103,11 @@ export class Showcase3D {
     }
     this.jfx = new JewelFx(this.renderer, this.ptScale);
     const name = showcaseModel(item);
-    this.ready = name ? assets.jewel(name).then(() => { this.build(item, name); return true; }, () => false) : Promise.resolve(false);
+    this.ready = name ? assets.jewel(name).then(() => {
+      if (this.dead) return false;
+      this.build(item, name);
+      return true;
+    }, () => false) : Promise.resolve(false);
   }
 
   private mine<T extends THREE.BufferGeometry | THREE.Material>(x: T) { this.own.push(x); return x; }
@@ -197,6 +203,7 @@ export class Showcase3D {
   }
 
   dispose() {
+    this.dead = true;
     cancelAnimationFrame(this.raf);
     for (const x of this.own) x.dispose();
     this.jfx.dispose();
