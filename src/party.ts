@@ -42,8 +42,7 @@ export interface ClassDef {
 export const CLASSES: Record<HeroClass, ClassDef> = {
   warrior: {
     name: 'Воин', icon: 'cls_warrior', color: ['#ff7a6a', '#c0352c'], key: 'Digit1',
-    // all three shields: each has its role (docs/features/gacha-gear/concept.md), the gacha gives any of them
-    weapons: ['sword', 'axe', 'hammer'], off: ['shield_tower', 'shield_buckler', 'shield_spiked'], offName: 'Щит',
+    weapons: ['sword', 'axe', 'hammer'], off: ['shield_spiked'], offName: 'Щит',
     kit: { hand: 'sword', left: 'shield_spiked', bag: ['axe', 'hammer'] },
   },
   hunter: {

@@ -330,7 +330,7 @@ export const dropIconId = (d: ItemDrop) => (d.kind !== 'weapon' ? ARMOR[d.def].s
 
 /** Old saves stored bare {def, rarity, sharpen} weapons. Items taken out of the game become the kept one of their slot. */
 const RENAMED: Record<string, string> = {
-  nagamaki: 'polearm', shield: 'shield_tower',
+  nagamaki: 'polearm', shield: 'shield_spiked', shield_tower: 'shield_spiked', shield_buckler: 'shield_spiked',
   ring_power: 'ring_swift', amulet_life: 'amulet_spring',
 };
 
