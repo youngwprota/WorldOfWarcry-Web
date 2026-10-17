@@ -4,7 +4,7 @@
 import * as CONFIG from './config';
 import {
   ATTACK_HIT, BREAKABLES, CEMETERY_BOARS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
-  CEMETERY_AREAS, DUNES_SPAWNERS, GROVE_SPAWNERS, HILLS_BANNERS, HILLS_EXTRA, HILLS_LIONS, HILLS_PACKS, HILLS_SNAGS, LAND_ELITES, MINI_PAIR_OF, PEAKS_SPAWNERS,
+  CEMETERY_AREAS, CEMETERY_PACKS, DUNES_SPAWNERS, GROVE_SPAWNERS, HILLS_BANNERS, HILLS_EXTRA, HILLS_LIONS, HILLS_PACKS, HILLS_SNAGS, LAND_ELITES, MINI_PAIR_OF, PEAKS_SPAWNERS,
   SPAWN_PRESETS, SWAMP_SPAWNERS, PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, ZONE_FOES, ZONE_TIER, depthMul, mobImpact, packUnits, mobRank, zoneResist,
   tokenChance as zoneTokenChance,
   type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
@@ -417,6 +417,12 @@ function buildUnits(): Unit[] {
     const spot = zone === 'forest' ? { s: sFort, off: 0 } : zone === 'cemetery' || !land ? { s: sArena, off: 0 } : landSpot(land[0], land[1], zone);
     us.push({ id: d.id, kind: 'mob', def: d.id, zone, spot, depth: 0, charges: [d.respawn], n: 0, respawnAt: 0 });
   }
+  // social packs of the forest and the cemetery (World.addPack / joinPack): the guard pairs, the boars, the cemetery trios
+  const join = (pack: string, ids: string[]) => { for (const u of us) if (ids.includes(u.id)) u.pack = pack; };
+  join('forest:boss_guard', ['bguard:0', 'bguard:1']);
+  join('forest:gate_guard', ['gguard:0', 'gguard:1']);
+  join('cemetery:boars', us.filter((u) => u.id.startsWith('cboars:')).map((u) => u.id));
+  CEMETERY_PACKS.forEach((ids, k) => join(`cemetery:pack:${k}`, ids.map((i) => `cemetery:${i}`)));
   // Game.zoneDef: in a location with an `alt` profile every other mob (in spawn order) has it
   const altN: Partial<Record<ZoneId, number>> = {};
   for (const u of us) {
@@ -452,6 +458,14 @@ function zoneDef(def: MobDef, zone: ZoneId, alt = false): MobDef {
   const z = def.boss?.zone ?? zone;
   return { ...def, resist: zoneResist(z, def.boss ? 'boss' : alt && ZONE_FOES[z]?.alt ? 'alt' : 'mob') };
 }
+/** Second boss a kit spawns into the fight (src/bosses BOSS_PARTNERS, rebuilt here without three): the Spring sister. */
+function partnersOf(u: Unit): Foe[] {
+  if (u.def !== 'elf_priestess') return [];
+  const { boss: _b, ...elf } = MOBS.elf_priestess;
+  const tier = ZONE_TIER[u.zone] ?? 1;
+  const def: MobDef = { ...elf, id: 'elf_priestess_spring', name: 'Весенняя сестра', resist: zoneResist(u.zone, 'boss') };
+  return [{ def, hp: Math.round(def.hp * tier), dmg: def.dmg * tier }];
+}
 /** The unit's numbers as Game.addMob gives them: zone resists, depth (plain mobs only), ZONE_TIER on HP and damage. */
 function foeOf(u: Unit): Foe {
   const d = zoneDef(MOBS[u.def], u.zone, u.alt);
@@ -461,23 +475,25 @@ function foeOf(u: Unit): Foe {
 }
 
 /**
- * One duel. `mean`: no dice (rolls at their expected value, slams hit for their expected share) — the bot's
- * quick estimate. Weapon mechanics are modelled for a single target: crowd effects are left out.
+ * One fight against a foe or a social pack (all of them strike, the hero downs them one by one: plain mobs first,
+ * the weakest first, a boss last). `mean`: no dice (rolls at their expected value, slams hit for their expected share)
+ * — the bot's quick estimate. Weapon mechanics hit the current target only: crowd effects are left out.
  */
-function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
+function fight(h: Hero, foes: Foe | Foe[], mean = false, limit = 400): FightOut {
   const st = stats(h);
-  const d = foe.def;
-  const boss = d.boss;
-  const rank = mobRank(d);
+  const list = (Array.isArray(foes) ? [...foes] : [foes]).sort((a, b) => (a.def.boss ? 1 : 0) - (b.def.boss ? 1 : 0) || a.hp - b.hp);
+  const bossFoe = list.find((f) => f.def.boss);
+  const boss = bossFoe?.def.boss;
   const roll = () => (mean ? 1 : 0.9 + rand() * 0.2);
   const chance = (p: number) => (mean ? false : rand() < p);
   let hp = h.hp;
-  let mhp = foe.hp;
-  const mmax = foe.hp;
-  let stun = 0;
+  const mhp = list.map((f) => f.hp);
+  const total = mhp.reduce((a, b) => a + b, 0);
+  const stun = list.map(() => 0);
+  const matk = list.map((f) => { const period = 1 / f.def.aps; return mobImpact(ATTACK_HIT[f.def.creature ? `${f.def.model.human[0]}:attack` : f.def.anim] ?? 0.6, period); });
+  /** The hero's target: the first one still standing. */
+  let cur = 0;
   let lastCounter = -99;
-  const period = 1 / d.aps;
-  let matk = mobImpact(ATTACK_HIT[d.creature ? `${d.model.human[0]}:attack` : d.anim] ?? 0.6, period);
   let special = boss ? boss.cd : Infinity;
   let phase2 = false;
   let busy = 0; // hero dodging: no swings
@@ -485,7 +501,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const pending: [number, number][] = []; // [time, damage] of telegraphed blasts
   // hands
   const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1 }));
-  // class extras (game.ts staffHit / iceHit / throwGust / updatePet), single target: the hunter's pet bites what he
+  // class extras (game.ts staffHit / iceHit / throwGust / updatePet), on the target: the hunter's pet bites what he
   // shoots; the fire staff burns (+vulnerability), the ice staff freezes every Nth hit, the wind staff throws an orb
   const petItem = h.weapons[1] && WEAPONS[h.weapons[1].def].pet ? h.weapons[1] : null;
   const pet = petItem ? PETS[WEAPONS[petItem.def].pet!] : null;
@@ -497,18 +513,23 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const vuln = () => (burn > 0 ? 1 + B.vuln : 1);
   // crits and dodges: dice, or their expected value with `mean`
   const heroCrit = () => (mean ? critAvg(st.critPts, st.critDmgPts) : chance(st.crit) ? st.critMul : 1);
-  const foeHits = () => (mean ? 1 - dodgeChance(d.dodge) : chance(dodgeChance(d.dodge)) ? 0 : 1);
-  /** Shield in the class slot: a blow taken (slams too) may be answered by the weapon. */
-  const answer = () => {
+  const foeHits = (d: MobDef) => (mean ? 1 - dodgeChance(d.dodge) : chance(dodgeChance(d.dodge)) ? 0 : 1);
+  /** The target is down: the next one (a burn dies with its target). */
+  const next = () => { while (cur < list.length && mhp[cur] <= 0) { cur++; burn = 0; } };
+  /** Shield in the class slot: a blow taken (slams too) from foe `k` may be answered by the weapon, at the target. */
+  const answer = (k: number) => {
     const g = h.weapons[1] && WEAPONS[h.weapons[1].def].guard;
     const weapon = h.weapons[0];
-    if (g && weapon && t - lastCounter >= g.cd && (mean ? true : chance(g.counter[rank]))) {
+    const rank = mobRank(list[k].def);
+    if (cur < list.length && g && weapon && t - lastCounter >= g.cd && (mean ? true : chance(g.counter[rank]))) {
       lastCounter = t;
       if (mean) hit(weapon, g.counter[rank]);
       else strike(weapon);
     }
   };
-  const hurt = (raw: number) => {
+  /** A blow of foe `k`. */
+  const hurt = (raw: number, k: number) => {
+    const d = list[k].def;
     // the hero's dodge works on any blow, boss specials too
     if (mean) raw *= (1 - st.dodge) * critAvg(d.crit, d.critDmg);
     else if (chance(st.dodge)) return;
@@ -518,35 +539,42 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     hp -= dmg;
     // spiked shield: a share of the blow goes back
     const reflect = h.weapons[1] && WEAPONS[h.weapons[1].def].guard?.reflect;
-    if (reflect) mhp -= dmg * reflect;
+    if (reflect) mhp[k] -= dmg * reflect;
   };
   const hit = (it: Item, mult: number) => {
+    if (cur >= list.length) return 0;
+    const d = list[cur].def;
     const w = WEAPONS[it.def];
     const r = RESIST_MULT[d.resist[w.type] ?? 'normal'];
-    const dmg = weaponDamage(it, st.power, st.powerMul) * heroCrit() * foeHits() * r * mult * roll() * vuln();
-    mhp -= dmg;
+    const dmg = weaponDamage(it, st.power, st.powerMul) * heroCrit() * foeHits(d) * r * mult * roll() * vuln();
+    mhp[cur] -= dmg;
     hp = Math.min(st.maxHp, hp + dmg * st.leech); // ring of blood
+    // thorn trees: the damage dealt comes straight back (no armour, dodge or shield)
+    if (d.thorns) { hp -= dmg * d.thorns; taken += dmg * d.thorns; }
     return dmg;
   };
   /** One swing of a hand (counters too). */
   const strike = (it: Item) => {
+    if (cur >= list.length) return;
+    const d = list[cur].def;
+    const rank = mobRank(d);
     const w = WEAPONS[it.def];
     const dmg = hit(it, CONFIG.attackMul(w)); // a gun's volley: its pellets that hit (PELLET_HIT)
     if (w.staff === 'fire' && dmg > 0) { if (burn <= 0) burnTick = B.tick; burn = B.time; burnDps = dmg * B.dps; }
     if (w.staff === 'ice' && dmg > 0) {
       const f = STAVES.ice.freeze;
       iceN = (iceN + 1) % f.every;
-      if (iceN === 0 && rank !== 'mini' && rank !== 'boss') stun = Math.max(stun, f.time);
+      if (iceN === 0 && rank !== 'mini' && rank !== 'boss') stun[cur] = Math.max(stun[cur], f.time);
     }
     if (w.staff === 'wind') {
       const o = STAVES.wind.orb;
       windN = (windN + 1) % o.every;
       if (windN === 0 && !d.static) gusts.push(t + o.flight); // orbs skip passive units
     }
-    if (!boss && w.stun && (mean ? false : chance(w.stun))) stun = Math.max(stun, 0.9);
+    if (!d.boss && w.stun && (mean ? false : chance(w.stun))) stun[cur] = Math.max(stun[cur], 0.9);
   };
   let t = 0;
-  for (; t < limit && hp > 0 && mhp > 0; t += DT) {
+  for (; t < limit && hp > 0 && cur < list.length; t += DT) {
     // hero hands
     if (busy > 0) busy -= DT;
     for (const hd of hands) {
@@ -560,46 +588,52 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       hd.cd = per / OPT.uptime;
       swings++;
       strike(hd.it);
+      next();
     }
     // the pet: always on the target (slams do not stop it), its item's own damage (no hero power), no crits or dodges
-    // (the bear's cleave is not modelled: the fights here are one on one)
-    if (pet && petItem) {
+    // (the bear's cleave is not modelled)
+    if (pet && petItem && cur < list.length) {
       petCd -= DT;
       pounceCd -= DT;
       if (petCd <= 0) {
         petCd += 1 / (pet.aps * st.haste);
         const leap = pet.pounce && pounceCd <= 0 ? pet.pounce.mult : 1;
         if (leap > 1) pounceCd = pet.pounce!.cd;
-        const dmg = weaponDamage(petItem) * leap * RESIST_MULT[d.resist[WEAPONS[petItem.def].type] ?? 'normal'] * roll() * vuln();
-        mhp -= dmg;
+        const dmg = weaponDamage(petItem) * leap * RESIST_MULT[list[cur].def.resist[WEAPONS[petItem.def].type] ?? 'normal'] * roll() * vuln();
+        mhp[cur] -= dmg;
         hp = Math.min(st.maxHp, hp + dmg * st.leech);
       }
     }
-    if (burn > 0) {
+    if (burn > 0 && cur < list.length) {
       burn -= DT;
       burnTick -= DT;
-      if (burnTick <= 0) { burnTick += B.tick; mhp -= burnDps * B.tick * (1 + B.vuln); }
+      if (burnTick <= 0) { burnTick += B.tick; mhp[cur] -= burnDps * B.tick * (1 + B.vuln); }
     }
     for (let i = gusts.length - 1; i >= 0; i--) {
       if (gusts[i] > t) continue;
       gusts.splice(i, 1);
       hit(h.weapons[0]!, STAVES.wind.orb.dmg);
     }
-    if (mhp <= 0) break;
-    // the foe (static units — trees — never strike back)
-    if (stun > 0) stun -= DT;
-    else if (d.aps > 0) {
-      matk -= DT;
-      if (matk <= 0) {
-        matk += period;
-        hurt(foe.dmg * (phase2 ? boss!.phase2Dmg : 1));
-        answer();
+    next();
+    if (cur >= list.length) break;
+    // the foes still standing (static units — trees — never strike back)
+    for (let k = cur; k < list.length; k++) {
+      const f = list[k];
+      if (mhp[k] <= 0) continue;
+      if (stun[k] > 0) { stun[k] -= DT; continue; }
+      if (f.def.aps <= 0) continue;
+      matk[k] -= DT;
+      if (matk[k] <= 0) {
+        matk[k] += 1 / f.def.aps;
+        hurt(f.dmg * (phase2 && f === bossFoe ? boss!.phase2Dmg : 1), k);
+        answer(k);
       }
     }
-    if (boss) {
-      if (!phase2 && mhp < mmax * boss.phase2At) phase2 = true;
+    if (boss && bossFoe) {
+      const b = list.indexOf(bossFoe);
+      if (!phase2 && mhp[b] < bossFoe.hp * boss.phase2At) phase2 = true;
       special -= DT;
-      if (special <= 0) {
+      if (special <= 0 && mhp[b] > 0) {
         special = phase2 ? boss.cdPhase2 : boss.cd;
         const chase = phase2 && rand() < boss.chance;
         const n = chase ? boss.chaseCount : 1;
@@ -611,14 +645,16 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
         const mul = pending[i][1];
         pending.splice(i, 1);
         slams++;
-        if (mean) { hurt(foe.dmg * mul * (1 - OPT.dodge)); busy = Math.max(busy, 0.8 * OPT.dodge); answer(); }
+        if (mean) { hurt(bossFoe.dmg * mul * (1 - OPT.dodge), b); busy = Math.max(busy, 0.8 * OPT.dodge); answer(b); }
         else if (rand() < OPT.dodge) busy = Math.max(busy, 0.8); // stepped out of the red circle
-        else { slamHits++; hurt(foe.dmg * mul); answer(); }
+        else { slamHits++; hurt(bossFoe.dmg * mul, b); answer(b); }
       }
     }
+    next();
     hp = Math.min(st.maxHp, hp + st.regen * DT);
   }
-  return { win: mhp <= 0 && hp > 0, dur: t, swings, dealt: mmax - Math.max(0, mhp), taken, hpEnd: Math.max(0, hp), slams, slamHits };
+  const left = mhp.reduce((a, m) => a + Math.max(0, m), 0);
+  return { win: cur >= list.length && hp > 0, dur: t, swings, dealt: total - left, taken, hpEnd: Math.max(0, hp), slams, slamHits };
 }
 
 // ---------- loot and gear ----------
@@ -784,22 +820,31 @@ function run(seed: number): RunOut {
   };
   /** Class `c` at full HP in its kit for `zone`. */
   const full = (c: HeroClass, zone: ZoneId): Hero => { const x = as(h, c, zone); x.hp = stats(x).maxHp; return x; };
-  const bossRate = (c: HeroClass, u: Unit) => { let w = 0; for (let i = 0; i < OPT.probes; i++) if (fight(full(c, u.zone), foeOf(u)).win) w++; return w / OPT.probes; };
+  // social packs: pulling one pulls the rest of it still standing
+  const packOf = new Map<string, Unit[]>();
+  for (const u of units) if (u.pack) packOf.set(u.pack, [...(packOf.get(u.pack) ?? []), u]);
+  /** What a pull of `u` fights: its pack (those standing), else it alone. */
+  const groupOf = (u: Unit) => (u.pack ? packOf.get(u.pack)!.filter((x) => x.respawnAt <= t) : [u]);
+  const foesOf = (g: Unit[]) => [...g.map(foeOf), ...g.flatMap(partnersOf)];
+  const isBoss = (g: Unit[]) => g.some((x) => !!MOBS[x.def].boss);
+  const bossRate = (c: HeroClass, g: Unit[]) => { let w = 0; for (let i = 0; i < OPT.probes; i++) if (fight(full(c, g[0].zone), foesOf(g)).win) w++; return w / OPT.probes; };
   /** The bot's estimate of the fight, by the best class for it: a boss by win rate, a mob by a safe and quick win. */
   /** Seconds to break a prop: its HP over the hero's plain-swing DPS against its material. */
   const propTime = (b: CONFIG.BreakableDef) => {
     const st = stats(h);
     return b.hp / Math.max(1, heroDps(h.weapons, st.power, st.powerMul, 1, b.resist));
   };
-  const estimate = (u: Unit) => {
-    const key = `${u.def}|${u.zone}|${u.alt ? 1 : 0}|${u.depth.toFixed(2)}`;
+  const estimate = (g: Unit[]) => {
+    const u = g[0];
+    const key = `${u.zone}|${g.map((x) => `${x.def}|${x.alt ? 1 : 0}|${x.depth.toFixed(2)}`).sort().join(',')}`;
     let e = est.get(key);
     if (!e) {
-      const boss = !!MOBS[u.def].boss;
-      const foe = foeOf(u);
+      const boss = isBoss(g);
+      const foe = foesOf(g);
+      const foeHp = foe.reduce((a, f) => a + f.hp, 0);
       // a boss: the class with the best mean fight (a win, quicker; else more of the boss's HP taken), then its
       // win rate in dice fights — the dice for that class only, they are what the sim spends its time on
-      const edge = (y: Est) => (y.win ? 2 - y.dur / 400 : y.dealt / foe.hp);
+      const edge = (y: Est) => (y.win ? 2 - y.dur / 400 : y.dealt / foeHp);
       const maxHp = new Map<HeroClass, number>();
       const safe = (y: Est) => y.win && y.taken <= 0.7 * maxHp.get(y.cls)!;
       for (const c of h.classes) {
@@ -811,7 +856,7 @@ function run(seed: number): RunOut {
             : safe(x) !== safe(e) ? safe(x) : safe(x) ? x.dur < e.dur : x.taken < e.taken;
         if (better) e = x;
       }
-      if (boss) e!.rate = bossRate(e!.cls, u);
+      if (boss) e!.rate = bossRate(e!.cls, g);
       est.set(key, e!);
     }
     return e!;
@@ -822,7 +867,7 @@ function run(seed: number): RunOut {
     for (const b of BOSSES) {
       const u = units.find((x) => x.def === b.id)!;
       // a boss behind a closed passage: no tries (and no time spent on its estimate)
-      win[b.id] = open.has(u.zone) ? estimate(u).rate ?? 0 : 0;
+      win[b.id] = open.has(u.zone) ? estimate([u]).rate ?? 0 : 0;
     }
     const kitName = (k: Kit) => k.map(wname).join('+');
     const zone: ZoneId = h.spot.zone ?? (h.spot.s > GATE.s ? 'cemetery' : 'forest');
@@ -914,14 +959,15 @@ function run(seed: number): RunOut {
       for (const u of units) {
         if (u.respawnAt > t || !open.has(u.zone)) continue;
         let dur = 0, e: Est | null = null;
+        const g = groupOf(u);
+        if (g[0] !== u) continue; // a pack is weighed once, by its first member standing
         if (u.kind === 'mob') {
-          e = estimate(u);
-          const boss = !!MOBS[u.def].boss;
-          if (boss ? (e.rate ?? 0) < bossMin : !e.win || e.taken > 0.7 * st.maxHp) continue;
+          e = estimate(g);
+          if (isBoss(g) ? (e.rate ?? 0) < bossMin : !e.win || e.taken > 0.7 * st.maxHp) continue;
           dur = e.dur;
         } else dur = propTime(BREAKABLES[u.def]);
         // the HP a fight costs has to be won back later: a tree or a crate is cheaper than its fight time alone says
-        const score = value(u) / (dist(h.spot, u.spot) / st.speed + dur + healTime(e?.taken ?? 0, u.spot) + 2);
+        const score = g.reduce((a, x) => a + value(x), 0) / (dist(h.spot, u.spot) / st.speed + dur + healTime(e?.taken ?? 0, u.spot) + 2);
         if (score > bestScore) { bestScore = score; best = u; bestEst = e; }
       }
       return { best, bestEst };
@@ -945,10 +991,11 @@ function run(seed: number): RunOut {
       continue;
     }
     const u = best;
+    const group = u.kind === 'mob' ? groupOf(u) : [u];
     // a player sends the class that does best and swaps to the weapons the location is weak to
     wear(h, bestEst?.cls ?? h.cls, u.zone);
     h.hp = Math.min(h.hp, stats(h).maxHp);
-    const boss = u.kind === 'mob' && !!MOBS[u.def].boss;
+    const boss = u.kind === 'mob' && isBoss(group);
     if (u.kind === 'mob' && (boss || h.hp - bestEst!.taken < 0.25 * st.maxHp)) heal();
     walk(u.spot);
     const t0 = t;
@@ -963,11 +1010,12 @@ function run(seed: number): RunOut {
         }
       }
     } else {
-      const foe = foeOf(u);
-      const r = fight(h, foe);
+      const r = fight(h, foesOf(group));
       t += r.dur;
-      const first = !out.fights.some((f) => f.def === u.def && f.depth === u.depth);
-      out.fights.push({ def: u.def, depth: u.depth, t, first, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: st.maxHp, win: r.win, cls: h.cls });
+      // a pack is one row of the mobs table: its members' ids joined by '+'
+      const key = group.map((x) => x.def).sort().join('+');
+      const first = !out.fights.some((f) => f.def === key && f.depth === u.depth);
+      out.fights.push({ def: key, depth: u.depth, t, first, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: st.maxHp, win: r.win, cls: h.cls });
       out.classTime[h.cls] = (out.classTime[h.cls] ?? 0) + r.dur;
       if (!r.win) {
         event(u, t0, 'death', { taken: r.taken / st.maxHp });
@@ -980,16 +1028,27 @@ function run(seed: number): RunOut {
         continue;
       }
       h.hp = r.hpEnd;
-      kills++;
-      const d = MOBS[u.def];
-      const gain = rewardOf(u);
-      giveStats(h, gain, true);
-      if (d.bonus) giveStats(h, d.bonus, false);
-      const item = d.drop ? dropItem(d.drop) : null;
-      if (item) lootItem(h, item);
-      const pulled = rand() < tokenChance(u);
-      if (pulled) { h.pulls++; out.pulls.push(t); }
-      event(u, t0, 'kill', { gain, bonus: d.bonus, item: item ? wname(item) : undefined, pull: pulled || undefined, taken: r.taken / st.maxHp });
+      const gain: Partial<Record<OrbKind, number>> = {}, bonus: Partial<Record<OrbKind, number>> = {};
+      const items: string[] = [];
+      let pulled = false;
+      for (const m of group) {
+        kills++;
+        const md = MOBS[m.def];
+        const mg = rewardOf(m);
+        giveStats(h, mg, true);
+        for (const [k, n] of Object.entries(mg) as [OrbKind, number][]) gain[k] = (gain[k] ?? 0) + n;
+        if (md.bonus) {
+          giveStats(h, md.bonus, false);
+          for (const [k, n] of Object.entries(md.bonus) as [OrbKind, number][]) bonus[k] = (bonus[k] ?? 0) + n;
+        }
+        const item = md.drop ? dropItem(md.drop) : null;
+        if (item) { lootItem(h, item); items.push(wname(item)); }
+        if (rand() < tokenChance(m)) { h.pulls++; out.pulls.push(t); pulled = true; }
+      }
+      event(u, t0, 'kill', {
+        gain, bonus: Object.keys(bonus).length ? bonus : undefined, item: items.join(', ') || undefined, pull: pulled || undefined, taken: r.taken / st.maxHp,
+      });
+      const d = MOBS[group.find((m) => MOBS[m.def].boss)?.def ?? u.def];
       if (d.boss) {
         if (!out.bossAt[d.id]) { out.bossAt[d.id] = t; out.bossDur[d.id] = r.dur; out.cycle.atBoss[d.id] = out.cycle.done / out.cycle.total; }
         // the first kill opens the boss's passages (boss.unlocks → GATES)
@@ -1003,15 +1062,17 @@ function run(seed: number): RunOut {
       h.pity = p.pity;
       lootItem(h, p.item);
     }
-    // the spawner's next charge
-    if (u.temp) { units.splice(units.indexOf(u), 1); continue; }
-    if (capped(u) && (spent.get(u) ?? 0) < u.charges.length) {
-      spent.set(u, (spent.get(u) ?? 0) + 1);
-      if (++out.cycle.done === out.cycle.total) out.cycle.doneAt = t;
+    // each spawner's next charge
+    for (const m of group) {
+      if (m.temp) { units.splice(units.indexOf(m), 1); continue; }
+      if (capped(m) && (spent.get(m) ?? 0) < m.charges.length) {
+        spent.set(m, (spent.get(m) ?? 0) + 1);
+        if (++out.cycle.done === out.cycle.total) out.cycle.doneAt = t;
+      }
+      const i = m.n % m.charges.length;
+      m.respawnAt = t + m.charges[i];
+      m.n = (i + 1) % m.charges.length;
     }
-    const i = u.n % u.charges.length;
-    u.respawnAt = t + u.charges[i];
-    u.n = (i + 1) % u.charges.length;
   }
   return out;
 }
