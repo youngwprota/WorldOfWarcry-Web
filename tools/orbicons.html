@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><title>orb icons</title></head>
+<body style="margin:0;background:#333">
+<canvas id="c" width="1536" height="1536" style="width:512px;height:512px"></canvas>
+<script type="module">
+  // Temporary icon renderer: each mage orb with its magic (src/orbfx.ts) on a transparent background, frozen in time.
+  import * as THREE from 'three';
+  import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+  import { magicOrb } from '/src/orbfx.ts';
+  const T = +(new URLSearchParams(location.search).get('t') ?? 7.3);
+  performance.now = () => T * 1000;
+  const canvas = document.getElementById('c');
+  const r = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, preserveDrawingBuffer: true, premultipliedAlpha: false });
+  r.setSize(1536, 1536, false);
+  r.outputColorSpace = THREE.SRGBColorSpace;
+  r.setClearColor(0x000000, 0);
+  const names = ['orb_glass', 'orb_vigor', 'orb_swift', 'orb_ward', 'orb_fortune', 'orb_demon'];
+  window.icons = {};
+  for (const n of names) {
+    const s = new THREE.Scene();
+    s.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.6));
+    const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(-1, 2, 2); s.add(key);
+    const g = (await new GLTFLoader().loadAsync(`/assets/models/${n}.glb`)).scene;
+    g.traverse((o) => { const m = o.material; if (m?.transparent) m.depthWrite = false; });
+    const box = new THREE.Box3().setFromObject(g);
+    magicOrb(g, n);
+    s.add(g);
+    const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
+    const half = Math.max(sz.x, sz.y, 0.3) * 0.5 * 1.32;
+    const cam = new THREE.OrthographicCamera(-half, half, half, -half, 0.01, 20);
+    cam.position.set(c.x, c.y, c.z + 5);
+    cam.lookAt(c);
+    // orthographic: the motes shader sizes by projectionMatrix[1][1] / depth; keep them like a 3/4 close-up
+    cam.projectionMatrix.elements[5] = 1 / half;
+    r.render(s, cam);
+    window.icons[n] = canvas.toDataURL('image/png');
+  }
+  window.done = true;
+</script>
+</body>
+</html>
