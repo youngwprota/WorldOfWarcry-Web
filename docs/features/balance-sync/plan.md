@@ -34,7 +34,7 @@
 ## Шаги
 - [x] 1. simcore: `mobFor(def, zone, altIdx)` — резисты зоны (alt, boss) и ZONE_TIER как в Game.addMob; бой и оценки
   берут его; BOSSES = все боссы; пины кладбища (CEMETERY_AREAS), третий страж — одиночкой.
-- [ ] 2. simcore: Spot с `zone`, `dist`/`route` между зонами через ворота; киты героя по всем зонам;
+- [x] 2. simcore: Spot с `zone`, `dist`/`route` между зонами через ворота; киты героя по всем зонам;
   открытие зон по `boss.unlocks` → GATES.
 - [ ] 3. simcore: юниты дальних земель из конфига (все списки выше, мини + пара, элитки, боссы на LAND_BOSSES).
 - [ ] 4. simcore: пачки — `fight` против списка врагов (social packs по joinPack/addPack, напарник Сестёр);

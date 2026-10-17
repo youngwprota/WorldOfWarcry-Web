@@ -13,7 +13,7 @@ import { ARMOR, armorStats, dropItem, itemClass, makeItem, sameItem, weaponDamag
 import { CLASSES, CLASS_IDS, classSlot, kitOf, weaponClass, type HeroClass } from './party';
 import { pull } from './gacha';
 import {
-  ARENA, BOSS_GUARDS, FORT, FOREST_PINS, GATE, GATE_GUARDS, GLOVES_PACKS, GLOVES_SPREAD, ISLAND, LAND_BOSSES, MAP_BOX, MID_UV, SPAWN, campToFortAt, ringSpots, inCamp,
+  ARENA, BOSS_GUARDS, FORT, FOREST_PINS, GATE, GATES, GATE_GUARDS, GLOVES_PACKS, GLOVES_SPREAD, ISLAND, LAND_BOSSES, MAP_BOX, MID_UV, SPAWN, campToFortAt, ringSpots, inCamp,
   pathAt, pathDist, progressAt, walkable, zoneIdAt,
 } from './island';
 
@@ -34,6 +34,7 @@ export interface SimOpts {
   keep: boolean; // never change weapons
   probes: number; // dice fights behind each win-rate estimate (boss tries, minute snapshots)
 }
+const ZONE_IDS = CONFIG.ZONES.map((z) => z.id);
 export const DEFAULT_OPTS: SimOpts = {
   faction: 'human', cls: 'party', weapon: '', off: '', runs: 20, until: 45 * 60, dodge: 0.6, uptime: 0.8, combo: 0.85, bossWin: 0.5, seed: 1, keep: false, probes: 12,
 };
@@ -54,7 +55,13 @@ const rand = () => { rs = (rs + 0x6d2b79f5) | 0; let t = Math.imul(rs ^ (rs >>> 
 
 // ---------- map: every spawner as a point beside the trail ----------
 /** `s`: progress along the trail, `off`: metres off it on `side` (±1); `x`/`z` when the world pins the exact spot. */
-interface Spot { s: number; off: number; side?: number; x?: number; z?: number }
+interface Spot { s: number; off: number; side?: number; x?: number; z?: number; zone?: ZoneId }
+/** The forest and the cemetery share the trail model; every outer location is its own open ground. */
+type Ground = ZoneId | 'trail';
+const groundOf = (z: ZoneId): Ground => (z === 'forest' || z === 'cemetery' ? 'trail' : z);
+const spotGround = (p: Spot): Ground => (p.zone ? groundOf(p.zone) : 'trail');
+/** A spot of an outer location: straight lines there (no trail model). */
+const landSpot = (x: number, z: number, zone: ZoneId): Spot => ({ s: 0, off: 0, x, z, zone });
 const spotAt = (x: number, z: number): Spot => { const s = progressAt(x, z); const p = pathAt(s); return { s, off: Math.hypot(x - p.x, z - p.z), x, z }; };
 const sCamp = progressAt(SPAWN.x, SPAWN.z);
 const sFort = progressAt(FORT.x, FORT.z);
@@ -98,12 +105,88 @@ function placeAlong(ranges: [number, number][], defs: SpawnerDef[], zone: ZoneId
     return spotAt(c.x, c.z);
   });
 }
+// ---------- gates: the way between locations ----------
+/** Each passage's spot on its two sides' grounds (the forest-cemetery one is inside the trail and left out). */
+const PASSES = GATES.filter((g) => groundOf(g.from) !== groundOf(g.to)).map((g) => {
+  const at = (z: ZoneId) => (groundOf(z) === 'trail' ? spotAt(g.x, g.z) : landSpot(g.x, g.z, z));
+  return { id: g.id, sides: new Map<Ground, Spot>([[groundOf(g.from), at(g.from)], [groundOf(g.to), at(g.to)]]) };
+});
+/** Same ground: the trail model or a straight line. */
+function leg(a: Spot, b: Spot) {
+  if (spotGround(a) === 'trail') return trailDist(a, b);
+  const pa = posOf(a), pb = posOf(b);
+  return Math.hypot(pa.x - pb.x, pa.z - pb.z);
+}
+/** Passages open in this run (boss.unlocks) and the shortest way between any two of them (Floyd), `via` to rebuild it. */
+let openGates = new Set<string>();
+let G: number[][] = [];
+let via: number[][] = [];
+function openGate(...ids: string[]) {
+  for (const id of ids) openGates.add(id);
+  const n = PASSES.length;
+  G = PASSES.map((a, i) => PASSES.map((b, j) => {
+    if (i === j) return 0;
+    if (!openGates.has(a.id) || !openGates.has(b.id)) return Infinity;
+    let best = Infinity;
+    for (const [g, sa] of a.sides) { const sb = b.sides.get(g); if (sb) best = Math.min(best, leg(sa, sb)); }
+    return best;
+  }));
+  via = PASSES.map(() => PASSES.map((_, j) => j));
+  for (let k = 0; k < n; k++) for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    if (G[i][k] + G[k][j] < G[i][j]) { G[i][j] = G[i][k] + G[k][j]; via[i][j] = via[i][k]; }
+  }
+}
+/** Locations the hero can walk into: the forest and both sides of every open passage. */
+function openZones() {
+  const out = new Set<ZoneId>(['forest']);
+  for (const g of GATES) if (openGates.has(g.id)) { out.add(g.from); out.add(g.to); }
+  return out;
+}
+/** Best way from `a` to `b` through open passages: [length, first passage, last passage] (−1 on the same ground). */
+function bestWay(a: Spot, b: Spot): [number, number, number] {
+  const ga = spotGround(a), gb = spotGround(b);
+  if (ga === gb) return [leg(a, b), -1, -1];
+  let best: [number, number, number] = [Infinity, -1, -1];
+  PASSES.forEach((p, i) => {
+    const pa = p.sides.get(ga);
+    if (!pa || !openGates.has(p.id)) return;
+    const da = leg(a, pa);
+    PASSES.forEach((q, j) => {
+      const qb = q.sides.get(gb);
+      if (!qb || !openGates.has(q.id)) return;
+      const d = da + G[i][j] + leg(qb, b);
+      if (d < best[0]) best = [d, i, j];
+    });
+  });
+  return best;
+}
+/** Walking distance between two spots, through the passages when they are on different grounds. */
+const dist = (a: Spot, b: Spot) => bestWay(a, b)[0];
+/** The way `dist` walks, as points. */
+function route(a: Spot, b: Spot) {
+  const [d, i0, j0] = bestWay(a, b);
+  const plain = (x: Spot, y: Spot) => (spotGround(x) === 'trail' ? trailRoute(x, y) : [posOf(x), posOf(y)]);
+  if (i0 < 0 || !isFinite(d)) return plain(a, b);
+  const seq = [i0];
+  for (let i = i0; i !== j0;) { i = via[i][j0]; seq.push(i); }
+  const pts: { x: number; z: number }[] = [];
+  let cur = a;
+  for (const k of seq) {
+    const sides = [...PASSES[k].sides.values()];
+    const enter = PASSES[k].sides.get(spotGround(cur))!;
+    pts.push(...plain(cur, enter));
+    cur = sides[0] === enter ? sides[1] : sides[0];
+  }
+  pts.push(...plain(cur, b));
+  return pts;
+}
+
 const forestRanges: [number, number][] = [[progressAt(-3, -80), sFort - 28]];
 const cemRange: [number, number][] = [[GATE.s + 12, sArena - ARENA.r - 3]];
 const graveRange: [number, number][] = [[GATE.s + 6, sArena - ARENA.r]];
 
-/** Walking distance between two spots: along the trail plus the way off it (straight line when close). */
-function dist(a: Spot, b: Spot) {
+/** Walking distance between two trail spots: along the trail plus the way off it (straight line when close). */
+function trailDist(a: Spot, b: Spot) {
   const ds = Math.abs(a.s - b.s);
   if (ds < a.off + b.off) {
     const pa = posOf(a), pb = posOf(b);
@@ -117,8 +200,8 @@ function posOf(p: Spot) {
   const o = p.off * (p.side ?? 1);
   return { x: pa.x + pa.tz * o, z: pa.z - pa.tx * o };
 }
-/** The way between two spots as `dist` walks it: straight when close, else onto the trail, along it and off again. */
-function route(a: Spot, b: Spot) {
+/** The way between two trail spots as `trailDist` walks it: straight when close, else onto the trail, along it and off again. */
+function trailRoute(a: Spot, b: Spot) {
   const ds = Math.abs(a.s - b.s);
   if (ds < a.off + b.off) return [posOf(a), posOf(b)];
   const pts = [posOf(a)];
@@ -443,17 +526,21 @@ const dpsCache = new Map<string, number>();
  * Each class: the best weapon + class item it may use (party.ts classSlot) for each location, by DPS against the
  * location's resists; armour it may wear (items.ts itemClass), the best piece per slot by defense + bonus.
  */
-function regear(h: Hero) {
-  const all = [...h.classes.flatMap((c) => [...h.kits[c].forest, ...h.kits[c].cemetery]), ...h.bag]
+function regear(h: Hero, open = openZones()) {
+  const all = [...h.classes.flatMap((c) => ZONE_IDS.flatMap((z) => h.kits[c][z])), ...h.bag]
     .filter((x, i, a): x is Item => !!x && x.kind === 'weapon' && a.indexOf(x) === i);
   h.bag = h.bag.filter((x) => x.kind !== 'weapon');
   for (const c of h.classes) {
     const mains = all.filter((x) => classSlot(c, x.def) === 0);
     const offs = all.filter((x) => classSlot(c, x.def) === 1);
-    for (const zone of ['forest', 'cemetery'] as ZoneId[]) {
+    // closed locations keep their kit until they open (regear runs again then)
+    for (const zone of ZONE_IDS) {
+      if (!open.has(zone)) continue;
       let bestDps = -1;
+      // locations with the same resist profile share the estimate
+      const prof = JSON.stringify(zoneResist(zone));
       for (const a of mains) for (const b of [null, ...offs]) {
-        const key = `${c}|${zone}|${wname(a)}|${wname(b)}`;
+        const key = `${c}|${prof}|${wname(a)}|${wname(b)}`;
         let dps = dpsCache.get(key);
         if (dps === undefined) dpsCache.set(key, (dps = dummyDps(h, c, [a, b], zone)));
         if (dps > bestDps) { bestDps = dps; h.kits[c][zone] = [a, b]; }
@@ -461,7 +548,7 @@ function regear(h: Hero) {
     }
   }
   // weapons no class picked go back to the bag (an unused class's)
-  const used = new Set(h.classes.flatMap((c) => [...h.kits[c].forest, ...h.kits[c].cemetery]));
+  const used = new Set(h.classes.flatMap((c) => ZONE_IDS.flatMap((z) => h.kits[c][z])));
   h.bag.push(...all.filter((x) => !used.has(x)));
   // armour: a new piece goes to the first class it is better for; the piece it replaces waits in the bag
   const score = (it: Item) => { const s = armorStats(it); return s.defense + (s.bonus ? s.bonus.value * VALUE[s.bonus.stat] * 2 : 0); };
@@ -540,7 +627,7 @@ function run(seed: number): RunOut {
   };
   const kits = {} as Hero['kits'];
   const gear = {} as Hero['gear'];
-  for (const c of classes) { const k = startKit(c); kits[c] = { forest: k, cemetery: k } as Record<ZoneId, Kit>; gear[c] = {}; }
+  for (const c of classes) { const k = startKit(c); kits[c] = Object.fromEntries(ZONE_IDS.map((z) => [z, k])) as Record<ZoneId, Kit>; gear[c] = {}; }
   const h: Hero = {
     faction: OPT.faction, src: {}, pct: {}, equip: gear[classes[0]], weapons: kits[classes[0]].forest, cls: classes[0], classes, kits, gear,
     hp: 0, bag, pulls: 0, pity: 0, spot: { s: sCamp, off: 0 },
@@ -554,7 +641,9 @@ function run(seed: number): RunOut {
     cycle: { total: units.filter(capped).reduce((a, u) => a + u.charges.length, 0), done: 0, atBoss: {} },
   };
   dpsCache.clear();
-  const open = new Set<ZoneId>(['forest']);
+  openGates = new Set();
+  openGate();
+  let open = openZones();
   const camp: Spot = { s: sCamp, off: 0 };
   const campHome = camp;
   let t = 0;
@@ -564,7 +653,7 @@ function run(seed: number): RunOut {
   let ver = 0, verPower = 0, verHp = 0, verGear = '';
   type Est = FightOut & { rate?: number; cls: HeroClass };
   const est = new Map<string, Est>();
-  const gearKey = () => h.classes.map((c) => [...h.kits[c].forest, ...h.kits[c].cemetery, ...Object.values(h.gear[c])].map(wname).join()).join('|');
+  const gearKey = () => h.classes.map((c) => [...ZONE_IDS.flatMap((z) => h.kits[c][z]), ...Object.values(h.gear[c])].map(wname).join()).join('|');
   const checkVer = () => {
     const st = stats(h);
     const g = gearKey();
@@ -605,9 +694,11 @@ function run(seed: number): RunOut {
       win[b.id] = Math.max(...h.classes.map((c) => bossRate(c, u)));
     }
     const kitName = (k: Kit) => k.map(wname).join('+');
+    const zone: ZoneId = h.spot.zone ?? (h.spot.s > GATE.s ? 'cemetery' : 'forest');
     out.snaps.push({
-      t, zone: h.spot.s > GATE.s ? 'cemetery' : 'forest', power: st.power, maxHp: st.maxHp, regen: st.regen, defense: st.defense,
-      weapons: h.classes.map((c) => kitName(h.kits[c].forest) + (open.has('cemetery') && kitName(h.kits[c].cemetery) !== kitName(h.kits[c].forest) ? ` / ${kitName(h.kits[c].cemetery)}` : '')).join(' · '),
+      t, zone, power: st.power, maxHp: st.maxHp, regen: st.regen, defense: st.defense,
+      // each class's kit for the location the hero is in
+      weapons: h.classes.map((c) => kitName(h.kits[c][zone])).join(' · '),
       kills, deaths: out.deaths, pulls: out.pulls.length, win, cycle: out.cycle.done / Math.max(1, out.cycle.total),
     });
   };
@@ -770,7 +861,8 @@ function run(seed: number): RunOut {
       event(u, t0, 'kill', { gain, bonus: d.bonus, item: item ? wname(item) : undefined, pull: pulled || undefined, taken: r.taken / st.maxHp });
       if (d.boss) {
         if (!out.bossAt[d.id]) { out.bossAt[d.id] = t; out.bossDur[d.id] = r.dur; out.cycle.atBoss[d.id] = out.cycle.done / out.cycle.total; }
-        open.add('cemetery');
+        // the first kill opens the boss's passages (boss.unlocks → GATES)
+        if (d.boss.unlocks.some((g) => !openGates.has(g))) { openGate(...d.boss.unlocks); open = openZones(); regear(h); }
       }
     }
     // the gacha: every pull right away
