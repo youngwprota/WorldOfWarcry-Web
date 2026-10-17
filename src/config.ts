@@ -1133,6 +1133,23 @@ export const DEPTH: Partial<Record<ZoneId, DepthDef>> = {
 };
 /** Outer lands: HP and damage multiplier of everything spawned there, doubling at each step of the map order. */
 export const ZONE_TIER: Partial<Record<ZoneId, number>> = { peaks: 2, hills: 4, grove: 8, swamp: 16, dunes: 32 };
+/**
+ * Balance knobs by location, set by the tuner (src/tuner.ts, the `<tuned>` block at the end of this file): HP and
+ * damage multipliers by rank (not bosses — they have their own MobDef numbers — nor static units), the orb rewards of
+ * every mob there, and the gacha pull rate (× GACHA.token). Game.addMob and the sim apply them on top of DEPTH and ZONE_TIER.
+ */
+export interface ZoneScale { hp: Record<'normal' | 'elite' | 'mini', number>; dmg: Record<'normal' | 'elite' | 'mini', number>; reward: number; token: number }
+const zoneScale = (): ZoneScale => ({ hp: { normal: 1, elite: 1, mini: 1 }, dmg: { normal: 1, elite: 1, mini: 1 }, reward: 1, token: 1 });
+export const ZONE_SCALE: Record<ZoneId, ZoneScale> = {
+  forest: zoneScale(), cemetery: zoneScale(), peaks: zoneScale(), hills: zoneScale(), grove: zoneScale(), swamp: zoneScale(), dunes: zoneScale(),
+};
+/** Numbers of a mob of `def` standing in `zone`: ZONE_SCALE by its rank (1 for bosses and static units). */
+export function zoneScaleOf(def: MobDef, zone: ZoneId) {
+  const z = ZONE_SCALE[zone];
+  const rank = mobRank(def);
+  const own = !def.static && rank !== 'boss';
+  return { hp: own ? z.hp[rank as 'normal'] : 1, dmg: own ? z.dmg[rank as 'normal'] : 1, reward: z.reward };
+}
 export function depthMul(zone: ZoneId, t: number) {
   const d = DEPTH[zone];
   t = d ? Math.min(1, Math.max(0, t)) : 0;
@@ -1527,7 +1544,7 @@ export const GACHA = {
   revealHold: 0.9,
 };
 /** Chance a kill of a `rank` mob from location `zone` gives a gacha pull (GACHA.token, none in GACHA.noTokens). */
-export const tokenChance = (rank: MobRank, zone: ZoneId) => (GACHA.noTokens.includes(zone) ? 0 : GACHA.token[rank]);
+export const tokenChance = (rank: MobRank, zone: ZoneId) => (GACHA.noTokens.includes(zone) ? 0 : Math.min(1, GACHA.token[rank] * ZONE_SCALE[zone].token));
 
 /**
  * Magic look of a mage orb model (src/orbfx.ts): shell nebula colours (`deep` inside, `glow` wisps and rim), its swirl
@@ -1622,3 +1639,7 @@ export const HIT_FREEZE = 0.15;
  * ~2.4 m; 5 m/s is ~0.5 m, a stagger back while falling.
  */
 export const KILL_FX = { knockMul: 2, maxKnock: 5, shake: 0.31, blood: 14 };
+
+// Numbers picked by the balance tuner (npm run tune -- --write / balance.html → «Цели»): rewritten as a whole, delete to undo.
+// <tuned>
+// </tuned>

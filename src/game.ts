@@ -5,7 +5,7 @@ import { Creature } from './creature';
 import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
-  ATTACK_HIT, FACTIONS, PETS, tokenChance, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
+  ATTACK_HIT, FACTIONS, PETS, tokenChance, zoneScaleOf, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
   SPAWN_PRESETS, type SpawnPreset, type SpawnPresetId, mobRank, zoneResist, ZONE_FOES, ZONE_SUN, type DamageType, type ResistTier, type ItemDrop, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
 import { ArenaFog, DROP_TINT, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, StatAuras, Telegraphs, type Bolt } from './fx';
@@ -336,8 +336,9 @@ export class Game {
     def = this.zoneDef(def, zone);
     const mul = def.boss || def.rank ? { hp: 1, dmg: 1, reward: 1, scale: 1 } : depthMul(zone, depth);
     const tier = ZONE_TIER[zone] ?? 1;
+    const zs = zoneScaleOf(def, zone); // the tuner's knobs (ZONE_SCALE)
     const items = [this.dropBadge(def), ...(def.moreDrops ?? []).map(dropBadgeOf)];
-    const m = new Mob(def, at, this.save.faction, labels, { ...mul, hp: mul.hp * tier, dmg: mul.dmg * tier }, behavior, items.filter((b) => !!b));
+    const m = new Mob(def, at, this.save.faction, labels, { ...mul, hp: mul.hp * tier * zs.hp, dmg: mul.dmg * tier * zs.dmg, reward: mul.reward * zs.reward }, behavior, items.filter((b) => !!b));
     m.ch.root.scale.setScalar(this.mobScale);
     this.addUnit(m);
     return m;

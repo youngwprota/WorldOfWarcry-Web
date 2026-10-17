@@ -5,7 +5,7 @@ import * as CONFIG from './config';
 import {
   ATTACK_HIT, BREAKABLES, CEMETERY_BOARS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
   CEMETERY_AREAS, CEMETERY_PACKS, DUNES_SPAWNERS, GROVE_SPAWNERS, HILLS_BANNERS, HILLS_EXTRA, HILLS_LIONS, HILLS_PACKS, HILLS_SNAGS, LAND_ELITES, MINI_PAIR_OF, PEAKS_SPAWNERS,
-  SPAWN_PRESETS, SWAMP_SPAWNERS, PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, ZONE_FOES, ZONE_TIER, depthMul, mobImpact, packUnits, mobRank, zoneResist,
+  SPAWN_PRESETS, SWAMP_SPAWNERS, PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, ZONE_FOES, ZONE_TIER, depthMul, zoneScaleOf, mobImpact, packUnits, mobRank, zoneResist,
   tokenChance as zoneTokenChance,
   type FactionId, type MobDef, type MobRank, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
@@ -473,7 +473,8 @@ function foeOf(u: Unit): Foe {
   const d = zoneDef(MOBS[u.def], u.zone, u.alt);
   const mul = d.boss || d.rank ? { hp: 1, dmg: 1 } : depthMul(u.zone, u.depth);
   const tier = ZONE_TIER[u.zone] ?? 1;
-  return { def: d, hp: Math.round(d.hp * mul.hp * tier), dmg: d.dmg * mul.dmg * tier };
+  const zs = zoneScaleOf(d, u.zone);
+  return { def: d, hp: Math.round(d.hp * mul.hp * tier * zs.hp), dmg: d.dmg * mul.dmg * tier * zs.dmg };
 }
 
 /**
@@ -664,10 +665,11 @@ const VALUE: Record<StatId, number> = { power: 1, hp: 0.35, regen: 1.5, speed: 0
 const rewardOf = (u: Unit): OrbReward => {
   if (u.kind === 'prop') return BREAKABLES[u.def].reward as OrbReward;
   const d = MOBS[u.def];
-  if (d.boss || d.rank) return d.reward as OrbReward;
-  const k = depthMul(u.zone, u.depth).reward;
-  const [s, n] = Object.entries(d.reward)[0] as [OrbKind, number];
-  return { [s]: Math.round(n * k) } as unknown as OrbReward;
+  // as Mob does: every orb × the depth (plain mobs) × ZONE_SCALE reward, rounded
+  const k = (d.boss || d.rank ? 1 : depthMul(u.zone, u.depth).reward) * zoneScaleOf(d, u.zone).reward;
+  const out: Partial<Record<OrbKind, number>> = {};
+  for (const [s, n] of Object.entries(d.reward) as [OrbKind, number][]) if (n) out[s] = Math.round(n * k);
+  return out as OrbReward;
 };
 function giveStats(h: Hero, r: Partial<Record<OrbKind, number>>, orbs: boolean) {
   for (const [k, n] of Object.entries(r) as [OrbKind, number][]) {
@@ -803,6 +805,8 @@ export interface RunCtl {
   keep?: string[];
   /** End the run right after this boss's first kill. */
   stopAt?: string;
+  /** End the run at this time, s, with a checkpoint named 'time'. */
+  stopTime?: number;
 }
 
 function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string, Checkpoint> } {
@@ -1007,13 +1011,14 @@ function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string,
     const b = firstKill;
     firstKill = null;
     if (ctl.keep?.includes(b) || ctl.stopAt === b) {
-      const data: CpData = { t, kills, nextSnap, rs, gates: [...openGates], h, units, out, spent: units.map((u) => spent.get(u) ?? 0) };
-      cps[b] = { boss: b, t, data: structuredClone(data) };
+      cps[b] = { boss: b, t, data: save() };
     }
     return ctl.stopAt === b;
   };
+  const save = () => structuredClone({ t, kills, nextSnap, rs, gates: [...openGates], h, units, out, spent: units.map((u) => spent.get(u) ?? 0) } satisfies CpData);
   while (t < OPT.until) {
     if (afterKill()) break;
+    if (ctl.stopTime !== undefined && t >= ctl.stopTime) { cps.time = { boss: 'time', t, data: save() }; break; }
     if (t >= nextSnap) { snap(); nextSnap = (Math.floor(t / 60) + 1) * 60; }
     checkVer();
     const st = stats(h);
@@ -1216,6 +1221,39 @@ export function simulateFrom(opts: Partial<SimOpts>, ctl: RunCtl[], onRun?: (don
   return runs;
 }
 
+/** The tuner's look at a boss fight: the hero of checkpoint `cp` at full HP, the class that does best. */
+export interface BossProbe {
+  /** Mean (no dice) fight: its length, s, and whether it is won; `dps`: the boss's HP lost per second of it. */
+  dur: number; win: boolean; dps: number;
+  /** Share of `probes` dice fights won. */
+  rate: number;
+}
+export function probeBoss(cp: Checkpoint, boss: string, opts: Partial<SimOpts>, probes = 24): BossProbe {
+  OPT = { ...DEFAULT_OPTS, ...opts };
+  Math.random = rand;
+  const c = cp.data as CpData;
+  const u = c.units.find((x) => x.def === boss);
+  if (!u) throw new Error(`нет босса ${boss}`);
+  const foes = () => [foeOf(u), ...partnersOf(u)];
+  const hp = foes().reduce((a, f) => a + f.hp, 0);
+  let best: (FightOut & { c: HeroClass }) | null = null;
+  for (const cls of c.h.classes) {
+    const x = as(c.h, cls, u.zone);
+    x.hp = stats(x).maxHp;
+    const r = { ...fight(x, foes(), true, 900), c: cls };
+    const edge = (y: FightOut) => (y.win ? 2 - y.dur / 900 : y.dealt / hp);
+    if (!best || edge(r) > edge(best)) best = r;
+  }
+  rs = 4242;
+  let won = 0;
+  for (let i = 0; i < probes; i++) {
+    const x = as(c.h, best!.c, u.zone);
+    x.hp = stats(x).maxHp;
+    if (fight(x, foes(), false, 900).win) won++;
+  }
+  return { dur: best!.dur, win: best!.win, dps: best!.dealt / Math.max(0.05, best!.dur), rate: won / probes };
+}
+
 export interface BenchRow { label: string; ttk: number }
 export const BENCH_HP = 4000;
 /** Weapon bench: mean time to kill a 4000 HP target (rare lvl 1, power 0, no resists): every weapon, sword + each shield, fire staff + each orb. */
@@ -1258,7 +1296,7 @@ export interface MobAvg { swings: number; dur: number; takenPct: number; t: numb
 export interface MobSum { key: string; n: number; first: MobAvg; all: MobAvg; losses: number }
 export interface SimSummary {
   runs: number; bosses: BossSum[]; pulls: Record<10 | 20 | 30, number | undefined>; deaths?: number; mobs: MobSum[];
-  /** Median fight length, s, by location and top rank (won fights; a pack is one fight). */
+  /** Median fight length, s, by location and top rank: won fights up to the location boss's first kill (the levelling there; a pack is one fight). */
   fightDur: Partial<Record<ZoneId, Partial<Record<MobRank | 'static', number>>>>;
   /** Each location: median time it opened (runs that opened it). */
   zones: { zone: ZoneId; p50?: number; n: number }[];
@@ -1295,7 +1333,8 @@ export function summarize(runs: RunOut[]): SimSummary {
   const zones = ZONE_IDS.map((zone) => { const at = runs.map((r) => r.openAt[zone]).filter((x): x is number => x !== undefined); return { zone, p50: pct(at, 0.5), n: at.length }; });
   const fightDur: SimSummary['fightDur'] = {};
   const durs = new Map<string, number[]>();
-  for (const r of runs) for (const f of r.fights) if (f.win) { const k = `${f.zone}|${f.rank}`; durs.set(k, [...(durs.get(k) ?? []), f.dur]); }
+  const bossOf = new Map(BOSSES.map((b) => [b.boss!.zone, b.id]));
+  for (const r of runs) for (const f of r.fights) if (f.win && f.t <= (r.bossAt[bossOf.get(f.zone) ?? ''] ?? Infinity)) { const k = `${f.zone}|${f.rank}`; durs.set(k, [...(durs.get(k) ?? []), f.dur]); }
   for (const [k, a] of durs) { const [z, rk] = k.split('|') as [ZoneId, MobRank | 'static']; (fightDur[z] ??= {})[rk] = pct(a, 0.5); }
   return { runs: runs.length, bosses, zones, fightDur, pulls: { 10: pullsBy(10), 20: pullsBy(20), 30: pullsBy(30) }, deaths: pct(runs.map((r) => r.deaths), 0.5), mobs, classShare, cycle };
 }
