@@ -4,7 +4,8 @@
 import * as CONFIG from './config';
 import {
   ATTACK_HIT, BREAKABLES, CEMETERY_BOARS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
-  CEMETERY_AREAS, PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, ZONE_FOES, ZONE_TIER, depthMul, mobImpact, packUnits, mobRank, zoneResist,
+  CEMETERY_AREAS, DUNES_SPAWNERS, GROVE_SPAWNERS, HILLS_BANNERS, HILLS_EXTRA, HILLS_LIONS, HILLS_PACKS, HILLS_SNAGS, LAND_ELITES, MINI_PAIR_OF, PEAKS_SPAWNERS,
+  SPAWN_PRESETS, SWAMP_SPAWNERS, PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, ZONE_FOES, ZONE_TIER, depthMul, mobImpact, packUnits, mobRank, zoneResist,
   tokenChance as zoneTokenChance,
   type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
@@ -13,7 +14,7 @@ import { ARMOR, armorStats, dropItem, itemClass, makeItem, sameItem, weaponDamag
 import { CLASSES, CLASS_IDS, classSlot, kitOf, weaponClass, type HeroClass } from './party';
 import { pull } from './gacha';
 import {
-  ARENA, BOSS_GUARDS, FORT, FOREST_PINS, GATE, GATES, GATE_GUARDS, GLOVES_PACKS, GLOVES_SPREAD, ISLAND, LAND_BOSSES, MAP_BOX, MID_UV, SPAWN, campToFortAt, ringSpots, inCamp,
+  ARENA, BOSS_GUARDS, FORT, FOREST_PINS, GATE, GATES, GATE_GUARDS, GLOVES_PACKS, GLOVES_SPREAD, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, MID_UV, SPAWN, campToFortAt, ringSpots, inCamp,
   pathAt, pathDist, progressAt, walkable, zoneIdAt,
 } from './island';
 
@@ -239,6 +240,126 @@ interface Unit {
   n: number; respawnAt: number; temp?: boolean;
   /** Snow Pass: every other mob has the location's `alt` resist profile (Game.zoneDef). */
   alt?: boolean;
+  /** Social pack id: pulling one pulls them all (PackDef link 'social', World.joinPack). */
+  pack?: string;
+  /** World picks the spot at random: the sim's is the same kind of spot, not the same one. */
+  approx?: boolean;
+}
+/**
+ * The outer locations (World.buildOuterLands and its *Mobs): what stands there and in which packs, from the config
+ * lists. Hand-picked spots are exact; World's random spreads are random walkable spots of the location here, its road
+ * spawners spread along the location's road (LAND_TRAILS).
+ */
+function buildLands(us: Unit[], packs: [number, number][]) {
+  const r = layoutRng(61);
+  type P = { x: number; z: number };
+  const one = (id: string, d: SpawnerDef, p: P, zone: ZoneId, pack?: string, approx = false) => us.push({
+    id, kind: d.unit, def: d.id, zone, spot: landSpot(p.x, p.z, zone), depth: 0, n: 0, respawnAt: 0, pack, approx: approx || undefined,
+    charges: d.charges ?? [d.unit === 'mob' ? MOBS[d.id].respawn : BREAKABLES[d.id].respawn],
+  });
+  const group = (id: string, p: CONFIG.PackDef, c: P, zone: ZoneId, approx = false) =>
+    ringSpots(c.x, c.z, p.slots.length, 1.8).forEach((q, i) =>
+      one(`${id}:${i}`, { unit: 'mob', id: p.slots[i].id, charges: p.charges }, q, zone, p.link === 'social' ? id : undefined, approx));
+  const pin = (x: number, z: number) => { packs.push([x, z]); return { x, z }; };
+  const rnd = (zone: ZoneId) => emptyIn(zone, r, packs);
+  /** `n` spots along road `k` of LAND_TRAILS, alternating sides `off` m off it, inside `zone` (else a random spot). */
+  const road = (k: number, n: number, zone: ZoneId, off = 6) => {
+    const line = LAND_TRAILS[k];
+    const seg = line.slice(1).map((p, i) => Math.hypot(p[0] - line[i][0], p[1] - line[i][1]));
+    const total = seg.reduce((a, b) => a + b, 0);
+    return Array.from({ length: n }, (_, i) => {
+      let d = ((i + 0.5) / n) * total, j = 0;
+      while (j < seg.length - 1 && d > seg[j]) d -= seg[j++];
+      const [x0, z0] = line[j], [x1, z1] = line[j + 1];
+      const k1 = Math.min(1, d / seg[j]), tx = (x1 - x0) / seg[j], tz = (z1 - z0) / seg[j], side = i % 2 ? 1 : -1;
+      const x = x0 + (x1 - x0) * k1 + tz * side * off, z = z0 + (z1 - z0) * k1 - tx * side * off;
+      return zoneIdAt(x, z) === zone && walkable(x, z, 1) ? pin(x, z) : rnd(zone);
+    });
+  };
+  /** A few metres inside `zone` from passage `id`. */
+  const atGate = (id: string, zone: ZoneId, d = 6) => {
+    const g = GATES.find((x) => x.id === id)!;
+    const s = g.to === zone ? 1 : -1;
+    return pin(g.x + g.tx * s * d, g.z + g.tz * s * d);
+  };
+
+  // main bosses' «Свирепый вожак» and the loot elites
+  for (const land of LAND_BOSSES) {
+    if (land.zone === 'cemetery') continue;
+    land.minis.forEach(([x, z], i) => {
+      const id = `mini:${land.zone}:${i}`;
+      const pair = MINI_PAIR_OF[land.zone];
+      const warden = land.zone === 'peaks' && i === 0; // PEAKS_SPAWNERS.wardenGuard joins it
+      const c = pin(x, z);
+      one(id, MINI_SPAWNER_OF[land.zone] ?? MINI_SPAWNER, c, land.zone, pair || warden ? id : undefined);
+      if (pair) one(`${id}:pair`, pair, { x: c.x + 1.5, z: c.z }, land.zone, id);
+      if (warden) one('peaks:warden_guard', PEAKS_SPAWNERS.wardenGuard, { x: c.x - 1.5, z: c.z }, 'peaks', id);
+    });
+    (LAND_ELITES[land.zone] ?? []).forEach((e, i) => one(`elite:${land.zone}:${i}`, e.def, pin(e.x, e.z), land.zone));
+  }
+
+  // Snow Pass (world.snowMobs / snowBeasts)
+  const P = PEAKS_SPAWNERS;
+  group('peaks:guards', P.guards, atGate('forest-peaks', 'peaks'), 'peaks');
+  P.elites.forEach((e, i) => one(`peaks:elite:${i}`, e.def, pin(e.x, e.z), 'peaks'));
+  P.packs.forEach((p, i) => group(`peaks:pack:${i}`, p.def, pin(p.x, p.z), 'peaks'));
+  P.assassins.forEach((d, i) => one(`peaks:lone:${i}`, d, rnd('peaks'), 'peaks', undefined, true));
+  P.beasts.forEach((d, i) => one(`peaks:beast:${i}`, d, rnd('peaks'), 'peaks', undefined, true));
+  const west = LAND_BOSSES.find((l) => l.zone === 'peaks')!.minis[1];
+  group('peaks:bears', P.bears, pin(west[0] + 6, west[1]), 'peaks', true);
+  road(4, P.trees.length, 'peaks', 3.2).forEach((p, i) => one(`peaks:tree:${i}`, P.trees[i], p, 'peaks', undefined, true));
+  P.woodTrees.forEach((t, i) => one(`peaks:wood_tree:${i}`, t.def, pin(t.x, t.z), 'peaks'));
+
+  // Hills: road mobs in pairs, snags on the road, lions off it, hand-picked extras and banners, a line at each gate
+  const hills = SPAWNERS.hills ?? [];
+  const inPair = new Map<number, string>();
+  HILLS_PACKS.forEach((ids, k) => ids.forEach((i) => inPair.set(i, `hills:pack:${k}`)));
+  road(0, hills.length, 'hills').forEach((p, i) => one(`hills:${i}`, hills[i], p, 'hills', inPair.get(i), true));
+  road(0, HILLS_SNAGS.length, 'hills', 4).forEach((p, i) => one(`hills:snag:${i}`, HILLS_SNAGS[i], p, 'hills', undefined, true));
+  HILLS_LIONS.packs.forEach((p, i) => group(`hills:lionpack:${i}`, p, rnd('hills'), 'hills', true));
+  HILLS_LIONS.lions.forEach((d, i) => one(`hills:lion:${i}`, d, rnd('hills'), 'hills', undefined, true));
+  HILLS_EXTRA.forEach((p, i) => group(`hills:extra:${i}`, p.def, pin(p.x, p.z), 'hills'));
+  HILLS_BANNERS.forEach((b, i) => one(`hills:banner:${i}`, b.def, pin(b.x, b.z), 'hills'));
+  for (const g of GATES) if (g.id.includes('hills')) group(`hills:gate:${g.id}`, SPAWN_PRESETS.gate_line.pack, atGate(g.id, 'hills'), 'hills');
+
+  // Grove (world.groveMobs / groveAmbushes)
+  const GR = GROVE_SPAWNERS;
+  road(1, GR.warriors.length, 'grove', 5).forEach((c, i) => group(`grove:warriors:${i}`, GR.warriors[i], c, 'grove', true));
+  GR.dragons.forEach((p, i) => group(`grove:dragon:${i}`, p, rnd('grove'), 'grove', true));
+  GR.ambushes.forEach((p, i) => group(`grove:ambush:${i}`, p, rnd('grove'), 'grove', true));
+  GR.bears.forEach((d, i) => one(`grove:bear:${i}`, d, rnd('grove'), 'grove', undefined, true));
+  road(1, GR.trees.length, 'grove', 3.2).forEach((p, i) => one(`grove:tree:${i}`, GR.trees[i], p, 'grove', undefined, true));
+  GR.woodTrees.forEach((d, i) => one(`grove:wood_tree:${i}`, d, rnd('grove'), 'grove', undefined, true));
+
+  // Swamp (world.swampMobs): the oracle elite's guard joins it
+  const SW = SWAMP_SPAWNERS;
+  group('swamp:dunegate', SW.duneGate, atGate('swamp-dunes', 'swamp'), 'swamp');
+  const oracle = us.find((u) => u.id === 'elite:swamp:0');
+  if (oracle) {
+    oracle.pack = 'swamp:oracle';
+    const o = posOf(oracle.spot);
+    one('swamp:elite_guard', SW.eliteGuard, { x: o.x + 1.5, z: o.z }, 'swamp', 'swamp:oracle');
+  }
+  road(2, SW.roadPairs.length, 'swamp', 5).forEach((c, i) => group(`swamp:road:${i}`, SW.roadPairs[i], c, 'swamp', true));
+  SW.pools.forEach((p, i) => group(`swamp:pool:${i}`, p, rnd('swamp'), 'swamp', true));
+  SW.shore.forEach((p, i) => group(`swamp:shore:${i}`, p, rnd('swamp'), 'swamp', true));
+  SW.bandits.forEach((d, i) => one(`swamp:bandit:${i}`, d, rnd('swamp'), 'swamp', undefined, true));
+  [...SW.trees, ...SW.thornTrees].forEach((d, i) => one(`swamp:tree:${i}`, d, rnd('swamp'), 'swamp', undefined, true));
+  SW.assassins.forEach((d, i) => one(`swamp:assassin:${i}`, d, rnd('swamp'), 'swamp', undefined, true));
+  group('swamp:mark:pack', SW.marks.pack.def, pin(SW.marks.pack.x, SW.marks.pack.z), 'swamp');
+  SW.marks.singles.forEach((m, i) => one(`swamp:mark:${i}`, m.def, pin(m.x, m.z), 'swamp'));
+
+  // Dunes (world.dunesMobs)
+  const D = DUNES_SPAWNERS;
+  D.battles.forEach((p, i) => group(`dunes:battle:${i}`, p, rnd('dunes'), 'dunes', true));
+  group('dunes:ambush:0', D.ambush, rnd('dunes'), 'dunes', true);
+  road(3, D.roadPairs.length, 'dunes', 5).forEach((c, i) => group(`dunes:road:${i}`, D.roadPairs[i], c, 'dunes', true));
+  D.archerPairs.forEach((p, i) => group(`dunes:archers:${i}`, p, rnd('dunes'), 'dunes', true));
+  D.escorts.forEach((p, i) => group(`dunes:escort:${i}`, p, rnd('dunes'), 'dunes', true));
+  D.dragons.forEach((d, i) => one(`dunes:dragon:${i}`, d, rnd('dunes'), 'dunes', undefined, true));
+  D.lionPairs.forEach((p, i) => group(`dunes:lions:${i}`, p, rnd('dunes'), 'dunes', true));
+  [...D.lions, ...D.edgeLions].forEach((d, i) => one(`dunes:lion:${i}`, d, rnd('dunes'), 'dunes', undefined, true));
+  D.boars.forEach((p, i) => group(`dunes:boars:${i}`, p, rnd('dunes'), 'dunes', true));
 }
 /** Every spawner World builds in the forest and the cemetery (world.buildForest / campToFort / glovesGuards / land minis). */
 function buildUnits(): Unit[] {
@@ -289,10 +410,12 @@ function buildUnits(): Unit[] {
   add('prop', PROP_SPAWNERS.forest, along(forestRanges, PROP_SPAWNERS.forest.length).map((p) => ({ s: p.s + 3, off: 6 })), 'forest', 'pf', false);
   add('prop', PROP_SPAWNERS.cemetery, along(graveRange, PROP_SPAWNERS.cemetery.length).map((p) => ({ s: p.s, off: 9 })), 'cemetery', 'pc', false);
   add('prop', PROP_SPAWNERS.cemeteryField, PROP_SPAWNERS.cemeteryField.map(() => ({ s: sArena - 20, off: 35 })), 'cemetery', 'pcf', false);
+  buildLands(us, packs);
   for (const d of BOSSES) {
     const zone = d.boss!.zone;
-    const s = zone === 'forest' ? sFort : sArena;
-    us.push({ id: d.id, kind: 'mob', def: d.id, zone, spot: { s, off: 0 }, depth: 0, charges: [d.respawn], n: 0, respawnAt: 0 });
+    const land = LAND_BOSSES.find((l) => l.zone === zone)?.boss;
+    const spot = zone === 'forest' ? { s: sFort, off: 0 } : zone === 'cemetery' || !land ? { s: sArena, off: 0 } : landSpot(land[0], land[1], zone);
+    us.push({ id: d.id, kind: 'mob', def: d.id, zone, spot, depth: 0, charges: [d.respawn], n: 0, respawnAt: 0 });
   }
   // Game.zoneDef: in a location with an `alt` profile every other mob (in spawn order) has it
   const altN: Partial<Record<ZoneId, number>> = {};
@@ -317,8 +440,8 @@ const stats = (h: Hero) => heroStats(h);
 /** Hero `h` with class `c` on the field, in its kit for `zone` (a copy: the bot's estimates). */
 const as = (h: Hero, c: HeroClass, zone: ZoneId): Hero => ({ ...h, cls: c, weapons: h.kits[c][zone], equip: h.gear[c] });
 const wear = (h: Hero, c: HeroClass, zone: ZoneId) => { h.cls = c; h.weapons = h.kits[c][zone]; h.equip = h.gear[c]; };
-/** The bot plays the forest and the cemetery only: their two bosses. */
-export const BOSSES = Object.values(MOBS).filter((d) => d.boss && (d.boss.zone === 'forest' || d.boss.zone === 'cemetery'));
+/** Every location's main boss (the bot walks on through the passages each one opens). */
+export const BOSSES = Object.values(MOBS).filter((d) => d.boss);
 // ---------- fight: ticks of 0.05 s ----------
 const DT = 0.05;
 interface FightOut { win: boolean; dur: number; swings: number; dealt: number; taken: number; hpEnd: number; slams: number; slamHits: number }
@@ -673,15 +796,22 @@ function run(seed: number): RunOut {
     let e = est.get(key);
     if (!e) {
       const boss = !!MOBS[u.def].boss;
+      const foe = foeOf(u);
+      // a boss: the class with the best mean fight (a win, quicker; else more of the boss's HP taken), then its
+      // win rate in dice fights — the dice for that class only, they are what the sim spends its time on
+      const edge = (y: Est) => (y.win ? 2 - y.dur / 400 : y.dealt / foe.hp);
+      const maxHp = new Map<HeroClass, number>();
+      const safe = (y: Est) => y.win && y.taken <= 0.7 * maxHp.get(y.cls)!;
       for (const c of h.classes) {
-        const x: Est = { ...fight(full(c, u.zone), foeOf(u), true, boss ? 400 : 150), cls: c };
-        if (boss) x.rate = bossRate(c, u);
-        const safe = (y: Est) => y.win && y.taken <= 0.7 * stats(full(y.cls, u.zone)).maxHp;
+        const fh = full(c, u.zone);
+        maxHp.set(c, fh.hp);
+        const x: Est = { ...fight(fh, foe, true, boss ? 400 : 150), cls: c };
         const better = !e ? true
-          : boss ? x.rate! > e.rate! || (x.rate === e.rate && x.dur < e.dur)
+          : boss ? edge(x) > edge(e)
             : safe(x) !== safe(e) ? safe(x) : safe(x) ? x.dur < e.dur : x.taken < e.taken;
         if (better) e = x;
       }
+      if (boss) e!.rate = bossRate(e!.cls, u);
       est.set(key, e!);
     }
     return e!;
@@ -691,7 +821,8 @@ function run(seed: number): RunOut {
     const win: Record<string, number> = {};
     for (const b of BOSSES) {
       const u = units.find((x) => x.def === b.id)!;
-      win[b.id] = Math.max(...h.classes.map((c) => bossRate(c, u)));
+      // a boss behind a closed passage: no tries (and no time spent on its estimate)
+      win[b.id] = open.has(u.zone) ? estimate(u).rate ?? 0 : 0;
     }
     const kitName = (k: Kit) => k.map(wname).join('+');
     const zone: ZoneId = h.spot.zone ?? (h.spot.s > GATE.s ? 'cemetery' : 'forest');
@@ -909,7 +1040,7 @@ export function simMap(): SimMap {
   ];
   const units = buildUnits().map((u): MapUnit => {
     const p = posOf(u.spot);
-    const base = { id: u.id, def: u.def, kind: u.kind, zone: u.zone, x: p.x, z: p.z, approx: u.id.startsWith('tree:') || undefined, depth: u.depth, charges: u.charges, reward: rewardOf(u) };
+    const base = { id: u.id, def: u.def, kind: u.kind, zone: u.zone, x: p.x, z: p.z, approx: u.approx || u.id.startsWith('tree:') || undefined, depth: u.depth, charges: u.charges, reward: rewardOf(u) };
     if (u.kind === 'prop') return { ...base, name: u.def, rank: 'prop', hp: BREAKABLES[u.def].hp, dmg: 0, token: 0 };
     const d = MOBS[u.def];
     const f = foeOf(u);
