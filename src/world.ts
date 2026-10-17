@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { assets } from './assets';
 import { blobShadow } from './character';
 import { FogOfWar } from './fog';
-import { FACTIONS, SPAWN_PRESETS, VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, MID_SPAWNERS, CEMETERY_AREAS, CEMETERY_BOARS, CEMETERY_PACKS, LAND_ELITES, MINI_SPAWNER, MINI_SPAWNER_OF, HILLS_BANNERS, HILLS_EXTRA, HILLS_LIONS, HILLS_PACKS, HILLS_SNAGS, MOBS, PEAKS_SPAWNERS, packUnits, PROP_SPAWNERS, SNOW_CROWNS, SPAWNERS, ZONES, ZOO, type PackDef, type SpawnPreset, type SpawnPresetId, type SpawnerDef, type FactionId, type ZoneId } from './config';
+import { FACTIONS, DUNES_SPAWNERS, GROVE_CROWNS, GROVE_SPAWNERS, SWAMP_SPAWNERS, SPAWN_PRESETS,VIEW, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, MID_SPAWNERS, CEMETERY_AREAS, CEMETERY_BOARS, CEMETERY_PACKS, LAND_ELITES, MINI_PAIR_OF, MINI_SPAWNER, MINI_SPAWNER_OF, HILLS_BANNERS, HILLS_EXTRA, HILLS_LIONS, HILLS_PACKS, HILLS_SNAGS, MOBS, PEAKS_SPAWNERS, packUnits, PROP_SPAWNERS, SNOW_CROWNS, SPAWNERS, ZONE_LIGHT, ZONES, ZOO, type PackDef, type SpawnPreset, type SpawnerDef, type FactionId, type ZoneId } from './config';
 import {
   ARENA, BOSS_GUARDS, BRANCH_PATHS, CAMP_EXIT, CAMP_WALL, FORT, FOREST_PINS, GATE, GLOVES_PACKS, GLOVES_SPREAD, MID_UV, campToFortAt, GATE_GUARDS, ISLAND, LAND_BOSSES, LAND_TRAILS, MAP_BOX, OLD_TRAIL, PATH, PATH_W, GATES, RIDGE_POINTS, angleOf, ringSpots, lineSpots, coastDist, gateDist, edgePoint, heightAt, inCamp, inland, outside,
   borderAway, borderRoom, pathAt, pathDist, progressAt, rimCliff, rimTrees, walkable, zoneAt, zoneIdAt, zoneWeights,
@@ -183,7 +183,7 @@ function swampPonds(): Pond[] {
   const land = LAND_BOSSES.find((l) => l.zone === 'swamp')!;
   const keep = [land.boss!, ...land.minis];
   const out: Pond[] = [];
-  for (let i = 0; i < 4000 && out.length < 6; i++) {
+  for (let i = 0; i < 12000 && out.length < 9; i++) {
     const x = MAP_BOX.x + r() * MAP_BOX.size;
     const z = MAP_BOX.z + r() * MAP_BOX.size;
     const pr = 3.2 + r() * 2.8;
@@ -215,8 +215,6 @@ export class World {
   /** Every spawner on the island: mobs and breakable props alike. */
   readonly spawns: SpawnPoint[] = [];
   readonly bosses: { mob: string; x: number; z: number }[] = [];
-  /** Spawn presets shown in the dunes (debug teleport): which preset and its centre. */
-  readonly presets: { id: SpawnPresetId; x: number; z: number }[] = [];
   /** Trail point just outside the bandit fort's entrance and the trail direction there (where reinforcements arrive). */
   readonly fortExit = { x: 0, z: 0, tx: 0, tz: 0 };
   readonly ponds: Pond[] = [{ x: 11, z: -83, r: 5 }];
@@ -280,12 +278,13 @@ export class World {
   zoneAt(x: number, z: number) { return zoneAt(x, z); }
 
   /** Environment colours (and fog density) blended across zone borders. */
-  envAt(x: number, z: number, out: { sky: THREE.Color; fog: THREE.Color; hemiSky: THREE.Color; hemiGround: THREE.Color; density: number }) {
+  envAt(x: number, z: number, out: { sky: THREE.Color; fog: THREE.Color; hemiSky: THREE.Color; hemiGround: THREE.Color; density: number; light: number }) {
     const w = zoneWeights(x, z);
     const sum = w.reduce((a, b) => a + b, 0) || 1;
     const tmp = new THREE.Color();
     out.sky.setRGB(0, 0, 0); out.fog.setRGB(0, 0, 0); out.hemiSky.setRGB(0, 0, 0); out.hemiGround.setRGB(0, 0, 0);
     out.density = 0;
+    out.light = 0;
     ZONES.forEach((zd, i) => {
       const k = w[i] / sum;
       if (k <= 0) return;
@@ -294,6 +293,7 @@ export class World {
       out.hemiSky.add(tmp.set(zd.hemi[0]).multiplyScalar(k));
       out.hemiGround.add(tmp.set(zd.hemi[1]).multiplyScalar(k));
       out.density += zd.fogDensity * k;
+      out.light += (ZONE_LIGHT[zd.id] ?? 1) * k;
     });
   }
 
@@ -654,7 +654,7 @@ export class World {
       this.place('shield', 9.9, cz - 5.5, 0.8, -Math.PI / 2, 0);
       this.place('spear', 9.9, cz - 6.2, 0.8, -Math.PI / 2, 0);
     }
-    this.campfireDecor(-3.8, cz - 0.8); // decoration only
+    this.campfireDecor(-3.8, cz - 0.8, false); // decoration only
     // cobbled square round the fire and the well, a cobbled road out of the gate (no grass on it)
     const sq = { x: 0.2, z: cz + 0.8, r: 6.4 };
     const road = { x: CAMP_EXIT.x + CAMP_EXIT.dirX * 1.2, z: CAMP_EXIT.z + CAMP_EXIT.dirZ * 1.2 };
@@ -680,7 +680,7 @@ export class World {
     this.spawns.push({ id, unit: d.unit, kind: d.id, x, z, zone, depth, rot, group, behavior: slotOf?.behavior });
   }
   /** A pack (config PackDef): its mobs at `spots` (one per slot), saved under `id` as one spawn. */
-  private addPack(id: string, p: PackDef, spots: { x: number; z: number }[], zone: ZoneId, depth: number, rot = 0) {
+  private addPack(id: string, p: PackDef, spots: { x: number; z: number }[], zone: ZoneId, depth: number, rot = 0, centre?: { x: number; z: number }) {
     let respawn = 0;
     let x = 0;
     let z = 0;
@@ -689,7 +689,7 @@ export class World {
       x += spots[j].x / spots.length;
       z += spots[j].z / spots.length;
     }
-    const group: SpawnGroup = { id, charges: p.charges ?? [respawn], link: p.link, x, z, zone };
+    const group: SpawnGroup = { id, charges: p.charges ?? [respawn], link: p.link, x: centre?.x ?? x, z: centre?.z ?? z, zone };
     for (let j = 0; j < p.slots.length; j++) {
       const s = p.slots[j];
       this.addSpawn(`${id}:${j}`, { unit: 'mob', id: s.id }, spots[j].x, spots[j].z, zone, depth, rot, { group, behavior: s.behavior });
@@ -710,9 +710,10 @@ export class World {
     this.addSpawn(`prop:${group}:${i}`, d, x, z, zone, 0, rot);
   }
 
-  /** The camp's fire: model and a flickering flame, no gameplay. */
-  private campfireDecor(x: number, z: number) {
-    this.place(FACTIONS[this.faction].campfire, x, z, 0.42, 0, 0.8);
+  /** The camp's fire: model and a flickering flame, no gameplay. `solid` false: walk-through (decor still keeps off it). */
+  private campfireDecor(x: number, z: number, solid = true) {
+    this.place(FACTIONS[this.faction].campfire, x, z, 0.42, 0, solid ? 0.8 : 0);
+    if (!solid) this.reserved.push({ x, z, r: 0.8 * ENV });
     // brighter than white in the HDR frame, so the post glow lights round it
     const flame = new THREE.Mesh(
       new THREE.ConeGeometry(0.35, 1, 6).translate(0, 0.5, 0),
@@ -939,11 +940,11 @@ export class World {
       } else if (t < 0.88) {
         const s = 0.16 + r() * 0.12;
         bushes.push({ x, z, s, r: r() * 6, y: 1.0 * s });
-        this.obstacles.push({ x, z, r: 2.4 * s });
+        this.reserved.push({ x, z, r: 2.4 * s });
       } else {
         const s = 0.3 + r() * 0.3;
         rocks.push({ x, z, s, r: r() * 6 });
-        this.obstacles.push({ x, z, r: 1.1 * s });
+        this.reserved.push({ x, z, r: 1.1 * s });
       }
     }
     // Some of the trees become static units (FOREST_TREES): by the trail where the hero passes, well apart;
@@ -1212,7 +1213,7 @@ export class World {
       }
     }
     this.place('undead_wood_pile', F.x - 3, F.z + 2.5, 0.5, r() * 6, 0.6);
-    if (this.free(F.x + 4, F.z - 3, 1)) this.place('undead_big_bone', F.x + 4, F.z - 3, 0.45, r() * 6, 0.5);
+    if (this.free(F.x + 4, F.z - 3, 1)) { this.place('undead_big_bone', F.x + 4, F.z - 3, 0.45, r() * 6, 0); this.reserved.push({ x: F.x + 4, z: F.z - 3, r: 0.5 * ENV }); }
     // Decorative old graves, bones and dead trees, evenly spread
     const old: Inst[] = [];
     const bones: Inst[] = [];
@@ -1307,6 +1308,7 @@ export class World {
     const r = rng(61);
     const PATH_OF: Partial<Record<ZoneId, number>> = { hills: 0, grove: 1, swamp: 2, dunes: 3 };
     const BOSS_OF: Partial<Record<ZoneId, string>> = { peaks: 'elf_queen', hills: 'orc_shaman', grove: 'elf_priestess', swamp: 'murloc_king', dunes: 'sand_boar' };
+    let groveRoad: { total: number; at: (d: number) => { x: number; z: number; tx: number; tz: number } } | undefined;
     for (const zone of ['hills', 'grove'] as const) {
       const line = LAND_TRAILS[PATH_OF[zone]!];
       const seg = line.slice(1).map((p, i) => Math.hypot(p[0] - line[i][0], p[1] - line[i][1]));
@@ -1320,6 +1322,11 @@ export class World {
         return { x: x0 + (x1 - x0) * k, z: z0 + (z1 - z0) * k, tx: (x1 - x0) / seg[i], tz: (z1 - z0) / seg[i] };
       };
       this.mobsOnCurve(total, at, SPAWNERS[zone] ?? [], zone, r);
+      if (zone === 'grove') {
+        groveRoad = { total, at };
+        // the old grove road spawners drew 24 numbers here: keep the rng stream of the Snow Pass layout
+        for (let i = 0; i < 24; i++) r();
+      }
       if (zone === 'hills') {
         // road mobs alternate sides, so their mean spot is on the road: pairs stand where the first one is
         HILLS_PACKS.forEach((ids, k) => this.joinPack(`hills:pack:${k}`, ids.map((i) => `hills:${i}`), true));
@@ -1336,7 +1343,13 @@ export class World {
       land.minis.forEach(([x0, z0], i) => {
         const p = this.spotIn(land.zone, x0, z0, 3);
         this.packCenters.push([p.x, p.z]);
-        this.addSpawn(`mini:${land.zone}:${i}`, MINI_SPAWNER_OF[land.zone] ?? MINI_SPAWNER, p.x, p.z, land.zone, 0, 0);
+        const id = `mini:${land.zone}:${i}`;
+        this.addSpawn(id, MINI_SPAWNER_OF[land.zone] ?? MINI_SPAWNER, p.x, p.z, land.zone, 0, 0);
+        const pair = MINI_PAIR_OF[land.zone];
+        if (!pair) return;
+        // the pair is one social pack saved under the mini's own id (the unit ids differ)
+        this.addSpawn(`${id}:pair`, pair, p.x, p.z, land.zone, 0, 0);
+        this.joinPack(id, [id, `${id}:pair`], true);
       });
       (LAND_ELITES[land.zone] ?? []).forEach((e, i) => {
         const p = this.spotIn(land.zone, e.x, e.z, 3);
@@ -1347,48 +1360,14 @@ export class World {
     }
     this.hillsBeasts();
     this.hillsGateGuards();
+    this.groveMobs(groveRoad!.total, groveRoad!.at);
+    this.groveAmbushes();
+    this.swampMobs();
+    this.dunesMobs();
     this.snowMobs(r);
     this.snowProps(r);
     this.snowBeasts(r);
-    this.dunesPresets();
     this.dressOuterLands(r);
-  }
-
-  /** One pack of each spawn preset (config SPAWN_PRESETS) on the empty dunes, as a showcase. */
-  private dunesPresets() {
-    const r = rng(53);
-    const spots: [SpawnPresetId, number, number][] = [['archer_escort', 35, 25], ['flankers', 60, 25], ['growing', 90, 35], ['skirmishers', 45, 65], ['horde', 30, 85], ['horde_mixed', 100, 62], ['gate_line', 70, 50]];
-    for (const [id, x0, z0] of spots) {
-      const c = this.spotIn('dunes', x0, z0, 3);
-      const preset: SpawnPreset = SPAWN_PRESETS[id];
-      const p = preset.pack;
-      // a line faces the island centre, like the debug teleport approaches
-      const fx = ISLAND.cx - c.x;
-      const fz = ISLAND.cz - c.z;
-      const at = preset.horde === 'scatter' ? this.scatterSpots(c.x, c.z, p.slots.length, 7, r)
-        : preset.line ? lineSpots(c.x, c.z, p.slots.length, 1.7, fx, fz)
-        : ringSpots(c.x, c.z, p.slots.length, preset.horde ? 3.5 : 1.8);
-      this.packCenters.push([c.x, c.z]);
-      for (const q of at) this.taken.push([q.x, q.z]);
-      this.addPack(`dunes:preset:${id}`, p, at, 'dunes', 0, preset.line ? Math.atan2(fx, fz) : 0);
-      this.presets.push({ id, x: c.x, z: c.z });
-    }
-  }
-
-  /** n random walkable spots within `radius` of (x, z), clear of its middle (a teleport lands there) and of each other. */
-  private scatterSpots(x: number, z: number, n: number, radius: number, r: () => number) {
-    const out: { x: number; z: number }[] = [];
-    for (let t = 0; out.length < n && t < n * 40; t++) {
-      const a = r() * Math.PI * 2;
-      // sqrt: even spread over the disc, not bunched at the middle
-      const d = 2 + Math.sqrt(r()) * (radius - 2);
-      const q = { x: x + Math.sin(a) * d, z: z + Math.cos(a) * d };
-      let near = false;
-      for (const o of out) if (Math.hypot(o.x - q.x, o.z - q.z) < 1.4) near = true;
-      if (!near && walkable(q.x, q.z, 1)) out.push(q);
-    }
-    while (out.length < n) out.push({ x: x + 2, z });
-    return out;
   }
 
   /** Distance to the Snow Pass roads (its trail, the side branch and the abandoned path from the arena). */
@@ -1505,6 +1484,508 @@ export class World {
       for (const p of spots) this.taken.push([p.x, p.z]);
       this.addPack(`hills:gate:${g.id}`, preset.pack, spots, 'hills', 0, Math.atan2(-hx, -hz));
     }
+  }
+
+  /**
+   * Grove mobs (config GROVE_SPAWNERS): warrior camps along the road, dragon + archer camps in the woods (campfire beside
+   * each), lone bears among a clump of trees, attackable autumn trees. All stay east of x -130 (the far west strip is for
+   * other content). Own rng keeps the rest stable.
+   */
+  private groveMobs(total: number, at: (d: number) => { x: number; z: number; tx: number; tz: number }) {
+    const r = rng(97);
+    const WEST = -130;
+    const inGrove = (x: number, z: number, pad: number) => x > WEST && zoneIdAt(x, z) === 'grove' && walkable(x, z, pad);
+    const woods = () => ({ x: WEST + r() * 90, z: -8 + r() * 50 });
+    const okWoods = (gap: number, apart: number) => (x: number, z: number) => inGrove(x, z, 3) && this.free(x, z, 2.5)
+      && landTrailDist(x, z) > gap && gateDist(x, z) > 14 && !this.nearPack(x, z, apart);
+    // a campfire 2.6 m (3.4 m for the big dragon) beside the pair, across the line between its two mobs
+    const campfire = (c: { x: number; z: number }, a: number, d: number) => {
+      for (let i = 0; i < 16; i++) {
+        const b = a + Math.PI / 2 + (i % 2 ? Math.PI : 0);
+        const dd = d + (i > 7 ? 1 : 0);
+        const x = c.x + Math.sin(b) * dd;
+        const z = c.z + Math.cos(b) * dd;
+        if (inGrove(x, z, 1) && this.free(x, z, 1.2) && landTrailDist(x, z) > 2.5 && gateDist(x, z) > 7) { this.campfireDecor(x, z, false); return; }
+      }
+    };
+    const camp = (id: string, p: PackDef, c: { x: number; z: number }, fire: number) => {
+      const a = r() * 6;
+      this.packCenters.push([c.x, c.z]);
+      this.addPack(id, p, ringSpots(c.x, c.z, p.slots.length, 1.8, a), 'grove', 0);
+      campfire(c, a, fire);
+    };
+
+    // the road runs on past the swamp gate: `end` is where it leaves the grove
+    let end = total;
+    while (end > 0 && (zoneIdAt(at(end).x, at(end).z) !== 'grove' || gateDist(at(end).x, at(end).z) < 12)) end -= 1;
+    // warrior camps spread over the road (not at its ends: the boss and the gate), alternating sides
+    const n = GROVE_SPAWNERS.warriors.length;
+    GROVE_SPAWNERS.warriors.forEach((p, i) => {
+      const d0 = 18 + (i / (n - 1)) * (end - 18);
+      for (const ds of [0, 4, -4, 8, -8, 12, -12, 16, -16]) {
+        const q = at(Math.min(end, Math.max(0, d0 + ds)));
+        for (const side of [i % 2 ? 1 : -1, i % 2 ? -1 : 1]) {
+          for (const off of [5, 6, 4.5, 7]) {
+            const x = q.x + q.tz * side * off;
+            const z = q.z - q.tx * side * off;
+            if (!inGrove(x, z, 3) || !this.free(x, z, 2.5) || landTrailDist(x, z) < 3.5 || gateDist(x, z) < 12 || this.nearPack(x, z, 10)) continue;
+            this.taken.push([x, z]);
+            camp(`grove:warriors:${i}`, p, { x, z }, 2.6);
+            return;
+          }
+        }
+      }
+    });
+
+    this.spread(GROVE_SPAWNERS.dragons.length, 20, woods, okWoods(9, 12), true).forEach((c, i) => {
+      camp(`grove:dragon:${i}`, GROVE_SPAWNERS.dragons[i], c, 3.4);
+    });
+
+    // bears: each single, a clump of two or three autumn trees 2–3.5 m beside it
+    const trees: Inst[] = [];
+    const fits = (x: number, z: number) => inGrove(x, z, 1) && this.free(x, z, 1) && landTrailDist(x, z) > 3;
+    this.spread(GROVE_SPAWNERS.bears.length, 16, woods, okWoods(8, 10), true).forEach((c, i) => {
+      this.packCenters.push([c.x, c.z]);
+      this.reserved.push({ x: c.x, z: c.z, r: 1.2 });
+      this.addSpawn(`grove:bear:${i}`, GROVE_SPAWNERS.bears[i], c.x, c.z, 'grove', 0, 0);
+      let left = 2 + Math.floor(r() * 2);
+      for (let t = 0; t < 24 && left; t++) {
+        const a = r() * Math.PI * 2;
+        const d = 2.2 + r() * 1.3;
+        const x = c.x + Math.sin(a) * d;
+        const z = c.z + Math.cos(a) * d;
+        if (!fits(x, z)) continue;
+        trees.push({ x, z, s: 0.55 + r() * 0.35, r: r() * 6, tint: GROVE_CROWNS[Math.floor(r() * GROVE_CROWNS.length)] });
+        this.reserved.push({ x, z, r: 0.5 });
+        left--;
+      }
+    });
+    this.scatter('elf_tree', trees, true, { recolor: true });
+
+    // attackable trees: one at a time along the road, alternating sides, about a road's width off it
+    const nt = GROVE_SPAWNERS.trees.length;
+    GROVE_SPAWNERS.trees.forEach((d, i) => {
+      for (const ds of [0, 4, -4, 8, -8, 12, -12]) {
+        const p = at(Math.min(end, Math.max(0, ((i + 0.5) / nt) * end + ds + (r() - 0.5) * 6)));
+        const side = i % 2 ? 1 : -1;
+        const x = p.x + p.tz * side * 3.2;
+        const z = p.z - p.tx * side * 3.2;
+        if (!inGrove(x, z, 1) || !this.free(x, z, 1) || this.nearPack(x, z, 6) || gateDist(x, z) < 8) continue;
+        this.reserved.push({ x, z, r: 0.8 });
+        this.taken.push([x, z]);
+        this.addSpawn(`grove:tree:${i}`, d, x, z, 'grove', 0, r() * 6);
+        return;
+      }
+    });
+    const okTree = (x: number, z: number) => inGrove(x, z, 1.5) && this.free(x, z, 1.5) && landTrailDist(x, z) > 6 && gateDist(x, z) > 10 && !this.nearPack(x, z, 6);
+    this.spread(GROVE_SPAWNERS.woodTrees.length, 12, woods, okTree, true).forEach(({ x, z }, i) => {
+      this.reserved.push({ x, z, r: 0.8 });
+      this.addSpawn(`grove:wood_tree:${i}`, GROVE_SPAWNERS.woodTrees[i], x, z, 'grove', 0, r() * 6);
+    });
+  }
+
+  /**
+   * Swamp mobs (config SWAMP_SPAWNERS), own rng: murloc shore packs, trios by the 3 most central murky pools, murloc + soldier
+   * pairs along the swamp road, a guard for the helmet elite by the forest gate, a pair by the dunes gate, 3 lone bandits and
+   * 8 attackable trees (3 of them thorn trees). Everything is walkable, off the road, apart from the gates (except the elite
+   * guard and the dunes pair) and from other packs.
+   */
+  private swampMobs() {
+    const r = rng(98);
+    const C = SWAMP_SPAWNERS;
+    const inSwamp = (x: number, z: number, pad: number) => zoneIdAt(x, z) === 'swamp' && walkable(x, z, pad);
+    const box = () => ({ x: -134 + r() * 140, z: -1 + r() * 112 });
+    const ringOk = (c: { x: number; z: number }, n: number, a: number, pad = 1.5) => ringSpots(c.x, c.z, n, 1.8, a).every((p) => inSwamp(p.x, p.z, pad) && this.free(p.x, p.z, 1));
+    const put = (id: string, p: PackDef, c: { x: number; z: number }, a: number) => {
+      this.packCenters.push([c.x, c.z]);
+      this.taken.push([c.x, c.z]);
+      this.addPack(id, p, ringSpots(c.x, c.z, p.slots.length, 1.8, a), 'swamp', 0);
+    };
+    // the packs spots must pass: a free ring in the swamp, off the road, 14 m from the gates, 10 m from other packs
+    const packSpot = (c: { x: number; z: number }, n: number, a: number, road = 5) => ringOk(c, n, a) && landTrailDist(c.x, c.z) > road && gateDist(c.x, c.z) > 14 && !this.nearPack(c.x, c.z, 10);
+
+    // the swamp-dunes gate: a green pair 6–9 m inside the swamp, in a row along the narrow passage, beside the trail into the gate
+    const dg = GATES.find((g) => g.id === 'swamp-dunes')!;
+    const along = Math.atan2(dg.tx, dg.tz);
+    done: for (const d of [7, 6.5, 7.5, 6, 8, 9]) {
+      for (const l of [2.5, -2.5, 2, -2, 3, -3]) {
+        const c = { x: dg.x - dg.tx * d - dg.tz * l, z: dg.z - dg.tz * d + dg.tx * l };
+        if (!ringOk(c, 2, along, 0.6) || landTrailDist(c.x, c.z) < 2 || this.nearPack(c.x, c.z, 6)) continue;
+        put('swamp:dunegate', C.duneGate, c, along);
+        break done;
+      }
+    }
+
+    // the helmet elite by the forest gate gets a guard: both stand as one social pack
+    const elite = this.spawns.find((s) => s.kind === 'murloc_oracle' && s.zone === 'swamp');
+    if (elite) {
+      this.addSpawn('swamp:elite_guard', C.eliteGuard, elite.x, elite.z, 'swamp', 0, 0);
+      this.joinPack('swamp:oracle', [elite.id, 'swamp:elite_guard'], true);
+    }
+
+    // pairs along the swamp road, alternating sides, spread over its length
+    const line = LAND_TRAILS[2];
+    const seg = line.slice(1).map((p, i) => Math.hypot(p[0] - line[i][0], p[1] - line[i][1]));
+    const total = seg.reduce((a, b) => a + b, 0);
+    const at = (d: number) => {
+      let i = 0;
+      while (i < seg.length - 1 && d > seg[i]) d -= seg[i++];
+      const k = Math.min(1, d / seg[i]);
+      const [x0, z0] = line[i];
+      const [x1, z1] = line[i + 1];
+      return { x: x0 + (x1 - x0) * k, z: z0 + (z1 - z0) * k, tx: (x1 - x0) / seg[i], tz: (z1 - z0) / seg[i] };
+    };
+    const np = C.roadPairs.length;
+    C.roadPairs.forEach((p, i) => {
+      const d0 = ((i + 0.5) / np) * total;
+      for (const ds of [0, 4, -4, 8, -8, 12, -12, 16, -16, 20, -20]) {
+        const q = at(Math.min(total, Math.max(0, d0 + ds)));
+        for (const side of [i % 2 ? 1 : -1, i % 2 ? -1 : 1]) {
+          for (const off of [5, 6, 4.5, 7]) {
+            const c = { x: q.x + q.tz * side * off, z: q.z - q.tx * side * off };
+            const a = r() * 6;
+            if (!packSpot(c, 2, a, 3.5)) continue;
+            put(`swamp:road:${i}`, p, c, a);
+            return;
+          }
+        }
+      }
+    });
+
+    // trios by the 3 murky pools nearest the middle of the swamp
+    let mx = 0, mz = 0, mn = 0;
+    for (let x = -134; x < 6; x += 3) for (let z = -1; z < 111; z += 3) if (inSwamp(x, z, 3)) { mx += x; mz += z; mn++; }
+    const mid = { x: mx / mn, z: mz / mn };
+    const pools = this.ponds.filter((p) => p.murky && zoneIdAt(p.x, p.z) === 'swamp')
+      .sort((a, b) => Math.hypot(a.x - mid.x, a.z - mid.z) - Math.hypot(b.x - mid.x, b.z - mid.z)).slice(0, C.pools.length);
+    pools.forEach((pond, i) => {
+      for (const gap of [3.5, 4.5, 5.5, 7, 9, 11]) {
+        for (let k = 0; k < 60; k++) {
+          const b = r() * Math.PI * 2;
+          const c = { x: pond.x + Math.sin(b) * (pond.r + gap), z: pond.z + Math.cos(b) * (pond.r + gap) };
+          const a = r() * 6;
+          if (!packSpot(c, 3, a, 4)) continue;
+          put(`swamp:pool:${i}`, C.pools[i], c, a);
+          return;
+        }
+      }
+    });
+
+    // shore packs: on the swamp's coast, spread apart
+    C.shore.forEach((p, i) => {
+      for (let k = 0; k < 4000; k++) {
+        const c = box();
+        if (coastDist(c.x, c.z) > 12 || !packSpot(c, 5, 0, 6) || this.nearPack(c.x, c.z, 16)) continue;
+        put(`swamp:shore:${i}`, p, c, 0);
+        break;
+      }
+    });
+
+    // lone bandits at the emptiest spots of the swamp
+    C.bandits.forEach((d, i) => {
+      const p = this.emptySpot((x, z) => inSwamp(x, z, 3) && this.free(x, z, 2) && landTrailDist(x, z) > 6 && gateDist(x, z) > 14);
+      if (!p) return;
+      this.packCenters.push([p.x, p.z]);
+      this.taken.push([p.x, p.z]);
+      this.addSpawn(`swamp:bandit:${i}`, d, p.x, p.z, 'swamp', 0, r() * 6);
+    });
+
+    // attackable trees spread over the woods: 5 plain and 3 thorn trees mixed
+    const all = [...C.trees, ...C.thornTrees];
+    const order = [0, 5, 1, 6, 2, 7, 3, 4];
+    const okTree = (x: number, z: number) => inSwamp(x, z, 1.5) && this.free(x, z, 1.5) && landTrailDist(x, z) > 3 && gateDist(x, z) > 10 && !this.nearPack(x, z, 6);
+    this.spread(all.length, 14, box, okTree, true).forEach(({ x, z }, i) => {
+      this.reserved.push({ x, z, r: 0.8 });
+      this.addSpawn(`swamp:tree:${i}`, all[order[i]], x, z, 'swamp', 0, r() * 6);
+    });
+
+    C.assassins.forEach((d, i) => {
+      const p = this.emptySpot((x, z) => inSwamp(x, z, 3) && this.free(x, z, 2) && landTrailDist(x, z) > 6 && gateDist(x, z) > 14);
+      if (!p) return;
+      this.packCenters.push([p.x, p.z]);
+      this.taken.push([p.x, p.z]);
+      this.addSpawn(`swamp:assassin:${i}`, d, p.x, p.z, 'swamp', 0, r() * 6);
+    });
+
+    put('swamp:mark:pack', C.marks.pack.def, this.spotIn('swamp', C.marks.pack.x, C.marks.pack.z, 3), r() * 6);
+    C.marks.singles.forEach(({ def, x, z }, i) => {
+      const p = this.spotIn('swamp', x, z, 1.5);
+      this.taken.push([p.x, p.z]);
+      if (MOBS[def.id].static) this.reserved.push({ x: p.x, z: p.z, r: 0.8 });
+      else this.packCenters.push([p.x, p.z]);
+      this.addSpawn(`swamp:mark:${i}`, def, p.x, p.z, 'swamp', 0, r() * 6);
+    });
+  }
+
+  /**
+   * Dunes mobs (config DUNES_SPAWNERS), own rng: two spar battle groups (dragon + 6 warriors) mid-location, warrior pairs
+   * on the road edge, archer pairs and escorts off it, an ambush by the entrance between the two armour elites nearest it,
+   * and animals (dragons, lions, boar trios) off the roads. Packs are 12 m or more apart; spawn spots go to `reserved`.
+   */
+  private dunesMobs() {
+    const r = rng(99);
+    const C = DUNES_SPAWNERS;
+    const inD = (x: number, z: number, pad: number) => zoneIdAt(x, z) === 'dunes' && walkable(x, z, pad);
+    const box = () => {
+      let p = { x: 0, z: 0 };
+      for (let i = 0; i < 30; i++) {
+        p = { x: 6 + r() * 106, z: -12 + r() * 107 };
+        if (inD(p.x, p.z, 3)) break;
+      }
+      return p;
+    };
+    const entrance = GATES.find((t) => t.id === 'swamp-dunes')!;
+    const SAND_ROCK = [0xe8d0a0, 0xd8c090, 0xf0dcb0, 0xc9a870];
+    const ringOk = (c: { x: number; z: number }, n: number, a: number, rad = 1.8) =>
+      ringSpots(c.x, c.z, n, rad, a).every((p) => inD(p.x, p.z, 1.2) && this.free(p.x, p.z, 1));
+    const put = (id: string, p: PackDef, c: { x: number; z: number }, a: number) => {
+      const spots = ringSpots(c.x, c.z, p.slots.length, 1.8, a);
+      this.packCenters.push([c.x, c.z]);
+      this.taken.push([c.x, c.z]);
+      for (const sp of spots) this.reserved.push({ x: sp.x, z: sp.z, r: 1.2 });
+      this.addPack(id, p, spots, 'dunes', 0);
+    };
+    const room = (gap: number, apart = 12) => (x: number, z: number) => inD(x, z, 3) && this.free(x, z, 2.5)
+      && landTrailDist(x, z) > gap && gateDist(x, z) > 14 && !this.nearPack(x, z, apart);
+
+    // battle groups: the dragon in the middle of the location, six warriors in a ring round it
+    const ARENAS = [{ x: 51, z: 36 }, { x: 65, z: 45 }];
+    C.battles.forEach((p, k) => {
+      const t = ARENAS[k];
+      let best: { x: number; z: number } | undefined;
+      for (let d = 0; d < 30 && !best; d += 1.5) {
+        for (let q = 0; q < Math.max(1, d * 4); q++) {
+          const a = (q / Math.max(1, d * 4)) * Math.PI * 2;
+          const c = { x: t.x + Math.sin(a) * d, z: t.z + Math.cos(a) * d };
+          if (inD(c.x, c.z, 4.5) && this.free(c.x, c.z, 3.5) && landTrailDist(c.x, c.z) > 11 && gateDist(c.x, c.z) > 14
+            && !this.nearPack(c.x, c.z, 14) && ringOk(c, 6, 0.3, 3.2)) { best = c; break; }
+        }
+      }
+      if (!best) return;
+      const spots = [best, ...ringSpots(best.x, best.z, 6, 3.2, 0.3)];
+      this.packCenters.push([best.x, best.z]);
+      this.taken.push([best.x, best.z]);
+      for (const sp of spots) this.reserved.push({ x: sp.x, z: sp.z, r: 1.4 });
+      this.addPack(`dunes:battle:${k}`, p, spots, 'dunes', 0, 0, best);
+    });
+
+    // ambush between the two armour elites nearest the entrance: a bandit by a campfire, four hiding among rocks and snags
+    const elites = this.spawns.filter((sp) => /^elite:dunes:/.test(sp.id) && MOBS[sp.kind].drop?.kind === 'armor')
+      .sort((a, b) => Math.hypot(a.x - entrance.x, a.z - entrance.z) - Math.hypot(b.x - entrance.x, b.z - entrance.z)).slice(0, 2);
+    if (elites.length === 2) {
+      const mid = { x: (elites[0].x + elites[1].x) / 2, z: (elites[0].z + elites[1].z) / 2 };
+      const apart = (p: { x: number; z: number }, d: number) => this.spawns.every((sp) => Math.hypot(sp.x - p.x, sp.z - p.z) > d);
+      for (let t = 0; t < 3000; t++) {
+        const ra = r() * Math.PI * 2;
+        const rd = Math.sqrt(r()) * 10;
+        const f = { x: mid.x + Math.sin(ra) * rd, z: mid.z + Math.cos(ra) * rd };
+        if (!inD(f.x, f.z, 2.5) || !this.free(f.x, f.z, 2.5) || landTrailDist(f.x, f.z) < 7 || gateDist(f.x, f.z) < 14
+          || this.nearPack(f.x, f.z, 12) || !apart(f, 12)) continue;
+        const b = r() * Math.PI * 2;
+        const fire = { x: f.x + Math.sin(b) * 2.5, z: f.z + Math.cos(b) * 2.5 };
+        if (!inD(fire.x, fire.z, 1.2) || !this.free(fire.x, fire.z, 1.2)) continue;
+        const hidden: { x: number; z: number }[] = [];
+        const a0 = r() * Math.PI * 2;
+        for (let q = 0; q < 4; q++) {
+          for (let i = 0; i < 60; i++) {
+            const a = a0 + (q / 4) * Math.PI * 2 + (r() - 0.5) * 1.2;
+            const d = 7 + r() * 5;
+            const h = { x: f.x + Math.sin(a) * d, z: f.z + Math.cos(a) * d };
+            if (!inD(h.x, h.z, 1.2) || !this.free(h.x, h.z, 1.2) || landTrailDist(h.x, h.z) < 5 || gateDist(h.x, h.z) < 10 || !apart(h, 10)
+              || hidden.some((o) => Math.hypot(o.x - h.x, o.z - h.z) < 6)) continue;
+            hidden.push(h);
+            break;
+          }
+        }
+        if (hidden.length < 4) continue;
+        // a tall rock and a bleached snag 2.2-3.5 m from each hidden bandit, leaving its own spot free
+        const mobs = [f, ...hidden];
+        const rocks: Inst[] = [];
+        const snags: Inst[] = [];
+        const used: { x: number; z: number }[] = [];
+        let cover = true;
+        for (const h of hidden) {
+          for (const kind of ['rock', 'snag'] as const) {
+            let done = false;
+            for (let i = 0; i < 80 && !done; i++) {
+              const a = r() * Math.PI * 2;
+              const d = 2.2 + r() * 1.3;
+              const x = h.x + Math.sin(a) * d;
+              const z = h.z + Math.cos(a) * d;
+              if (!inD(x, z, 1.2) || !this.free(x, z, 1) || landTrailDist(x, z) < 3 || mobs.some((o) => Math.hypot(o.x - x, o.z - z) < 2.2)
+                || used.some((o) => Math.hypot(o.x - x, o.z - z) < 2)) continue;
+              used.push({ x, z });
+              if (kind === 'rock') rocks.push({ x, z, s: 2 + r() * 0.6, r: r() * 6, tint: SAND_ROCK[Math.floor(r() * SAND_ROCK.length)], k: 1.6 });
+              else snags.push({ x, z, s: 0.8 + r() * 0.4, r: r() * 6 });
+              done = true;
+            }
+            if (!done) cover = false;
+          }
+        }
+        if (!cover) continue;
+        this.packCenters.push([f.x, f.z]);
+        for (const m of mobs) {
+          this.packCenters.push([m.x, m.z]);
+          this.reserved.push({ x: m.x, z: m.z, r: 1.2 });
+          this.taken.push([m.x, m.z]);
+        }
+        for (const k of rocks) this.obstacles.push({ x: k.x, z: k.z, r: 0.42 * k.s });
+        for (const k of snags) this.obstacles.push({ x: k.x, z: k.z, r: 0.45 });
+        this.campfireDecor(fire.x, fire.z, false);
+        this.scatter('orc_stone_big', rocks);
+        this.deadTrees(snags, 0xb8a888);
+        this.addPack('dunes:ambush:0', C.ambush, mobs, 'dunes', 0, 0, f);
+        break;
+      }
+    }
+
+    // warrior pairs on the road edge at irregular gaps, alternating sides; the last one on the short branch
+    const lines = [LAND_TRAILS[3], LAND_TRAILS[7]];
+    const lens = lines.map((l) => l.slice(1).reduce((t, p, i) => t + Math.hypot(p[0] - l[i][0], p[1] - l[i][1]), 0));
+    const onLine = (li: number, d: number) => {
+      const l = lines[li];
+      for (let i = 0; i < l.length - 1; i++) {
+        const len = Math.hypot(l[i + 1][0] - l[i][0], l[i + 1][1] - l[i][1]);
+        if (d <= len || i === l.length - 2) {
+          const k = Math.min(1, d / len);
+          return { x: l[i][0] + (l[i + 1][0] - l[i][0]) * k, z: l[i][1] + (l[i + 1][1] - l[i][1]) * k, tx: (l[i + 1][0] - l[i][0]) / len, tz: (l[i + 1][1] - l[i][1]) / len };
+        }
+        d -= len;
+      }
+      return { x: 0, z: 0, tx: 1, tz: 0 };
+    };
+    const mainPairs = C.roadPairs.length - 1;
+    C.roadPairs.forEach((p, i) => {
+      const li = i < mainPairs ? 0 : 1;
+      const lo = li ? 6 : 18;
+      const hi = lens[li] - (li ? 6 : 10);
+      const frac = li ? 0.5 : (i + 0.5 + (r() - 0.5) * 0.7) / mainPairs;
+      const d0 = lo + frac * (hi - lo);
+      for (const ds of [0, 5, -5, 10, -10, 15, -15, 20, -20]) {
+        const q = onLine(li, Math.min(hi, Math.max(lo, d0 + ds)));
+        for (const side of [i % 2 ? 1 : -1, i % 2 ? -1 : 1]) {
+          const off = 3.6 + r() * 0.8;
+          const c = { x: q.x + q.tz * side * off, z: q.z - q.tx * side * off };
+          const a = Math.atan2(q.tx, q.tz);
+          if (!ringOk(c, 2, a) || landTrailDist(c.x, c.z) < 2.2 || gateDist(c.x, c.z) < 14 || this.nearPack(c.x, c.z, 12)) continue;
+          put(`dunes:warriors:${i}`, p, c, a);
+          return;
+        }
+      }
+    });
+
+    // archer pairs a bit off the road, escorts (archer + two warriors) further out
+    this.spread(C.archerPairs.length, 22, box, (x, z) => room(6)(x, z) && ringOk({ x, z }, 2, 0), true).forEach((c, i) => {
+      put(`dunes:archers:${i}`, C.archerPairs[i], c, r() * 6);
+    });
+    this.spread(C.escorts.length, 24, box, (x, z) => room(8)(x, z) && ringOk({ x, z }, 3, 0), true).forEach((c, i) => {
+      put(`dunes:escort:${i}`, C.escorts[i], c, r() * 6);
+    });
+
+    // animals keep off the roads (8 m or more)
+    this.spread(C.dragons.length, 22, box, room(8, 10), true).forEach((c, i) => {
+      this.packCenters.push([c.x, c.z]);
+      this.reserved.push({ x: c.x, z: c.z, r: 1.6 });
+      this.addSpawn(`dunes:dragon:${i}`, C.dragons[i], c.x, c.z, 'dunes', 0, r() * 6);
+    });
+    this.spread(C.lionPairs.length, 20, box, (x, z) => room(10, 10)(x, z) && ringOk({ x, z }, 2, 0), true).forEach((c, i) => {
+      put(`dunes:lions:${i}`, C.lionPairs[i], c, r() * 6);
+    });
+    this.spread(C.lions.length, 20, box, room(8, 10), true).forEach((c, i) => {
+      this.packCenters.push([c.x, c.z]);
+      this.reserved.push({ x: c.x, z: c.z, r: 1.2 });
+      this.addSpawn(`dunes:lion:${i}`, C.lions[i], c.x, c.z, 'dunes', 0, r() * 6);
+    });
+    this.spread(C.boars.length, 20, box, (x, z) => room(10, 10)(x, z) && ringOk({ x, z }, 3, 0), true).forEach((c, i) => {
+      put(`dunes:boars:${i}`, C.boars[i], c, r() * 6);
+    });
+    // lone lions by the coast and in the far corners (within 9 m of the walkable border), placed last so nothing else moves
+    const edge = (x: number, z: number) => room(8, 10)(x, z) && !walkable(x, z, 9);
+    const edgeBox = () => {
+      let p = box();
+      for (let i = 0; i < 40 && (!inD(p.x, p.z, 3) || walkable(p.x, p.z, 9)); i++) p = box();
+      return p;
+    };
+    C.edgeLions.forEach((d, i) => {
+      // one at a time, so each lion sees the earlier ones as packs (10 m apart)
+      const c = this.spread(1, 20, edgeBox, edge, true)[0];
+      if (!c) return;
+      this.packCenters.push([c.x, c.z]);
+      this.reserved.push({ x: c.x, z: c.z, r: 1.2 });
+      this.addSpawn(`dunes:edgelion:${i}`, d, c.x, c.z, 'dunes', 0, r() * 6);
+    });
+  }
+
+  /**
+   * Grove ambushes (config GROVE_SPAWNERS.ambushes) on the west coast: slot 0 stands by a campfire, the other four hide
+   * among trees by the water, 7–12 m round it. The pack centre is the fire elf, so the leash covers the hidden ones.
+   */
+  private groveAmbushes() {
+    const r = rng(93);
+    const FAR = -135;
+    const fits = (x: number, z: number, pad: number) => x < FAR && zoneIdAt(x, z) === 'grove' && this.free(x, z, pad);
+    const apart = (p: { x: number; z: number }) => this.spawns.every((sp) => Math.hypot(sp.x - p.x, sp.z - p.z) > 12);
+    const trees: Inst[] = [];
+    const fires: { x: number; z: number }[] = [];
+    GROVE_SPAWNERS.ambushes.forEach((p, k) => {
+      for (let t = 0; t < 3000; t++) {
+        const f = { x: FAR - 1 - r() * 25, z: -33 + k * 29 + r() * 8 };
+        if (!fits(f.x, f.z, 2.5) || coastDist(f.x, f.z) > 14 || landTrailDist(f.x, f.z) < 10 || gateDist(f.x, f.z) < 12
+          || this.nearPack(f.x, f.z, 12) || !apart(f) || fires.some((o) => Math.hypot(o.x - f.x, o.z - f.z) < 25)) continue;
+        const b = r() * Math.PI * 2;
+        const fire = { x: f.x + Math.sin(b) * 2.5, z: f.z + Math.cos(b) * 2.5 };
+        if (!fits(fire.x, fire.z, 1.2)) continue;
+        // four hidden elves on the shore side, 7–12 m round the fire, 6 m or more from each other and spread out
+        const hidden: { x: number; z: number }[] = [];
+        for (let q = 0; q < 4; q++) {
+          let best: { x: number; z: number } | undefined;
+          let bestScore = Infinity;
+          for (let i = 0; i < 80; i++) {
+            const a = r() * Math.PI * 2;
+            const d = 7 + r() * 5;
+            const h = { x: f.x + Math.sin(a) * d, z: f.z + Math.cos(a) * d };
+            if (!fits(h.x, h.z, 1.2) || coastDist(h.x, h.z) > 15 || !apart(h) || landTrailDist(h.x, h.z) < 6) continue;
+            const gap = Math.min(99, ...hidden.map((o) => Math.hypot(o.x - h.x, o.z - h.z)));
+            const score = coastDist(h.x, h.z) - gap;
+            if (gap >= 6 && score < bestScore) { best = h; bestScore = score; }
+          }
+          if (!best) break;
+          hidden.push(best);
+        }
+        if (hidden.length < 4) continue;
+        // two or three autumn trees right beside each hidden elf, leaving it a free spot
+        const mobs = [f, ...hidden];
+        const own: Inst[] = [];
+        let cover = true;
+        for (const h of hidden) {
+          let left = 2 + Math.floor(r() * 2);
+          for (let i = 0; i < 80 && left; i++) {
+            const a = r() * Math.PI * 2;
+            const d = 2.2 + r() * 1.2;
+            const x = h.x + Math.sin(a) * d;
+            const z = h.z + Math.cos(a) * d;
+            if (!fits(x, z, 1) || landTrailDist(x, z) < 3 || mobs.some((o) => Math.hypot(o.x - x, o.z - z) < 2.2)
+              || own.some((o) => Math.hypot(o.x - x, o.z - z) < 1.6)) continue;
+            own.push({ x, z, s: 0.55 + r() * 0.35, r: r() * 6, tint: GROVE_CROWNS[Math.floor(r() * GROVE_CROWNS.length)] });
+            left--;
+          }
+          if (left > 0) cover = false;
+        }
+        if (!cover) continue;
+        fires.push(f);
+        this.packCenters.push([f.x, f.z]);
+        for (const m of mobs) {
+          this.reserved.push({ x: m.x, z: m.z, r: 1.2 });
+          this.taken.push([m.x, m.z]);
+        }
+        this.campfireDecor(fire.x, fire.z, false);
+        for (const tr of own) this.reserved.push({ x: tr.x, z: tr.z, r: 0.5 });
+        trees.push(...own);
+        this.addPack(`grove:ambush:${k}`, p, mobs, 'grove', 0, 0, f);
+        return;
+      }
+    });
+    this.scatter('elf_tree', trees, true, { recolor: true });
   }
 
   /** Snow Pass mobs (config PEAKS_SPAWNERS): guards past the hub gate, packs at hand-picked spots, lone assassins in the woods. */
@@ -1653,14 +2134,14 @@ export class World {
       const it = { x, z, s: 0, r: r() * 6, tint: grey() };
       if (k < 0.3) stumps.push({ ...it, s: 0.25 + r() * 0.25 });
       else if (k < 0.72) rocks.push({ ...it, s: 0.5 + r() * 0.6 });
-      else if (k < 0.9) { bigRocks.push({ ...it, s: 0.45 + r() * 0.4 }); this.obstacles.push({ x, z, r: 1 }); }
-      else { logs.push({ ...it, s: 0.45 + r() * 0.15 }); this.obstacles.push({ x, z, r: 0.8 }); }
+      else if (k < 0.9) { bigRocks.push({ ...it, s: 0.45 + r() * 0.4 }); this.reserved.push({ x, z, r: 1 }); }
+      else { logs.push({ ...it, s: 0.45 + r() * 0.15 }); this.reserved.push({ x, z, r: 0.8 }); }
     });
     clumps(40, 3, [2, 3], [0.8, 1.8], ok(2.6, 0.6), (x, z) => {
       const it = { x, z, s: 0, r: r() * 6, tint: SNOW[Math.floor(r() * SNOW.length)] };
       if (r() < 0.6) bushes.push({ ...it, s: 0.6 + r() * 0.5 });
       else smallBushes.push({ ...it, s: 0.7 + r() * 0.6 });
-      this.obstacles.push({ x, z, r: 0.3 });
+      this.reserved.push({ x, z, r: 0.3 });
     });
     this.scatter('elf_tree', trees, true, { recolor: true });
     this.pines(pines);
@@ -1674,6 +2155,144 @@ export class World {
   }
 
   /**
+   * Autumn grove: a cobbled road with elf monoliths at uneven intervals, orange and red woods in clumps (thicker towards the
+   * western coast, with a few clearings left open), scrub, boulders, stumps, logs and leaf piles. Keeps off the roads, gates and spawns.
+   */
+  private dressGrove() {
+    const r = rng(95);
+    const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
+    const AUTUMN = [0xff8a30, 0xffb040, 0xe85a28, 0xd8402a, 0xffd050, 0xc86a20];
+    const GROVE_ROCK = [0x8c8070, 0x9a8a72, 0x7a7262, 0xa59478];
+    const inGrove = () => ({ x: -162 + r() * 152, z: -55 + r() * 115 });
+    const roads = [LAND_TRAILS[1], LAND_TRAILS[5]];
+
+    // road paving like the camp's (terrain.buildCobbles): continuous 10 m pieces, grass cleared under them
+    for (const line of roads) {
+      for (let i = 0; i < line.length - 1; i++) {
+        const [ax, az] = line[i], [bx, bz] = line[i + 1];
+        const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 10);
+        for (let k = 0; k < n; k++) {
+          const a = { x: ax + (bx - ax) * k / n, z: az + (bz - az) * k / n, r: 0.6 };
+          const b = { x: ax + (bx - ax) * (k + 1) / n, z: az + (bz - az) * (k + 1) / n };
+          if (zoneIdAt(a.x, a.z) !== 'grove' || zoneIdAt(b.x, b.z) !== 'grove' || gateDist(a.x, a.z) < 3 || gateDist(b.x, b.z) < 3) continue;
+          this.group.add(buildCobbles(a, b));
+          for (let t = 0; t <= 1; t += 0.1) this.layers.clear(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t, 1.5);
+        }
+      }
+    }
+
+    // clearings left open in the west (room for camps and ambushes)
+    const clearings: { x: number; z: number }[] = [];
+    for (let i = 0; i < 400 && clearings.length < 5; i++) {
+      const p = inGrove();
+      if (p.x < -118 && zoneIdAt(p.x, p.z) === 'grove' && walkable(p.x, p.z, 7) && landTrailDist(p.x, p.z) > 10 && clearings.every((c) => Math.hypot(c.x - p.x, c.z - p.z) > 26)) clearings.push(p);
+    }
+    const open = (x: number, z: number, d: number) => clearings.every((c) => Math.hypot(c.x - x, c.z - z) > d);
+    const ok = (pad: number, gap = 3.5, clear = 8, pack = 5) => (x: number, z: number) => zoneIdAt(x, z) === 'grove' && this.free(x, z, pad)
+      && !this.nearPack(x, z, pack) && gateDist(x, z) > 7 && landTrailDist(x, z) > gap && open(x, z, clear)
+      && this.spawns.every((sp) => (sp.x - x) ** 2 + (sp.z - z) ** 2 > 6.25);
+
+    const gTrees: Inst[] = [], gBush: Inst[] = [], leaves: Inst[] = [], stumps: Inst[] = [], logs: Inst[] = [];
+    const bigE: Inst[] = [], midO: Inst[] = [], smallE: Inst[] = [], smallO: Inst[] = [];
+    const tree = (x: number, z: number) => {
+      gTrees.push({ x, z, s: 0.55 + r() * 0.35, r: r() * 6, tint: pick(AUTUMN) });
+      this.reserved.push({ x, z, r: 0.5 });
+    };
+    const bush = (x: number, z: number) => {
+      const s = 0.16 + r() * 0.12;
+      gBush.push({ x, z, s, r: r() * 6, y: s, tint: pick(AUTUMN) });
+      this.reserved.push({ x, z, r: 2.4 * s });
+    };
+    const leafPile = (x: number, z: number) => {
+      const s = 0.09 + r() * 0.08;
+      leaves.push({ x, z, s, r: r() * 6, y: s * 0.4, tint: pick(AUTUMN) });
+    };
+    const stone = (x: number, z: number, size: number) => {
+      const t = pick(GROVE_ROCK);
+      if (size === 2) { const s = 0.55 + r() * 0.4; bigE.push({ x, z, s, r: r() * 6, tint: t, k: 1.3 }); this.obstacles.push({ x, z, r: 0.55 * s }); }
+      else if (size === 1) { const s = 1 + r() * 0.7; midO.push({ x, z, s, r: r() * 6, tint: t, k: 1.3 }); this.reserved.push({ x, z, r: 0.3 * s }); }
+      else if (r() < 0.5) smallE.push({ x, z, s: 0.25 + r() * 0.25, r: r() * 6, tint: t, k: 1.3 });
+      else smallO.push({ x, z, s: 0.6 + r() * 0.5, r: r() * 6, tint: t, k: 1.3 });
+    };
+    /** Up to n things dropped at random round (x, z) where there is room. */
+    const around = (x: number, z: number, n: number, rad: number, pad: number, put: (x: number, z: number) => void) => {
+      const good = ok(pad, 2.5, 5);
+      for (let i = 0; i < n; i++) {
+        const a = r() * Math.PI * 2, d = 0.8 + Math.sqrt(r()) * rad;
+        const px = x + Math.sin(a) * d, pz = z + Math.cos(a) * d;
+        if (good(px, pz)) put(px, pz);
+      }
+    };
+
+    // elf monoliths along both roads at uneven intervals, on either side, with stones, scrub and fallen leaves round each
+    for (const line of roads) {
+      const segs = line.slice(1).map((p, i) => Math.hypot(p[0] - line[i][0], p[1] - line[i][1]));
+      const total = segs.reduce((a, b) => a + b, 0);
+      const at = (d: number) => {
+        let i = 0;
+        while (i < segs.length - 1 && d > segs[i]) d -= segs[i++];
+        const k = d / segs[i];
+        const [x0, z0] = line[i], [x1, z1] = line[i + 1];
+        return { x: x0 + (x1 - x0) * k, z: z0 + (z1 - z0) * k, tx: (x1 - x0) / segs[i], tz: (z1 - z0) / segs[i] };
+      };
+      let side = r() < 0.5 ? -1 : 1;
+      for (let d = 4 + r() * 10; d < total - 3; d += 12 + r() * 18) {
+        if (r() < 0.6) side = -side;
+        for (let t = 0; t < 8; t++) {
+          const p = at(Math.max(0, Math.min(total, d + (r() - 0.5) * 5)));
+          const s = t % 2 ? -side : side;
+          const off = 4.2 + r() * 1.8;
+          const x = p.x - p.tz * s * off, z = p.z + p.tx * s * off;
+          if (!ok(1.6, 3, 0, 2.5)(x, z)) continue;
+          this.place('elf_monolith', x, z, 0.4 + r() * 0.1, r() * 6, 0.7);
+          this.taken.push([x, z]);
+          around(x, z, 3 + Math.floor(r() * 3), 2.6, 0.5, (px, pz) => stone(px, pz, 0));
+          around(x, z, 1 + Math.floor(r() * 2), 2.8, 0.8, bush);
+          around(x, z, 3 + Math.floor(r() * 3), 2.2, 0, leafPile);
+          break;
+        }
+      }
+    }
+
+    // woods: clumps of trees with scrub in the gaps, at every coast too (cover for ambushes), then loose singles
+    const clump = (x: number, z: number) => {
+      const n = 2 + Math.floor(r() * 4);
+      around(x, z, n, 3.4, 1.2, tree);
+      around(x, z, 1 + Math.floor(r() * 3), 3.8, 0.8, bush);
+      around(x, z, 1 + Math.floor(r() * 2), 3.4, 0, leafPile);
+    };
+    for (const { x, z } of this.spread(22, 8, inGrove, ok(1.5, 4, 9), true)) clump(x, z);
+    for (const { x, z } of this.spread(14, 7, inGrove, (x, z) => ok(1.5, 4, 9)(x, z) && coastDist(x, z) < 16, true)) clump(x, z);
+    for (const { x, z } of this.spread(34, 4, inGrove, ok(1, 3.5, 6), true)) {
+      const k = r();
+      if (k < 0.55) tree(x, z);
+      else if (k < 0.8) bush(x, z);
+      else if (k < 0.9) stumps.push({ x, z, s: 0.3 + r() * 0.2, r: r() * 6 });
+      else { logs.push({ x, z, s: 0.5 + r() * 0.2, r: r() * 6 }); this.obstacles.push({ x, z, r: 0.8 }); }
+    }
+    // boulders of three sizes, stumps, logs and leaf piles over the open ground
+    for (const { x, z } of this.spread(12, 9, inGrove, ok(1.2, 4, 0), true)) stone(x, z, 2);
+    for (const { x, z } of this.spread(20, 6, inGrove, ok(1, 4, 0), true)) stone(x, z, 1);
+    for (const { x, z } of this.spread(26, 4, inGrove, ok(0.5, 3, 0), true)) stone(x, z, 0);
+    for (const { x, z } of this.spread(14, 7, inGrove, ok(1, 5, 4), true)) stumps.push({ x, z, s: 0.3 + r() * 0.2, r: r() * 6 });
+    for (const { x, z } of this.spread(10, 8, inGrove, ok(1.2, 5, 4), true)) {
+      logs.push({ x, z, s: 0.5 + r() * 0.2, r: r() * 6 });
+      this.obstacles.push({ x, z, r: 0.8 });
+    }
+    for (const { x, z } of this.spread(30, 4, inGrove, ok(0.3, 3, 0), true)) leafPile(x, z);
+
+    this.scatter('elf_tree', gTrees, true, { recolor: true });
+    this.scatter('elf_foliage_mid', gBush, true, { recolor: true });
+    this.scatter('elf_foliage_small', leaves, false, { recolor: true });
+    this.scatter('elf_stone_big', bigE);
+    this.scatter('orc_stone_mid', midO);
+    this.scatter('elf_stone_small', smallE, false);
+    this.scatter('orc_stone_small', smallO, false);
+    this.scatter('elf_tree_root_1', stumps, false);
+    this.scatter('orc_log', logs);
+  }
+
+  /**
    * The placeholder locations get a look of their own (decor only; trunks, rocks and logs collide): an autumn wood in
    * the grove, murky pools with reeds and lily pads, swamp trees and snags in the swamp, bleached rocks, dry scrub
    * and bones in the dunes, boulders and pines on the hills. Everything keeps off their paths, packs and passages.
@@ -1683,85 +2302,15 @@ export class World {
     const anywhere = () => ({ x: MAP_BOX.x + r() * MAP_BOX.size, z: MAP_BOX.z + r() * MAP_BOX.size });
     const room = (zone: ZoneId, pad: number, gap = 3.5) => (x: number, z: number) => zoneIdAt(x, z) === zone && this.free(x, z, pad)
       && !this.nearPack(x, z, 5) && gateDist(x, z) > 7 && landTrailDist(x, z) > gap;
-    const tree = (list: Inst[], x: number, z: number, tint: number) => {
-      list.push({ x, z, s: 0.55 + r() * 0.35, r: r() * 6, tint });
-      this.obstacles.push({ x, z, r: 0.5 });
-    };
-    const bush = (list: Inst[], x: number, z: number, tint?: number) => {
-      const s = 0.16 + r() * 0.12;
-      list.push({ x, z, s, r: r() * 6, y: 1.0 * s, tint });
-      this.obstacles.push({ x, z, r: 2.4 * s });
-    };
     /** A boulder of scale s; `cr`: its collision radius, `k`: tint brightness. */
-    const rock = (list: Inst[], x: number, z: number, s: number, cr: number, tint?: number, k = 1) => {
+    const rock = (list: Inst[], x: number, z: number, s: number, cr: number, tint?: number, k = 1, block = true) => {
       list.push({ x, z, s, r: r() * 6, tint, k });
-      this.obstacles.push({ x, z, r: cr });
+      (block ? this.obstacles : this.reserved).push({ x, z, r: cr });
     };
 
-    // Autumn grove: orange, red and gold crowns, leafy scrub, stumps and fallen logs
-    const AUTUMN = [0xff8a30, 0xffb040, 0xe85a28, 0xd8402a, 0xffd050, 0xc86a20];
-    const gTrees: Inst[] = [], gBush: Inst[] = [], stumps: Inst[] = [], logs: Inst[] = [];
-    for (const { x, z } of this.spread(90, 6, anywhere, room('grove', 1.2))) {
-      const k = r();
-      if (k < 0.62) tree(gTrees, x, z, pick(AUTUMN));
-      else if (k < 0.86) bush(gBush, x, z, pick(AUTUMN));
-      else if (k < 0.94) stumps.push({ x, z, s: 0.3 + r() * 0.2, r: r() * 6 });
-      else { logs.push({ x, z, s: 0.5 + r() * 0.2, r: r() * 6 }); this.obstacles.push({ x, z, r: 0.8 }); }
-    }
-    this.scatter('elf_tree', gTrees, true, { recolor: true });
-    this.scatter('elf_foliage_mid', gBush, true, { recolor: true });
-
-    // Swamp: pools with reeds and lily pads, olive trees, snags, mossy logs and stones
-    const MURK = [0x5e7030, 0x4e6229, 0x6a6e34, 0x445a26];
-    const sTrees: Inst[] = [], sBush: Inst[] = [], snags: Inst[] = [], sRocks: Inst[] = [];
-    for (const { x, z } of this.spread(70, 5.5, anywhere, room('swamp', 1.2))) {
-      const k = r();
-      if (k < 0.4) tree(sTrees, x, z, pick(MURK));
-      else if (k < 0.62) { snags.push({ x, z, s: 0.8 + r() * 0.5, r: r() * 6 }); this.obstacles.push({ x, z, r: 0.45 }); }
-      else if (k < 0.8) bush(sBush, x, z, pick(MURK));
-      else if (k < 0.9) { logs.push({ x, z, s: 0.5 + r() * 0.2, r: r() * 6 }); this.obstacles.push({ x, z, r: 0.8 }); }
-      else sRocks.push({ x, z, s: 0.4 + r() * 0.3, r: r() * 6, tint: 0x8a9a70 });
-    }
-    this.scatter('elf_tree', sTrees, true, { recolor: true });
-    this.scatter('elf_foliage_mid', sBush, true, { recolor: true });
-    this.deadTrees(snags, 0x4e5240);
-    this.scatter('elf_rock_small', sRocks, false);
-    const reeds: Inst[] = [];
-    const pads: Inst[] = [];
-    // (the forest pond gets a few too, greener)
-    for (const p of this.ponds) {
-      for (let k = 0; k < (p.murky ? 18 : 9); k++) {
-        const a = r() * Math.PI * 2;
-        const d = pondR(p, a) * (0.86 + r() * 0.24);
-        const x = p.x + Math.sin(a) * d;
-        const z = p.z + Math.cos(a) * d;
-        reeds.push({ x, z, s: 0.7 + r() * 0.6, r: r() * 6, tint: pick(p.murky ? [0x6a7a34, 0x7e8a3c, 0x8a7a40] : [0x5a8a34, 0x6a9a3c, 0x78903e]) });
-      }
-      for (let k = 0; k < (p.murky ? 9 : 4); k++) {
-        const a = r() * Math.PI * 2;
-        const d = Math.sqrt(r()) * pondR(p, a) * 0.7;
-        pads.push({ x: p.x + Math.sin(a) * d, z: p.z + Math.cos(a) * d, s: 0.7 + r() * 0.6, r: r() * 6, y: 0.055, tint: pick([0x4e8a36, 0x5e9a3e, 0x6aa040]) });
-      }
-    }
-    this.reeds(reeds);
-    this.lilyPads(pads);
-
-    // Dunes: sun-bleached boulders and stones, dry scrub, white snags and old bones
-    const SAND_ROCK = [0xe8d0a0, 0xd8c090, 0xf0dcb0];
-    const dRocks: Inst[] = [], dSmall: Inst[] = [], scrub: Inst[] = [], bleached: Inst[] = [], bones: Inst[] = [];
-    for (const { x, z } of this.spread(70, 6, anywhere, room('dunes', 1.2))) {
-      const k = r();
-      if (k < 0.3) { const s = 0.45 + r() * 0.35; rock(dRocks, x, z, s, 1.6 * s, pick(SAND_ROCK), 2.1); }
-      else if (k < 0.5) dSmall.push({ x, z, s: 0.5 + r() * 0.5, r: r() * 6, tint: pick(SAND_ROCK), k: 1.8 });
-      else if (k < 0.75) bush(scrub, x, z, pick([0xc8a048, 0xb89040, 0xd8b860]));
-      else if (k < 0.88) { bleached.push({ x, z, s: 0.7 + r() * 0.4, r: r() * 6 }); this.obstacles.push({ x, z, r: 0.45 }); }
-      else bones.push({ x, z, s: 0.35 + r() * 0.2, r: r() * 6 });
-    }
-    this.scatter('elf_rock_big', dRocks);
-    this.scatter('elf_rock_small', dSmall, false);
-    this.scatter('elf_foliage_small', scrub, true, { recolor: true });
-    this.deadTrees(bleached, 0xb8a888);
-    this.scatter('undead_bones_remains', bones, false);
+    this.dressGrove();
+    this.dressSwamp();
+    this.dressDunes();
 
     // Rocky hills dressing. Placed in this order so the hand-made bits (shrines, bones, scrub) get the room first and the boulders fill round them.
     const bushOk = room('hills', 0.4, 3.5);
@@ -1772,7 +2321,7 @@ export class World {
     const hBush = (x: number, z: number) => {
       const s = 0.22 + r() * 0.18;
       (r() < 0.65 ? hMid : hSmall).push({ x, z, s, r: r() * 6, y: s });
-      this.obstacles.push({ x, z, r: 1.8 * s });
+      this.reserved.push({ x, z, r: 1.8 * s });
     };
     /** Up to n bushes dropped at random round (x, z), on free ground off the road. */
     const tufts = (x: number, z: number, n: number, rad: number) => {
@@ -1912,8 +2461,8 @@ export class World {
       const k = r();
       if (k < 0.18) { const s = 2.4 + r() * 1.2; rock(bigO, x, z, s, 0.42 * s, hTone(), 1.4); }
       else if (k < 0.32) { const s = 0.9 + r() * 0.5; rock(bigE, x, z, s, 0.6 * s, hTone(), 1.4); }
-      else if (k < 0.5) { const s = 1.2 + r() * 0.6; rock(midO, x, z, s, 0.3 * s, hTone(), 1.4); }
-      else if (k < 0.62) { const s = 0.8 + r() * 0.3; rock(midE, x, z, s, 0.5 * s, hTone(), 1.4); }
+      else if (k < 0.5) { const s = 1.2 + r() * 0.6; rock(midO, x, z, s, 0.3 * s, hTone(), 1.4, false); }
+      else if (k < 0.62) { const s = 0.8 + r() * 0.3; rock(midE, x, z, s, 0.5 * s, hTone(), 1.4, false); }
       else if (k < 0.82) smallO.push({ x, z, s: 0.6 + r() * 0.6, r: r() * 6, tint: hTone(), k: 1.4 });
       else smallE.push({ x, z, s: 0.3 + r() * 0.3, r: r() * 6, tint: hTone(), k: 1.4 });
     }
@@ -1956,7 +2505,7 @@ export class World {
     };
     for (const g of pairs) {
       const f = nearSpot(g, 2, 3) ?? nearSpot(g, 2, 1.8);
-      if (f) this.place('orc_campfire', f.x, f.z, 0.42, f.a, 0.8);
+      if (f) { this.place('orc_campfire', f.x, f.z, 0.42, f.a, 0); this.reserved.push({ x: f.x, z: f.z, r: 0.8 * ENV }); }
     }
     const tauren = hMobs.filter((sp) => sp.kind.startsWith('tauren'));
     for (let i = 0; i < 2 && tauren.length; i++) {
@@ -1964,8 +2513,227 @@ export class World {
       const f = nearSpot(sp, 3, 0);
       if (f) this.place('orc_drum_big', f.x, f.z, 0.45, f.a, 0.6);
     }
+  }
+
+  /**
+   * The dunes (whole zone): sand-tinted boulders of three sizes, orc tusks and skulls, bleached snags and stumps, dry scrub, a
+   * few altar shrines, and bones beside the road. Keeps off the roads, gates and spawns; only tall things (trunks, big
+   * boulders, tusks, altars) collide, the rest goes to `reserved`.
+   */
+  private dressDunes() {
+    const r = rng(96);
+    const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
+    const inDunes = () => ({ x: 4 + r() * 113, z: -16 + r() * 113 });
+    const SAND_ROCK = [0xe8d0a0, 0xd8c090, 0xf0dcb0, 0xc9a870];
+    const DRY = [0xc8a048, 0xb89040, 0xd8b860, 0xa88838];
+    const ok = (pad: number, gap = 3.5, pack = 5) => (x: number, z: number) => zoneIdAt(x, z) === 'dunes' && this.free(x, z, pad)
+      && !this.nearPack(x, z, pack) && gateDist(x, z) > 7 && landTrailDist(x, z) > gap
+      && this.spawns.every((sp) => (sp.x - x) ** 2 + (sp.z - z) ** 2 > 6.25);
+    const L: Record<string, Inst[]> = {};
+    const add = (name: string, it: Inst) => (L[name] ??= []).push(it);
+    const snags: Inst[] = [];
+    const stone = (name: string, x: number, z: number, s: number, cr: number) => {
+      add(name, { x, z, s, r: r() * 6, tint: pick(SAND_ROCK), k: 1.6 });
+      if (cr > 0) this.obstacles.push({ x, z, r: cr });
+      else this.reserved.push({ x, z, r: 0.3 * s });
+    };
+    const scrub = (x: number, z: number) => {
+      const s = 0.16 + r() * 0.12;
+      add(r() < 0.7 ? 'elf_foliage_small' : 'elf_foliage_mid', { x, z, s, r: r() * 6, y: 1.0 * s, tint: pick(DRY) });
+      this.reserved.push({ x, z, r: 2.4 * s });
+    };
+    const tusk = (x: number, z: number, s: number) => {
+      add('orc_tusk_standing', { x, z, s, r: r() * 6 });
+      this.obstacles.push({ x, z, r: 0.35 });
+    };
+    const skull = (x: number, z: number, big = 1) => {
+      add(r() < 0.5 ? 'orc_skull' : 'orc_horned_skull', { x, z, s: (0.9 + r() * 0.8) * big, r: r() * 6 });
+      this.reserved.push({ x, z, r: 0.4 });
+    };
+    const tufts = (x: number, z: number, n: number, rad: number) => {
+      const good = ok(0.4, 3, 3);
+      for (let i = 0; i < n; i++) {
+        const a = r() * Math.PI * 2, d = 0.4 + Math.sqrt(r()) * rad;
+        if (good(x + Math.sin(a) * d, z + Math.cos(a) * d)) scrub(x + Math.sin(a) * d, z + Math.cos(a) * d);
+      }
+    };
+
+    // bones beside the roads: a bone, a skull or a small heap every few metres at uneven gaps, 2.4-4 m off the centre line, no colliders
+    const BONES = ['undead_bones_remains', 'undead_bones_remains', 'undead_ground_bone_1', 'undead_ground_bone_2', 'undead_ground_bone_3', 'undead_big_bone', 'orc_skull', 'orc_horned_skull'];
+    const bone = (x: number, z: number) => {
+      if (zoneIdAt(x, z) !== 'dunes' || !walkable(x, z, 0.3) || gateDist(x, z) < 4) return;
+      const m = pick(BONES);
+      const s = m.startsWith('orc') ? 1 + r() * 0.8 : m === 'undead_big_bone' ? 0.4 + r() * 0.2 : 0.3 + r() * 0.3;
+      add(m, { x, z, s, r: r() * 6 });
+      this.reserved.push({ x, z, r: 0.4 });
+    };
+    for (const line of [LAND_TRAILS[3], LAND_TRAILS[7]]) {
+      let gap = 3 + r() * 5;
+      for (let i = 0; i < line.length - 1; i++) {
+        const [ax, az] = line[i];
+        const len = Math.hypot(line[i + 1][0] - ax, line[i + 1][1] - az);
+        const ux = (line[i + 1][0] - ax) / len, uz = (line[i + 1][1] - az) / len;
+        for (; gap < len; gap += 4 + r() * r() * 22) {
+          const side = r() < 0.5 ? -1 : 1;
+          const off = 2.4 + r() * 1.6;
+          const x = ax + ux * gap - uz * side * off, z = az + uz * gap + ux * side * off;
+          bone(x, z);
+          if (r() < 0.4) bone(x + ux * (0.5 + r()), z + uz * (0.5 + r()) + (r() - 0.5));
+        }
+        gap -= len;
+      }
+    }
+
+    // altar shrines (rare): altar, tusks of uneven height, skulls, sometimes ringed pillars, scrub on one side
+    for (const { x, z } of this.spread(3, 30, inDunes, ok(4, 6), true)) {
+      const a = r() * Math.PI * 2;
+      const at = (side: number, fwd: number) => ({ x: x + Math.cos(a) * side + Math.sin(a) * fwd, z: z - Math.sin(a) * side + Math.cos(a) * fwd });
+      this.place('orc_altar', x, z, 0.45 + r() * 0.15, a, 0.7);
+      const tusks = 1 + Math.floor(r() * 3);
+      for (let i = 0; i < tusks; i++) {
+        const t = at((i % 2 ? 1 : -1) * (1.5 + r() * 1.5), 0.5 + r() * 1.8);
+        this.place('orc_tusk_standing', t.x, t.z, 0.45 + r() * 0.6, a + (r() - 0.5) * 1.2, 0.3);
+      }
+      const skulls = 1 + Math.floor(r() * 3);
+      for (let i = 0; i < skulls; i++) {
+        const sk = at((r() - 0.5) * 3.2, 1.1 + r() * 1.8);
+        this.place(r() < 0.5 ? 'orc_horned_skull' : 'orc_skull', sk.x, sk.z, 1 + r() * 0.4, r() * 6, 0);
+      }
+      const pillars = Math.floor(r() * 3);
+      for (let i = 0; i < pillars; i++) {
+        const t = at((i % 2 ? 3.4 : -3.4) + (r() - 0.5), -0.8 + r() * 1.6);
+        this.place('orc_stone_pillar_small_ringed', t.x, t.z, 0.4 + r() * 0.2, r() * 6, 0.35);
+      }
+    }
+
+    // bone patches: a skull or two with a leaning tusk, and lone tusks standing in the sand
+    for (const { x, z } of this.spread(16, 7, inDunes, ok(0.8, 3), true)) {
+      skull(x, z);
+      if (r() < 0.5) continue;
+      const a = r() * Math.PI * 2;
+      const n = 1 + Math.floor(r() * 2);
+      for (let i = 0; i < n; i++) {
+        const px = x + Math.sin(a + i * 2.3) * (0.6 + r() * 0.8), pz = z + Math.cos(a + i * 2.3) * (0.6 + r() * 0.8);
+        if (this.free(px, pz, 0.3)) skull(px, pz, 0.8);
+      }
+      const tx = x + Math.sin(a + 4) * 1.1, tz = z + Math.cos(a + 4) * 1.1;
+      if (r() < 0.6 && this.free(tx, tz, 0.4)) tusk(tx, tz, 0.5 + r() * 0.4);
+    }
+    for (const { x, z } of this.spread(16, 9, inDunes, ok(0.8, 4), true)) tusk(x, z, 0.5 + r() * 0.6);
+    for (const { x, z } of this.spread(8, 10, inDunes, ok(0.6, 3.5), true)) add('undead_bones_remains', { x, z, s: 0.35 + r() * 0.2, r: r() * 6 });
+
+    // snags and stumps
+    for (const { x, z } of this.spread(56, 6, inDunes, ok(1.2, 4.5), true)) {
+      snags.push({ x, z, s: 0.7 + r() * 0.5, r: r() * 6 });
+      this.obstacles.push({ x, z, r: 0.45 });
+    }
+    for (const { x, z } of this.spread(34, 5, inDunes, ok(0.8, 4), true)) add('elf_tree_root_1', { x, z, s: 0.3 + r() * 0.25, r: r() * 6 });
+
+    // dry scrub only in two clumps just inside the gate from the swamp, either side of the road
+    const g = GATES.find((t) => t.id === 'swamp-dunes')!;
+    for (const side of [-1, 1]) tufts(g.x + g.tx * 9 + g.tz * side * 5, g.z + g.tz * 9 - g.tx * side * 5, 5, 1.8);
+
+    // boulders of three sizes: big (solid), medium and small (walk-through)
+    for (const { x, z } of this.spread(14, 11, inDunes, ok(1.8, 5), true)) { const s = 2.2 + r() * 1.1; stone('orc_stone_big', x, z, s, 0.42 * s); }
+    for (const { x, z } of this.spread(12, 11, inDunes, ok(1.4, 5), true)) { const s = 0.7 + r() * 0.5; stone('elf_stone_big', x, z, s, 0.6 * s); }
+    for (const { x, z } of this.spread(34, 5, inDunes, ok(1, 4), true)) {
+      if (r() < 0.6) stone('orc_stone_mid', x, z, 1.1 + r() * 0.6, 0);
+      else stone('elf_stone_small', x, z, 0.8 + r() * 0.3, 0);
+    }
+    for (const { x, z } of this.spread(80, 2.8, inDunes, ok(0.5, 3.5), true)) {
+      if (r() < 0.65) add('orc_stone_small', { x, z, s: 0.5 + r() * 0.5, r: r() * 6, tint: pick(SAND_ROCK), k: 1.6 });
+      else add('elf_stone_small', { x, z, s: 0.25 + r() * 0.25, r: r() * 6, tint: pick(SAND_ROCK), k: 1.6 });
+    }
+
+    for (const [name, items] of Object.entries(L)) {
+      this.scatter(name, items, !/bone|skull|foliage|root|small/.test(name), name.startsWith('elf_foliage') ? { recolor: true } : {});
+    }
+    this.deadTrees(snags, 0xb8a888);
+  }
+
+  /**
+   * The swamp (whole zone, coastal extension included): olive trees, snags, mossy rocks of three sizes, scrub, stumps,
+   * logs, a few bones and reed clumps, plus reeds and lily pads on every pool. Keeps off its road, gates and spawns.
+   */
+  private dressSwamp() {
+    const r = rng(93);
+    const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
+    const inSwamp = () => ({ x: -134 + r() * 140, z: -1 + r() * 112 });
+    const room = (pad: number, gap = 3.5) => (x: number, z: number) => zoneIdAt(x, z) === 'swamp' && this.free(x, z, pad)
+      && !this.nearPack(x, z, 5) && gateDist(x, z) > 7 && landTrailDist(x, z) > gap;
+    const MURK = [0x5e7030, 0x4e6229, 0x6a6e34, 0x445a26];
+    const MOSS = [0x6f7a58, 0x7d8a62, 0x5f6a4c, 0x8a9470];
+    const sTrees: Inst[] = [], sBush: Inst[] = [], sSmall: Inst[] = [], snags: Inst[] = [], stumps: Inst[] = [], logs: Inst[] = [];
+    const bigE: Inst[] = [], midO: Inst[] = [], smallO: Inst[] = [], smallE: Inst[] = [], bones: Inst[] = [];
+    const solid = (list: Inst[], x: number, z: number, s: number, cr: number, tint: number, block = true) => {
+      list.push({ x, z, s, r: r() * 6, tint, k: 1.2 });
+      (block ? this.obstacles : this.reserved).push({ x, z, r: cr });
+    };
+
+    for (const { x, z } of this.spread(5, 11, inSwamp, room(2.5, 4.5), true)) solid(bigE, x, z, 0.9 + r() * 0.5, 0.6 * (0.9 + r() * 0.5), pick(MOSS));
+    for (const { x, z } of this.spread(48, 6.5, inSwamp, room(2), true)) {
+      const s = 0.55 + r() * 0.35;
+      sTrees.push({ x, z, s, r: r() * 6, tint: pick(MURK) });
+      this.obstacles.push({ x, z, r: 0.5 });
+    }
+    for (const { x, z } of this.spread(32, 5, inSwamp, room(1.5), true)) {
+      snags.push({ x, z, s: 0.8 + r() * 0.5, r: r() * 6 });
+      this.obstacles.push({ x, z, r: 0.45 });
+    }
+    for (const { x, z } of this.spread(14, 4.5, inSwamp, room(1.5), true)) solid(midO, x, z, 1.2 + r() * 0.6, 0.3 * (1.2 + r() * 0.6), pick(MOSS), false);
+    for (const { x, z } of this.spread(30, 4.5, inSwamp, room(1.2), true)) {
+      if (r() < 0.6) stumps.push({ x, z, s: 0.3 + r() * 0.25, r: r() * 6 });
+      else { logs.push({ x, z, s: 0.5 + r() * 0.2, r: r() * 6, tint: pick(MURK) }); this.obstacles.push({ x, z, r: 0.8 }); }
+    }
+    for (const { x, z } of this.spread(70, 3.2, inSwamp, room(0.5), true)) {
+      const s = 0.16 + r() * 0.12;
+      if (r() < 0.65) sBush.push({ x, z, s, r: r() * 6, y: 1.0 * s, tint: pick(MURK) });
+      else sSmall.push({ x, z, s: s * 1.6, r: r() * 6, y: 1.6 * s, tint: pick(MURK) });
+      this.reserved.push({ x, z, r: 2.4 * s });
+    }
+    for (const { x, z } of this.spread(40, 2.6, inSwamp, room(0.5), true)) {
+      if (r() < 0.65) smallO.push({ x, z, s: 0.6 + r() * 0.6, r: r() * 6, tint: pick(MOSS), k: 1.2 });
+      else smallE.push({ x, z, s: 0.3 + r() * 0.3, r: r() * 6, tint: pick(MOSS), k: 1.2 });
+    }
+    for (const { x, z } of this.spread(8, 9, inSwamp, room(1), true)) bones.push({ x, z, s: 0.35 + r() * 0.2, r: r() * 6 });
+    // reed clumps on dry ground
+    const reeds: Inst[] = [];
+    for (const { x, z } of this.spread(26, 4, inSwamp, room(0.3, 3), true)) {
+      for (let k = 0; k < 3 + Math.floor(r() * 2); k++) {
+        reeds.push({ x: x + (r() - 0.5) * 1.6, z: z + (r() - 0.5) * 1.6, s: 0.7 + r() * 0.6, r: r() * 6, tint: pick([0x6a7a34, 0x7e8a3c, 0x8a7a40]) });
+      }
+    }
+
+    this.scatter('elf_tree', sTrees, true, { recolor: true });
+    this.scatter('elf_foliage_mid', sBush, true, { recolor: true });
+    this.scatter('elf_foliage_small', sSmall, false, { recolor: true });
+    this.deadTrees(snags, 0x4e5240);
+    this.scatter('elf_stone_big', bigE);
+    this.scatter('orc_stone_mid', midO);
+    this.scatter('orc_stone_small', smallO, false);
+    this.scatter('elf_stone_small', smallE, false);
     this.scatter('elf_tree_root_1', stumps, false);
     this.scatter('orc_log', logs);
+    this.scatter('undead_bones_remains', bones, false);
+
+    const pads: Inst[] = [];
+    // (the forest pond gets a few too, greener)
+    for (const p of this.ponds) {
+      for (let k = 0; k < (p.murky ? 18 : 9); k++) {
+        const a = r() * Math.PI * 2;
+        const d = pondR(p, a) * (0.86 + r() * 0.24);
+        const x = p.x + Math.sin(a) * d;
+        const z = p.z + Math.cos(a) * d;
+        reeds.push({ x, z, s: 0.7 + r() * 0.6, r: r() * 6, tint: pick(p.murky ? [0x6a7a34, 0x7e8a3c, 0x8a7a40] : [0x5a8a34, 0x6a9a3c, 0x78903e]) });
+      }
+      for (let k = 0; k < (p.murky ? 9 : 4); k++) {
+        const a = r() * Math.PI * 2;
+        const d = Math.sqrt(r()) * pondR(p, a) * 0.7;
+        pads.push({ x: p.x + Math.sin(a) * d, z: p.z + Math.cos(a) * d, s: 0.7 + r() * 0.6, r: r() * 6, y: 0.055, tint: pick([0x4e8a36, 0x5e9a3e, 0x6aa040]) });
+      }
+    }
+    this.reeds(reeds);
+    this.lilyPads(pads);
   }
 
   /** Reed clumps round the swamp pools: tall thin blades swaying in the wind. */
@@ -2091,13 +2859,21 @@ export class World {
         }
       }
     }
+    // In the dunes the green banks are bare bleached trunks without crowns (same lattice and draws, only the model differs).
+    const bare: Inst[] = [];
+    const green = (list: Inst[], grow: number) => list.filter((t) => {
+      if (zoneIdAt(t.x, t.z) !== 'dunes') return true;
+      if (grow) bare.push({ x: t.x, z: t.z, s: t.s * grow, r: t.r });
+      return false;
+    });
     // The rim is mostly out of the shadow box: only the big rocks and pines cast shadows.
-    this.scatter('elf_tree', trees, false);
-    this.scatter('elf_foliage_small', tall, false);
+    this.scatter('elf_tree', green(trees, 1.5), false);
+    this.scatter('elf_foliage_small', green(tall, 1.4), false);
     this.deadTrees(cemTrees);
-    this.pines(pines);
+    this.pines(green(pines, 1.2));
+    this.deadTrees(bare, 0xb8a888);
     this.scatter('orc_stone_big', rocks.map((k) => ({ ...k, s: k.s * 2.4 })));
-    this.scatter('elf_foliage_mid', bushes.map((b) => ({ ...b, y: heightAt(b.x, b.z) + 1.0 * b.s })));
+    this.scatter('elf_foliage_mid', green(bushes, 0).map((b) => ({ ...b, y: heightAt(b.x, b.z) + 1.0 * b.s })));
     this.scatter('orc_log', logs, false);
   }
 

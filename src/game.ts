@@ -6,7 +6,7 @@ import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
   ATTACK_HIT, FACTIONS, PETS, tokenChance, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
-  mobRank, zoneResist, ZONE_FOES, ZONE_SUN, type DamageType, type ResistTier, type ItemDrop, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
+  SPAWN_PRESETS, type SpawnPreset, type SpawnPresetId, mobRank, zoneResist, ZONE_FOES, ZONE_SUN, type DamageType, type ResistTier, type ItemDrop, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
 import { ArenaFog, DROP_TINT, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, StatAuras, Telegraphs, type Bolt } from './fx';
 import { Glows, SunLight, type GlowOpts } from './vfx';
@@ -22,13 +22,14 @@ import { BODY_PARTS, CLASS_LOOK, debugSetTrims, type Wearer } from './looks';
 import { assets } from './assets';
 import { Arrows, type ArrowTarget } from './arrows';
 import { PET_SEEK, Pet } from './pet';
-import { GATE, GATES, ISLAND, SPAWN, inCamp, pathAt, progressAt } from './island';
+import { GATE, GATES, ISLAND, SPAWN, inCamp, lineSpots, pathAt, progressAt, ringSpots, walkable } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type Obstacle, type SpawnGroup, type SpawnPoint } from './world';
 import { MARK_COLOR, Unit, setChargeBars, unitBar } from './mobs/unit';
 import { Mob } from './mobs/mob';
 import { Spawn } from './mobs/spawn';
 import { combatGoal } from './mobs/behavior';
 import { Ambient } from './ambient';
+import { Sandstorm } from './sandstorm';
 import { UI, type FlyEl, type MapMark } from './ui';
 import { art } from './art';
 import { fmtK, lootHtml, resistIcons } from './icons';
@@ -48,6 +49,9 @@ const bloodColor = (m: Mob) => m.def.id.startsWith('skel') || m.def.id === 'ghos
 const DROP_GAP = 56;
 /** White-yellow sparks of a non-lethal hit (blood is for the kill). */
 const HIT_SPARK = 0xfff3a8;
+/** Sky fill and sun strength at full light; each location scales them by ZONE_LIGHT (World.envAt). */
+const HEMI_LIGHT = 1.45;
+const SUN_LIGHT = 3.3;
 
 
 const v1 = new THREE.Vector3();
@@ -134,7 +138,7 @@ export class Game {
   hero: Character;
   private hemi: THREE.HemisphereLight;
   private sun: THREE.DirectionalLight;
-  private env = { sky: new THREE.Color(), fog: new THREE.Color(), hemiSky: new THREE.Color(), hemiGround: new THREE.Color(), density: 0.015 };
+  private env = { sky: new THREE.Color(), fog: new THREE.Color(), hemiSky: new THREE.Color(), hemiGround: new THREE.Color(), density: 0.015, light: 1 };
   /** Every mob and breakable prop (one type); `mobs` / `props` are views of it by kind. */
   private units: Unit[] = [];
   private mobs: Mob[] = [];
@@ -170,6 +174,8 @@ export class Game {
   private puffs: FogPuffs;
   /** Pollen, wisps, snow, fireflies… in the air round the hero (src/ambient.ts). */
   private ambient = new Ambient();
+  /** Dunes sandstorm: sand sheets + haze (src/sandstorm.ts). */
+  private sandstorm = new Sandstorm();
   /** Drawing-buffer height in pixels (set by main.ts; ambient point sizes). */
   viewH = 1600;
   /** Fog ring around each Death-like boss's arena (BossDef.souls), shown while it fights. */
@@ -225,8 +231,8 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(VIEW.fov, 9 / 16, 0.5, 90);
     this.scene.fog = new THREE.FogExp2(0xbfe0f5, 0.015);
     // A cool sky fill and a strong warm sun: shadows read as blue-ish shade, lit sides glow (zone colours: ZONES.hemi).
-    this.hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 1.45);
-    this.sun = new THREE.DirectionalLight(0xffe6c0, 3.3);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x556644, HEMI_LIGHT);
+    this.sun = new THREE.DirectionalLight(0xffe6c0, SUN_LIGHT);
     this.sun.position.set(-6, 12, 5);
     // Real-time shadows in a box that follows the camera.
     this.sun.castShadow = true;
@@ -318,6 +324,7 @@ export class Game {
     this.syncPet();
     this.puffs = new FogPuffs(this.scene);
     this.scene.add(this.ambient.points);
+    this.scene.add(this.sandstorm.group);
     // (no camp NPC by the gate for now: src/npc.ts CampNpc is kept for later)
     this.camPos.copy(this.hero.position);
     this.ui.lockClasses((c) => !this.classOpen(c));
@@ -618,6 +625,7 @@ export class Game {
     for (const a of this.arenas.values()) a.update(dt, this.time);
     this.world.update(dt, this.time, this.hero.position);
     this.ambient.update(this.time, this.hero.position, this.viewH);
+    this.sandstorm.update(this.time, this.hero.position, this.ambient.storm, this.lowGfx);
     this.render(dt);
     this.saveT += dt;
     if (this.saveT > 5) { this.saveT = 0; this.persist(); }
@@ -671,6 +679,8 @@ export class Game {
     this.scene.background = this.env.sky;
     this.hemi.color.copy(this.env.hemiSky);
     this.hemi.groundColor.copy(this.env.hemiGround);
+    this.hemi.intensity = HEMI_LIGHT * this.env.light;
+    this.sun.intensity = SUN_LIGHT * this.env.light;
     const { w, h } = this.ui.size();
     this.fx.update(dt, w, h);
     // hero HP bar above the head
@@ -1025,6 +1035,7 @@ export class Game {
   /** A burn tick: no flash, no knockback, a small orange number. */
   private burnMob(m: Mob, dmg: number) {
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
+    this.reflectThorns(m, Math.min(dmg, m.hp));
     m.hp -= dmg;
     m.hurtAt = this.time;
     this.fx.spawn(this.unitTextAt(m), `-${fmtK(dmg)}`, 'dmg small', 0.6, { lift: m.uiEl.offsetHeight, color: '#ff9a4a' });
@@ -1164,6 +1175,7 @@ export class Game {
       if (dmg <= 0) { m.state = m.state === 'return' ? 'return' : 'chase'; return; }
     }
     this.fightOf(m).dealt += Math.min(dmg, m.hp);
+    this.reflectThorns(m, Math.min(dmg, m.hp));
     m.hp -= dmg;
     m.hurtAt = this.time;
     if (m.def.twin && !m.twinned && !m.twinOf && m.hp > 0 && m.hp < m.maxHp * m.def.twin) this.callTwin(m);
@@ -1181,6 +1193,12 @@ export class Game {
     if (m.hp <= 0) this.killMob(m);
   }
 
+  /** MobDef.thorns: the damage the hero really dealt comes back to him as it is (hurtHero `exact`). */
+  private reflectThorns(m: Mob, dealt: number) {
+    const k = m.def.thorns;
+    if (k && dealt > 0) this.hurtHero(dealt * k, m.pos, undefined, false, true);
+  }
+
   /** World point the over-head block (HP bar + chips) is anchored to; damage numbers start there plus its height. */
   private unitTextAt(u: Unit, out = v1) { return out.copy(u.pos).setY(u.barY); }
 
@@ -1195,7 +1213,7 @@ export class Game {
     this.shake = Math.max(this.shake, KILL_FX.shake);
     this.particles.burst(v2.copy(m.pos).setY(1.1 * m.def.scale), bloodColor(m), KILL_FX.blood, 0.12, 6, 0.7);
     this.deathFx(m);
-    this.save.kills++;
+    if (!m.debug) this.save.kills++;
     this.endFight(m, 'kill');
     const d = m.def;
     m.loot = [];
@@ -1206,8 +1224,9 @@ export class Game {
       const kit = this.kitOf(m);
       if (kit) { kit.died?.(); this.despawnMinions(m); }
       if (d.summon) this.despawnMinions(m);
+      if (d.healsOnDeath) this.healPartners(m);
       // elites: their own item on every kill (spawner charges limit the farming)
-      if (d.drop) m.loot.push(rollDrop(d.drop));
+      if (d.drop && !m.debug) m.loot.push(rollDrop(d.drop));
       if (m.temp) m.respawnAt = Infinity;
     }
     this.grantKillRewards(m);
@@ -1215,6 +1234,7 @@ export class Game {
 
   /** Right on the kill: stat orbs, items, a micro-boss's bonus, the gacha pull. */
   private grantKillRewards(m: Mob) {
+    if (m.debug) return;
     if (!m.owner?.def.summon) this.payRewards(m);
     const chance = tokenChance(mobRank(m.def), this.world.zoneAt(m.spawn.x, m.spawn.z).id);
     const pull = !m.owner && Math.random() < 1 - (1 - chance) * (1 - (this.orb?.pull ?? 0));
@@ -1279,6 +1299,7 @@ export class Game {
 
   /** A spawn comes back as a whole: its next charge starts when its last unit is down, the dead wait till then. */
   private spawnLost(u: Unit, sp: Spawn) {
+    if (u instanceof Mob && u.temp) { u.respawnAt = Infinity; return; }
     if (!sp.cleared) { u.respawnAt = Infinity; return; }
     const [total, used] = this.useCharge(sp.def);
     for (const o of sp.units) {
@@ -1569,6 +1590,7 @@ export class Game {
         m.ch.update(dt, false);
         continue;
       }
+      if (def.aura) this.auraTick(m, dt, heroInCamp);
       if (def.boss?.souls) {
         if (m.state === 'chase') this.raiseSouls(m, def.boss.souls, dt);
         let arena = this.arenas.get(m);
@@ -1609,7 +1631,7 @@ export class Game {
             if (d > 0.4 && !def.boss) {
               moving = this.stepTo(m, m.wander, def.speed * 0.35, dt);
             }
-          }
+          } else if (b.idle === 'spar') moving = this.sparTick(m, dt, dSpawn);
         } else if (m.state === 'chase') {
           // Death's souls have no leash: they chase the hero even after their boss gives up
           const outOfLeash = !m.passable && (m.pos.distanceTo(home) > leash || hp.distanceTo(home) > leash + 4);
@@ -1673,6 +1695,10 @@ export class Game {
           }
         }
       }
+      if (m.sparImpact >= 0) {
+        m.sparImpact -= dt;
+        if (m.sparImpact < 0 && m.state === 'idle' && m.sparFoe?.alive) m.sparFoe.ch.hit();
+      }
       // knockback
       if (m.knock.lengthSq() > 0.001) {
         m.pos.addScaledVector(m.knock, dt);
@@ -1730,7 +1756,7 @@ export class Game {
     for (const ev of b.def.onBreak ?? []) {
       if (Math.random() >= ev.chance) continue;
       if (ev.type === 'spawnMob') {
-        const live = this.mobs.filter((m) => m.temp && m.alive).length;
+        const live = this.mobs.filter((m) => m.temp && !m.debug && m.alive).length;
         const n = Math.min(ev.count ?? 1, 8 - live);
         for (let i = 0; i < n; i++) {
           const at = new THREE.Vector3(b.pos.x + (Math.random() - 0.5) * 0.8, 0, b.pos.z + (Math.random() - 0.5) * 0.8);
@@ -1750,6 +1776,44 @@ export class Game {
         }
       }
     }
+  }
+
+  /**
+   * Idle 'spar': a staged fight in a pack. Slot 0 (the centre) swings at each other sparring mate in turn, the rest at slot 0;
+   * swings only: no damage, no aggro, no sounds. Returns whether the mob is walking (back to its spot).
+   */
+  private sparTick(m: Mob, dt: number, dSpawn: number) {
+    const units = m.spawner?.units;
+    const sparring = (o: Mob | undefined) => !!o && o.alive && o.state === 'idle' && o.behavior.idle === 'spar';
+    let foe: Mob | undefined;
+    if (units) {
+      const centre = units[0];
+      if (m === centre) {
+        m.sparPickT -= dt;
+        if (m.sparPickT <= 0 || !sparring(m.sparFoe ?? undefined)) {
+          m.sparPickT = 3 + Math.random() * 2;
+          // the next living mate after the current foe, in slot order
+          const mates = units.filter((u): u is Mob => u instanceof Mob && u !== m && sparring(u));
+          const i = m.sparFoe ? mates.indexOf(m.sparFoe) : -1;
+          m.sparFoe = mates.length ? mates[(i + 1) % mates.length] : null;
+        }
+        foe = m.sparFoe ?? undefined;
+      } else if (centre instanceof Mob && sparring(centre)) foe = centre;
+    }
+    if (foe !== m.sparFoe) m.sparFoe = foe ?? null;
+    let moving = false;
+    if (dSpawn > 0.5) moving = this.stepTo(m, m.spawn, m.def.speed * 0.35, dt);
+    if (!foe) return moving;
+    m.ch.facing = turn(m.ch.facing, Math.atan2(foe.pos.x - m.pos.x, foe.pos.z - m.pos.z), dt * 5);
+    m.sparT -= dt;
+    if (m.sparT <= 0 && !moving) {
+      const period = 1 / m.def.aps;
+      const impactAt = mobImpact(m.ch.hitTime(m.def.anim), period);
+      const swing = m.ch.attack(m.def.anim, period, impactAt);
+      m.sparImpact = impactAt;
+      m.sparT = Math.max(swing, period * (0.8 + Math.random() * 0.6));
+    }
+    return moving;
   }
 
   private stepTo(m: Mob, to: THREE.Vector3, speed: number, dt: number) {
@@ -1934,6 +1998,30 @@ export class Game {
     if (m.soulT >= s.every) {
       m.soulT = 0;
       this.raiseSoul(m, s);
+    }
+  }
+
+  /** MobDef.aura: while the unit chases, the hero inside the radius takes a damage tick every second (no slowdown); a ring of the aura's colour marks each tick. */
+  private auraTick(m: Mob, dt: number, heroInCamp: boolean) {
+    const a = m.def.aura!;
+    if (m.state !== 'chase' || this.dead || heroInCamp) { m.auraT = 0; return; }
+    m.auraT -= dt;
+    if (m.auraT > 0) return;
+    m.auraT += 1;
+    this.waves.add(m.pos, a.radius, a.color, 0.8);
+    this.puffs.cloud(m.pos, a.radius * 0.7, a.color, 6, 1);
+    if (m.pos.distanceTo(this.hero.position) < a.radius + HERO.radius) this.hurtHero(m.dmg * a.dmg, m.pos, m, true);
+  }
+
+  /** MobDef.healsOnDeath: the living units of the dead one's spawn with that MobDef id come back to full HP. */
+  private healPartners(m: Mob) {
+    for (const o of m.spawner?.units ?? []) {
+      if (!(o instanceof Mob) || !o.alive || o.def.id !== m.def.healsOnDeath || o.hp >= o.maxHp) continue;
+      const heal = Math.round(o.maxHp - o.hp);
+      o.hp = o.maxHp;
+      this.fx.spawn(this.unitTextAt(o), `+${fmtK(heal)}`, 'loot', 1.2, { color: '#6cff7a', lift: o.uiEl.offsetHeight });
+      this.waves.add(o.pos, 2.5, 0x6cff7a, 0.6);
+      this.particles.burst(v2.copy(o.pos).setY(1.2 * o.def.scale), 0x6cff7a, 10, 0.12, 4, 0.8);
     }
   }
 
@@ -2142,19 +2230,20 @@ export class Game {
   };
 
   /** `dot`: a tick of damage over time — no dodge, no crit, no counter; defense still cuts it. */
-  private hurtHero(raw: number, from: THREE.Vector3, src?: Mob, dot = false) {
+  /** `exact`: the damage lands as given (no dodge, armour, shield or spread): the thorn trees' return. */
+  private hurtHero(raw: number, from: THREE.Vector3, src?: Mob, dot = false, exact = false) {
     if (this.dead || this.cut) return;
     const s = this.stats;
     const barY = 2.45 * this.heroScale;
     const lift = this.heroBar.el.offsetHeight + 14;
     // dodge: any blow, boss specials too
-    if (!dot && Math.random() < s.dodge) {
+    if (!dot && !exact && Math.random() < s.dodge) {
       this.fx.spawn(v1.copy(this.hero.position).setY(barY), 'Уклон', 'hurt', 0.6, { color: '#9fe8ff', lift });
       return;
     }
     const crit = !dot && !!src && Math.random() < critChance(src.def.crit);
     // GDD 10.5: reduction = defense / (defense + 100).
-    const dmg = Math.max(1, Math.round(raw * (crit ? critMul(src!.def.critDmg) : 1) * armorMul(s.defense) * this.guardMul() * (0.9 + Math.random() * 0.2)));
+    const dmg = exact ? Math.max(1, Math.round(raw)) : Math.max(1, Math.round(raw * (crit ? critMul(src!.def.critDmg) : 1) * armorMul(s.defense) * this.guardMul() * (0.9 + Math.random() * 0.2)));
     if (src) this.shieldAnswer(src, dmg);
     if (src) this.fightOf(src).taken += Math.min(dmg, this.hp);
     this.hp -= dmg;
@@ -2702,6 +2791,53 @@ export class Game {
     for (const m of this.mobs) m.ch.root.scale.setScalar(this.mobScale);
   }
 
+  /**
+   * Debug: a pack of spawn preset `id` next to the hero, built like a placed one (addMob, Spawn, social link, behaviours; scaled by
+   * the tier of the zone it lands in). Not saved and no respawn: its mobs are `temp` and go when they die.
+   */
+  debugSpawnPreset(id: SpawnPresetId) {
+    const preset: SpawnPreset = SPAWN_PRESETS[id];
+    const slots = preset.pack.slots;
+    const h = this.hero.position;
+    const f = this.hero.facing;
+    const cx = preset.horde ? h.x : h.x + Math.sin(f) * 6;
+    const cz = preset.horde ? h.z : h.z + Math.cos(f) * 6;
+    let at: { x: number; z: number }[];
+    let rot = 0;
+    if (preset.horde === 'scatter') {
+      at = [];
+      for (let t = 0; at.length < slots.length && t < slots.length * 40; t++) {
+        const a = Math.random() * Math.PI * 2;
+        // sqrt: even spread over the disc, not bunched at the middle
+        const d = 2 + Math.sqrt(Math.random()) * 5;
+        const q = { x: cx + Math.sin(a) * d, z: cz + Math.cos(a) * d };
+        if (at.every((o) => Math.hypot(o.x - q.x, o.z - q.z) >= 1.4)) at.push(q);
+      }
+      while (at.length < slots.length) at.push({ x: cx + 2, z: cz });
+    } else if (preset.line) {
+      at = lineSpots(cx, cz, slots.length, 1.7, h.x - cx, h.z - cz);
+      rot = Math.atan2(h.x - cx, h.z - cz);
+    } else at = ringSpots(cx, cz, slots.length, preset.horde ? 3.5 : 1.8);
+    // an unwalkable spot slides towards the hero until it is walkable
+    for (const q of at) {
+      for (let i = 0; i < 20 && !walkable(q.x, q.z, 1); i++) {
+        q.x += (h.x - q.x) * 0.15;
+        q.z += (h.z - q.z) * 0.15;
+      }
+    }
+    const zone = this.world.zoneAt(h.x, h.z).id;
+    const group: SpawnGroup = { id: `debug:${id}:${this.time}`, charges: [0], link: preset.pack.link, x: cx, z: cz, zone };
+    const sp = new Spawn(group);
+    slots.forEach((s, j) => {
+      const m = this.addMob(MOBS[s.id], new THREE.Vector3(at[j].x, 0, at[j].z), this.labels, 0, s.behavior);
+      m.temp = true;
+      m.debug = true;
+      if (m.behavior.idle === 'stand') m.ch.facing = rot;
+      sp.units.push(m);
+      m.spawner = sp;
+    });
+  }
+
   /** Debug: every mob and prop dies at once, silently (no loot); spawners spend their next charge as usual. */
   debugKillAll() {
     for (const u of this.units) {
@@ -2732,7 +2868,7 @@ export class Game {
     for (const rec of Object.values(this.save.bosses)) rec.deadUntil = 0;
     for (const u of this.units) {
       u.chargesUsed = 0;
-      if (!u.alive) u.respawnAt = this.time;
+      if (!u.alive && !(u instanceof Mob && u.debug)) u.respawnAt = this.time;
     }
     this.ui.toast('Таймеры спавнеров сброшены');
     this.persist();
@@ -2837,6 +2973,7 @@ export class Game {
     const f = m.fight;
     if (!f) return;
     m.fight = null;
+    if (m.debug) return;
     logFight({
       // Depth-scaled mobs are logged as e.g. bandit_thug×1.5 (HP multiplier rounded to 0.5).
       t: this.save.playTime ?? 0, mob: m.maxHp > m.def.hp ? `${m.def.id}×${Math.round((m.maxHp / m.def.hp) * 2) / 2}` : m.def.id, boss: !!m.def.boss, result, dur: +(this.time - f.t0).toFixed(1),

@@ -4,7 +4,7 @@ import type { MobDef } from '../config';
 /**
  * How a mob behaves, as independent axes:
  * - disposition: hostile attacks on sight (MobDef.aggro), neutral only once hit, passive never fights (no AI at all);
- * - idle: stand on the spawn point or wander round it;
+ * - idle: stand on the spawn point, wander round it, or spar (a staged fight inside the pack: slot 0 against the rest, swings only);
  * - combat: chase into melee, hold its spot (hits whoever comes in reach), flank (melee that spreads round the hero
  *   and strikes from its own side), or kite inside the [near, far] band (default: 55–90% of its reach), sidestepping
  *   left / right meanwhile; with `zone` a kiter never leaves that radius round its spawn centre.
@@ -12,7 +12,7 @@ import type { MobDef } from '../config';
  */
 export interface MobBehavior {
   disposition: 'hostile' | 'neutral' | 'passive';
-  idle: 'stand' | 'wander';
+  idle: 'stand' | 'wander' | 'spar';
   combat: 'chase' | 'hold' | 'flank' | 'kite';
   kite?: [number, number];
   zone?: number;

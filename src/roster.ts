@@ -94,10 +94,11 @@ const thumbRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 thumbRenderer.setSize(360, 420);
 const thumbCam = new THREE.PerspectiveCamera(32, 360 / 420, 0.05, 100);
 
-async function mobThumb(model: string, img: HTMLImageElement) {
+async function mobThumb(model: string, hide: string[], img: HTMLImageElement) {
   const g = await loadModel(model);
   const scene = makeScene();
   const obj = SkeletonUtils.clone(g.scene);
+  for (const n of hide) obj.getObjectByName(n)!.visible = false;
   scene.add(obj);
   const mixer = new THREE.AnimationMixer(obj);
   const idle = g.animations.find((c) => c.name === 'idle');
@@ -126,7 +127,7 @@ for (const s of SECTIONS) {
   root.appendChild(el);
   for (const m of mobs) {
     const card = el.querySelector<HTMLElement>(`[data-mob="${m.def.id}"]`)!;
-    mobThumb(m.model, card.querySelector('img')!);
+    mobThumb(m.model, m.def.hide ?? [], card.querySelector('img')!);
     card.addEventListener('click', () => viewer.open(m.def.id));
   }
 }
@@ -179,6 +180,7 @@ class Viewer {
     const grid = new THREE.GridHelper(6, 12, 0x555555, 0x333333);
     scene.add(grid);
     const obj = SkeletonUtils.clone(g.scene);
+    for (const n of d.hide ?? []) obj.getObjectByName(n)!.visible = false;
     scene.add(obj);
     this.scene = scene;
     this.mixer = new THREE.AnimationMixer(obj);

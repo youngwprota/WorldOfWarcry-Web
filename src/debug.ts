@@ -1,7 +1,7 @@
 // Debug panel. Floating, does not pause the game, so fights can be watched live. Open: ` (Backquote) or ⚙ → «Дебаг-меню».
 import { sfx } from './audio';
 import { SPAWN_PRESETS, ZONES } from './config';
-import type { SpawnPreset, SpawnPresetId, ZoneId } from './config';
+import type { SpawnPresetId, ZoneId } from './config';
 import { ARENA, FOREST_MINI, FORT, GATES, ISLAND, LAND_BOSSES } from './island';
 import type { Game } from './game';
 import { CLASSES, CLASS_IDS, type HeroClass } from './party';
@@ -35,19 +35,6 @@ function teleport(g: Game, arg: string) {
   const dz = ISLAND.cz - at[1];
   const l = Math.hypot(dx, dz) || 1;
   g.debugTeleportTo(at[0] + (dx / l) * 5, at[1] + (dz / l) * 5, kind === 'fort' || kind === 'arena' || kind === 'fmini' ? undefined : gate?.id);
-}
-
-/** `arg`: SpawnPresetId; the pack centre is read at click time (World.presets is filled when the world is built). */
-function teleportPreset(g: Game, arg: string) {
-  let p: (typeof g.world.presets)[number] | undefined;
-  for (const e of g.world.presets) if (e.id === arg) p = e;
-  if (!p) return;
-  // into the middle of a horde, 6 m short of the other packs
-  const off = (SPAWN_PRESETS[p.id] as SpawnPreset).horde ? 0 : 6;
-  const dx = ISLAND.cx - p.x;
-  const dz = ISLAND.cz - p.z;
-  const l = Math.hypot(dx, dz) || 1;
-  g.debugTeleportTo(p.x + (dx / l) * off, p.z + (dz / l) * off, 'swamp-dunes');
 }
 
 /** Gear a player plausibly has by each boss: armour rarity (the class set), weapon rarity, ring and amulet. */
@@ -114,7 +101,7 @@ const SECTIONS: Section[] = [
     ['Сбросить таймеры', (g) => g.debugResetTimers(), 'wide'],
     ['Восстановить всех', (g) => g.debugRestoreAll(), 'wide'],
   ]],
-  ['Пресеты спавнов', (Object.keys(SPAWN_PRESETS) as SpawnPresetId[]).map((id): Action => [SPAWN_PRESETS[id].name, teleportPreset, '', id])],
+  ['Пресеты спавнов', (Object.keys(SPAWN_PRESETS) as SpawnPresetId[]).map((id): Action => [SPAWN_PRESETS[id].name, (g, arg) => g.debugSpawnPreset(arg as SpawnPresetId), '', id])],
   ['Статы (+очки)', [
     ['+10 урон', (g) => g.debugAddStat('power', 10)],
     ['+50 хп', (g) => g.debugAddStat('hp', 50)],

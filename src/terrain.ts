@@ -7,7 +7,7 @@
 import * as THREE from 'three';
 import { ATMOS, ATMOS_GLSL, atmosUniforms } from './atmos';
 import { pondDist, type Pond } from './water';
-import { ZONES, type ZoneId } from './config';
+import { ZONE_LIGHT, ZONES, type ZoneId } from './config';
 import {
   ARENA, BRANCH_PATHS, FORT, GATE, ISLAND, LAND_TRAILS, OLD_TRAIL, MAP_BOX, NZ, PATH, PATH_W, ZGRID, ZONE_IDS, ZONE_INDEX, angleOf, fbm, heightAt, outside, rimCliff, smooth,
   zoneGrid, zoneWeights,
@@ -487,7 +487,8 @@ export class GroundLayers {
 export function zoneTexture() {
   const { n } = ZGRID;
   const data = new Uint8Array(n * n * 4);
-  const cols = ZONES.map((z) => new THREE.Color(z.mistColor));
+  // the mist shader is unlit: dim it by the location's light here
+  const cols = ZONES.map((z) => new THREE.Color(z.mistColor).multiplyScalar(ZONE_LIGHT[z.id] ?? 1));
   const c = new THREE.Color();
   for (let i = 0; i < n * n; i++) {
     let sum = 0;

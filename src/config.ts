@@ -19,6 +19,7 @@ export type AttackAnim = WeaponAnim | BossAnim;
 export const ATTACK_HIT: Record<string, number> = {
   SwordAttack: 0.6, AxeAttack: 0.83, MagicAttack: 1.13, SlashAdvance: 0.73, MeleeHigh: 0.32, MeleeLong: 1.07, MeleeHorizontal: 0.97,
   'orc_boar:attack': 9 / 24, 'undead_boar:attack': 9 / 24, 'human_murloc:attack': 0.6 / 1.3,
+  'murloc_dartfrog:attack': 0.6 / 1.3, 'murloc_treefrog:attack': 0.6 / 1.3,
   'wild_bear:attack': 0.58, 'wild_direwolf:attack': 0.375, 'wild_lion:attack': 0.4, 'wild_dragon:attack': 1.04,
 };
 /** When a mob's damage lands: on the clip's hit marker, sped up only if the attack period is too short for it. */
@@ -333,6 +334,13 @@ export interface MobDef {
   dodge?: number;
   /** GLB animal (Creature): `model` names a .glb with its own rig and clips, weapon is always null. */
   creature?: boolean;
+  /** Creature only: names of the model's meshes that stay hidden (a murloc without its armour, tabard and shield). */
+  hide?: string[];
+  /**
+   * Fraction (0..1) of the damage the hero deals to this unit that comes straight back to the hero (no armour, dodge or
+   * shield applies). Used by the swamp thorn trees.
+   */
+  thorns?: number;
   /**
    * Static unit (src/staticbody.ts): `model` names a level model (a tree, a crate…); it stands on its spawn
    * point, never moves or attacks, and is hit, resists, drops and respawns like any mob.
@@ -347,6 +355,13 @@ export interface MobDef {
    * (no cap; they pay nothing and crumble when the unit breaks or the hero leaves).
    */
   summon?: { mob: string; every: number };
+  /**
+   * While the unit chases the hero, everyone inside `radius` m takes a tick of damage over time every second
+   * (`dmg` x the unit's damage, no dodge or crit; no slowdown). `color` tints the pulse ring.
+   */
+  aura?: { radius: number; dmg: number; color: number };
+  /** On its death every living unit of the same spawn with this MobDef id is healed to full. */
+  healsOnDeath?: string;
   /** Recolour: body textures are swapped by the table SKINS[skin] (src/assets.ts). */
   skin?: string;
   /** Speed (m/s) the hit shoves the hero back with. */
@@ -783,7 +798,7 @@ export const MOBS: Record<string, MobDef> = {
   // Rotten Swamp and Sand Dunes: only their bosses for now
   murloc_king: {
     id: 'murloc_king', name: 'Король мурлоков', creature: true,
-    model: { human: ['human_murloc', null], orc: ['human_murloc', null] },
+    model: { human: ['murloc_treefrog', null], orc: ['murloc_treefrog', null] },
     anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.4,
     ...foes('swamp'), reward: { hp: 20 }, respawn: 1200,
     // an epic weapon for every class
@@ -794,16 +809,17 @@ export const MOBS: Record<string, MobDef> = {
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
     },
   },
+  // the dunes boss is a big dragon now; the id stays 'sand_boar' (saved boss records are keyed by it)
   sand_boar: {
-    id: 'sand_boar', name: 'Песчаный вепрь', creature: true, push: 5,
-    model: { human: ['orc_boar', null], orc: ['orc_boar', null] },
-    anim: 'AxeAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 3,
+    id: 'sand_boar', name: 'Песчаный дракон', creature: true, push: 6,
+    model: { human: ['wild_dragon', null], orc: ['wild_dragon', null] },
+    anim: 'AxeAttack', hp: 16000, dmg: 37, aps: 0.6, range: 3.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 0.6,
     ...foes('dunes'), reward: { speed: 20 }, respawn: 1200,
     // an epic helmet for every class
     drop: { kind: 'armor', def: 'plate_head', rarity: 3 },
     moreDrops: [{ kind: 'armor', def: 'hunter_head', rarity: 3 }, { kind: 'armor', def: 'mage_head', rarity: 3 }],
     boss: {
-      ...BOSS_BASE, titles: { human: 'Песчаный вепрь', orc: 'Песчаный вепрь' }, zone: 'dunes', unlocks: [],
+      ...BOSS_BASE, titles: { human: 'Песчаный дракон', orc: 'Песчаный дракон' }, zone: 'dunes', unlocks: [],
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
     },
   },
@@ -861,6 +877,10 @@ MOBS.snag_mummy = snag('snag_mummy', 'Проклятое знамя', 2000, { po
 export const SNOW_CROWNS = [0xd4dbe2, 0xc8d0d8, 0xdce1e6, 0xbfc8d0];
 MOBS.snow_tree_young = { ...MOBS.tree_young, id: 'snow_tree_young', name: 'Увядшее дерево', crown: SNOW_CROWNS[0] };
 MOBS.snow_tree_birch = { ...MOBS.tree_birch, id: 'snow_tree_birch', name: 'Увядшая берёза', crown: SNOW_CROWNS[1] };
+/** Orange autumn crowns of the grove trees (the grove's AUTUMN decor tints). */
+export const GROVE_CROWNS = [0xff8a30, 0xffb040, 0xe85a28, 0xd8402a, 0xffd050, 0xc86a20];
+MOBS.grove_tree_young = { ...MOBS.tree_young, id: 'grove_tree_young', name: 'Осеннее дерево', crown: GROVE_CROWNS[0] };
+MOBS.grove_tree_birch = { ...MOBS.tree_birch, id: 'grove_tree_birch', name: 'Осенняя берёза', crown: GROVE_CROWNS[2] };
 // Local mini-bosses of the outer lands: each carries a small version of its location boss's mechanic (src/bosses).
 MOBS.frost_warden = {
   ...MOBS.bandit_warlord, ...foes('peaks'), id: 'frost_warden', name: 'Ледяной страж', drop: undefined,
@@ -870,9 +890,65 @@ MOBS.grove_dryad = {
   ...MOBS.bandit_warlord, ...foes('grove'), id: 'grove_dryad', name: 'Дриада', drop: undefined, scale: 1.4,
   model: { human: ['elf_priestess', 'magic_ball'], orc: ['elf_priestess', 'magic_ball'] },
 };
+/** Murky crowns of the swamp trees (the swamp decor's MURK tints) and the thorn trees' dark plum. */
+export const SWAMP_CROWNS = [0x5e7030, 0x4e6229, 0x6a6e34, 0x445a26];
+export const THORN_CROWN = 0x6e3a52;
+MOBS.swamp_tree_young = { ...MOBS.tree_young, id: 'swamp_tree_young', name: 'Болотное дерево', crown: SWAMP_CROWNS[0] };
+MOBS.swamp_tree_birch = { ...MOBS.tree_birch, id: 'swamp_tree_birch', name: 'Болотная берёза', crown: SWAMP_CROWNS[2] };
+/**
+ * BALANCE NOTE: «Терновое дерево». All damage the player deals to it is returned to the player (`thorns: 1`): the tree
+ * must be beatable only when the hero has more HP than the tree (hp below is multiplied by ZONE_TIER.swamp like every swamp
+ * mob, and the hero's returned damage ignores armour, dodge and shields). Re-tune hp and reward together with the hero HP curve.
+ */
+MOBS.swamp_thorn_tree = {
+  ...MOBS.tree_birch, id: 'swamp_thorn_tree', name: 'Терновое дерево', crown: THORN_CROWN, thorns: 1,
+  hp: 600, reward: { hp: 6 },
+};
+// Swamp murlocs (src/world.ts swampMobs): human_murloc re-skinned as frogs, placeholder stats (no balance yet), ZONE_TIER.swamp multiplies them.
+const MURLOC_SWAMP = {
+  ...MOBS.murloc, ...foes('swamp'), hp: 800, dmg: 10, aps: 0.85, range: 1.5, speed: 3.4, aggro: 5, scale: 1.1, regen: 0.03, respawn: 60,
+};
+/** Green tree-frog murloc, only a sword (armour, tabard and shield hidden). */
+MOBS.murloc_green = {
+  ...MURLOC_SWAMP, id: 'murloc_green', name: 'Зелёный мурлок', hide: ['armour', 'tabard', 'shield'],
+  model: { human: ['murloc_treefrog', null], orc: ['murloc_treefrog', null] }, reward: { hp: 3 },
+};
+/** Blue dart-frog murloc, only a sword: STRONGER than the green one (leader of the shore packs). */
+MOBS.murloc_blue = {
+  ...MURLOC_SWAMP, id: 'murloc_blue', name: 'Синий мурлок', hide: ['armour', 'tabard', 'shield'],
+  model: { human: ['murloc_dartfrog', null], orc: ['murloc_dartfrog', null] }, hp: 1300, dmg: 15, speed: 3.6, scale: 1.2, reward: { power: 3 },
+};
+/** Blue murloc guard: sword, shield and armour (the whole model), the toughest of the three. */
+MOBS.murloc_blue_guard = {
+  ...MURLOC_SWAMP, id: 'murloc_blue_guard', name: 'Синий мурлок-страж',
+  model: { human: ['murloc_dartfrog', null], orc: ['murloc_dartfrog', null] }, hp: 1700, dmg: 14, speed: 3.3, scale: 1.25, reward: { power: 4 },
+};
+// Humans of the swamp: Alliance models for both player factions (stats of the forest bandits).
+MOBS.swamp_soldier = {
+  ...MOBS.bandit_fighter, ...foes('swamp'), id: 'swamp_soldier', name: 'Солдат', model: { human: ['soldier', 'sword_soldier'], orc: ['soldier', 'sword_soldier'] },
+};
+MOBS.swamp_bandit = {
+  ...MOBS.bandit_thug, ...foes('swamp'), id: 'swamp_bandit', name: 'Разбойник', model: { human: ['peasant', 'sword_soldier'], orc: ['peasant', 'sword_soldier'] },
+};
+// the elf assassin (calls a shadow twin, MobDef.twin) on a human body
+MOBS.swamp_assassin = {
+  ...MOBS.elf_assassin, ...foes('swamp'), id: 'swamp_assassin', name: 'Убийца', model: { human: ['human_archer', 'dagger'], orc: ['human_archer', 'dagger'] },
+};
+MOBS.swamp_archer = {
+  ...MOBS.archer, ...foes('swamp'), id: 'swamp_archer', name: 'Лучник', model: { human: ['human_archer', 'bow_human_archer'], orc: ['human_archer', 'bow_human_archer'] },
+  shot: { ...MOBS.archer.shot!, arrow: { human: 'arrow_human_archer', orc: 'arrow_human_archer' } }, behavior: { combat: 'kite' },
+};
+// Humans of the dunes: the faction opposite to the player's (MobDef.model is keyed by the PLAYER's faction)
+MOBS.dunes_warrior = { ...MOBS.bandit_fighter, ...foes('dunes'), id: 'dunes_warrior', name: 'Воин дюн' };
+MOBS.dunes_bandit = { ...MOBS.bandit_thug, ...foes('dunes'), id: 'dunes_bandit', name: 'Бандит дюн' };
+MOBS.dunes_archer = {
+  ...MOBS.archer, ...foes('dunes'), id: 'dunes_archer', name: 'Лучник дюн',
+  model: { human: ['orc_archer', 'bow_orc_archer'], orc: ['human_archer', 'bow_human_archer'] },
+  shot: { ...MOBS.archer.shot!, arrow: { human: 'arrow_orc_archer', orc: 'arrow_human_archer' } },
+};
 MOBS.murloc_tidehunter = {
   ...MOBS.bandit_warlord, ...foes('swamp'), id: 'murloc_tidehunter', name: 'Мурлок-приливник', drop: undefined, creature: true, scale: 1.6,
-  model: { human: ['human_murloc', null], orc: ['human_murloc', null] },
+  model: { human: ['murloc_treefrog', null], orc: ['murloc_treefrog', null] },
 };
 /** «Свирепый вожак» of the Rocky Hills: a tauren chieftain for both factions (a storm-shaman mini, src/bosses). */
 MOBS.tauren_warlord = {
@@ -902,11 +978,22 @@ MOBS.murloc_brute = landElite('swamp', 'murloc_brute', 'Мурлок-громи�
 MOBS.murloc_runner = landElite('swamp', 'murloc_runner', 'Мурлок-бегун', { anim: 'SwordAttack', creature: true, model: both('human_murloc', null) }, 1.3, { speed: 3 }, { kind: 'armor', def: 'mage_legs', rarity: 2 });
 // Sand Dunes: epic chests and boots of every class
 MOBS.dune_raider = landElite('dunes', 'dune_raider', 'Пустынный налётчик', { anim: 'SwordAttack', model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] } }, 1.4, { hp: 6 }, { kind: 'armor', def: 'plate_chest', rarity: 3 });
-MOBS.dune_hunter = landElite('dunes', 'dune_hunter', 'Пустынный охотник', { anim: 'SwordAttack', model: { human: ['human_archer', 'bow_human_archer'], orc: ['orc_archer', 'bow_orc_archer'] } }, 1.35, { power: 4 }, { kind: 'armor', def: 'hunter_chest', rarity: 3 });
-MOBS.dune_mystic = landElite('dunes', 'dune_mystic', 'Пустынный мистик', { anim: 'SwordAttack', model: both('orc_shaman', 'staff_orc_shaman') }, 1.35, { regen: 2 }, { kind: 'armor', def: 'mage_chest', rarity: 3 });
+MOBS.dune_hunter = landElite('dunes', 'dune_hunter', 'Пустынный охотник', { anim: 'SwordAttack', model: { human: ['orc_archer', 'bow_orc_archer'], orc: ['human_archer', 'bow_human_archer'] } }, 1.35, { power: 4 }, { kind: 'armor', def: 'hunter_chest', rarity: 3 });
+MOBS.dune_mystic = landElite('dunes', 'dune_mystic', 'Пустынный мистик', { anim: 'SwordAttack', model: { human: ['orc_shaman', 'staff_orc_shaman'], orc: ['mage', 'mage_staff'] } }, 1.35, { regen: 2 }, { kind: 'armor', def: 'mage_chest', rarity: 3 });
 MOBS.dune_nomad = landElite('dunes', 'dune_nomad', 'Кочевник', { anim: 'SwordAttack', model: { human: ['orc_grunt', 'sword_orc_warrior'], orc: ['human_knight', 'sword_human_knight'] } }, 1.4, { speed: 3 }, { kind: 'armor', def: 'plate_legs', rarity: 3 });
-MOBS.dune_scout = landElite('dunes', 'dune_scout', 'Пустынный разведчик', { anim: 'SwordAttack', model: { human: ['human_archer', 'bow_human_archer'], orc: ['orc_archer', 'bow_orc_archer'] } }, 1.3, { speed: 3 }, { kind: 'armor', def: 'hunter_legs', rarity: 3 });
-MOBS.dune_seer = landElite('dunes', 'dune_seer', 'Пустынный провидец', { anim: 'SwordAttack', model: both('orc_shaman', 'staff_orc_shaman') }, 1.3, { power: 4 }, { kind: 'armor', def: 'mage_legs', rarity: 3 });
+MOBS.dune_scout = landElite('dunes', 'dune_scout', 'Пустынный разведчик', { anim: 'SwordAttack', model: { human: ['orc_archer', 'bow_orc_archer'], orc: ['human_archer', 'bow_human_archer'] } }, 1.3, { speed: 3 }, { kind: 'armor', def: 'hunter_legs', rarity: 3 });
+MOBS.dune_seer = landElite('dunes', 'dune_seer', 'Пустынный провидец', { anim: 'SwordAttack', model: { human: ['orc_shaman', 'staff_orc_shaman'], orc: ['mage', 'mage_staff'] } }, 1.3, { power: 4 }, { kind: 'armor', def: 'mage_legs', rarity: 3 });
+// Dunes mini-boss pair (MINI_SPAWNER_OF / MINI_PAIR_OF): the dragon burns everyone near it, the mystic heals it to full when it dies
+// placeholders: ZONE_TIER dunes x32 applies on top of these stats, balance later
+MOBS.dune_mini_mystic = {
+  ...MOBS.dune_mystic, id: 'dune_mini_mystic', name: 'Мистик дюн', rank: 'elite', drop: undefined,
+  hp: 1600, dmg: 14, scale: 1.4, reward: { regen: 3 }, respawn: 900, healsOnDeath: 'dune_mini_dragon',
+};
+MOBS.dune_mini_dragon = {
+  ...MOBS.wild_dragon, id: 'dune_mini_dragon', name: 'Пламенный дракон', rank: 'mini',
+  ...foes('dunes'), hp: 3200, dmg: 20, range: 3, scale: 0.4, reward: { hp: 8 }, respawn: 900, bonus: { hp: 100 },
+  aura: { radius: 5.5, dmg: 0.25, color: 0xff7a2a },
+};
 
 export type OrbKind = 'power' | 'hp' | 'regen' | 'speed';
 /** Stats a mob / prop gives: exactly one stat ({ hp: 3 }), a second key is a type error. */
@@ -1000,14 +1087,16 @@ export const ZONES: ZoneDef[] = [
   // Placeholder locations around the forest (no content yet: ground, sky and fog only).
   // snow is kept a cool mid blue-grey with a dim cool sky: lit white snow and white fog burned the screen out
   { id: 'peaks', name: 'Снежный перевал', ground: 0xb7c5d6, ground2: 0xcbd6e3, sky: 0x9cbbd8, fog: 0xabbfd2, hemi: [0xaabcd8, 0x627186], fogDensity: 0.007, mist: 0.06, mistColor: 0xd4dfeb },
-  { id: 'swamp', name: 'Гнилое болото', ground: 0x587f3a, ground2: 0x6c9044, sky: 0x9cc8b0, fog: 0xa4ccb4, hemi: [0xc4dcec, 0x4a6a3a], fogDensity: 0.01, mist: 0.25, mistColor: 0xd8f0e0 },
+  { id: 'swamp', name: 'Гнилое болото', ground: 0x587f3a, ground2: 0x6c9044, sky: 0x9cc8b0, fog: 0xa4ccb4, hemi: [0xc4dcec, 0x4a6a3a], fogDensity: 0.01, mist: 0.45, mistColor: 0xd8f0e0 },
   { id: 'grove', name: 'Осенняя роща', ground: 0xcc8a30, ground2: 0xdea244, sky: 0xffd8a0, fog: 0xffe0bc, hemi: [0xe8d8e8, 0x8a6a3a], fogDensity: 0.007, mist: 0.06, mistColor: 0xfff0e0 },
-  { id: 'dunes', name: 'Песчаные дюны', ground: 0xe6c674, ground2: 0xf0d68e, sky: 0xa8dcff, fog: 0xfff0d0, hemi: [0xd4e4ff, 0xa08a5a], fogDensity: 0.006, mist: 0.03, mistColor: 0xffffff },
+  { id: 'dunes', name: 'Песчаные дюны', ground: 0xe6c674, ground2: 0xf0d68e, sky: 0xa8dcff, fog: 0xf0d8a8, hemi: [0xd4e4ff, 0xa08a5a], fogDensity: 0.011, mist: 0.03, mistColor: 0xffffff },
   { id: 'hills', name: 'Скалистые холмы', ground: 0x9a9286, ground2: 0xaca496, sky: 0xb0c8e0, fog: 0xc8d4e0, hemi: [0xccd8f0, 0x6a6458], fogDensity: 0.008, mist: 0.06, mistColor: 0xeef0f4 },
 ];
 
 /** How sunny each location is (0..1): soft shafts of sunlight (src/vfx.ts SunLight). */
 export const ZONE_SUN: Partial<Record<ZoneId, number>> = { forest: 1, grove: 1, dunes: 1, hills: 0.7, peaks: 0.5, swamp: 0.35 };
+/** Sun + sky light strength per location (1 if missing); also dims that location's ground mist. */
+export const ZONE_LIGHT: Partial<Record<ZoneId, number>> = { swamp: 0.55 };
 
 /**
  * Zone depth: packs further along the trail are bigger, tougher and pay more, so progress means
@@ -1125,10 +1214,79 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
     'orc_blademaster', 'orc_axeman', 'orc_laborer', 'orc_blademaster', 'orc_axeman', 'orc_blademaster',
     'mummy_archer', 'mummy_archer', 'mummy_archer',
   ]).map((id) => spawner(id)),
-  grove: ([
-    'elf_lumberjack', 'elf_assassin', 'elf_lumberjack', 'elf_sentinel', 'elf_assassin', 'elf_lumberjack',
-    'elf_sentinel', 'elf_assassin', 'elf_lumberjack', 'elf_sentinel', 'elf_assassin', 'elf_sentinel',
-  ]).map((id) => spawner(id)),
+};
+/** Grove mobs (world.groveMobs): road camps, dragon + archer camps, lone bears with trees, attackable autumn trees. */
+export const GROVE_SPAWNERS = {
+  /** Camps along the grove road, alternating sides. */
+  warriors: [0, 1, 2, 3, 4, 5].map(() => pack(['elf_lumberjack', 'elf_sentinel'])),
+  /** Camps in the woods off the road (a campfire beside each). */
+  dragons: [0, 1, 2, 3, 4].map(() => pack(['wild_dragon', 'elf_archer'])),
+  /** Ambushes on the west coast: one hostile elf at a campfire, four hidden among trees that join in once it is pulled. */
+  ambushes: [0, 1, 2].map((): PackDef => ({
+    slots: [{ id: 'elf_assassin' }, ...[0, 1, 2, 3].map(() => ({ id: 'elf_assassin', behavior: { disposition: 'neutral', idle: 'stand' } as const }))],
+    link: 'social',
+  })),
+  /** Single bears, each with a clump of trees beside it. */
+  bears: [0, 1, 2, 3, 4, 5].map(() => spawner('wild_bear')),
+  /** Attackable trees, one at a time a road's width off the road. */
+  trees: ['grove_tree_young', 'grove_tree_birch', 'grove_tree_young', 'grove_tree_young', 'grove_tree_birch', 'grove_tree_young', 'grove_tree_birch', 'grove_tree_young']
+    .map((id) => spawner(id)),
+  /** More attackable trees at random spots in the woods. */
+  woodTrees: ['grove_tree_birch', 'grove_tree_young', 'grove_tree_birch', 'grove_tree_young'].map((id) => spawner(id)),
+};
+/** Swamp mobs (world.swampMobs): murloc packs, human pairs along the road, lone bandits, attackable trees. No other swamp mobs. */
+export const SWAMP_SPAWNERS = {
+  /** Shore packs: 4 green murlocs and a BLUE leader (the blue one is the stronger: balance it as the pack's leader). */
+  shore: [0, 1, 2].map(() => pack(['murloc_blue', 'murloc_green', 'murloc_green', 'murloc_green', 'murloc_green'])),
+  /** One trio of blue murlocs by each of the 3 most central murky pools. */
+  pools: [0, 1, 2].map(() => pack(['murloc_blue', 'murloc_blue', 'murloc_blue'])),
+  /** Pairs beside the swamp road, alternating sides: an armoured blue guard and a human soldier. */
+  roadPairs: [0, 1, 2, 3].map(() => pack(['murloc_blue_guard', 'swamp_soldier'])),
+  /** The guard of the helmet elite by the forest-swamp gate (joined into one pack with it). */
+  eliteGuard: spawner('murloc_blue_guard'),
+  /** Lone human bandits at empty spots of the swamp. */
+  bandits: [0, 1, 2].map(() => spawner('swamp_bandit')),
+  /** Lone human assassins at the emptiest spots left (placed after everything else). */
+  assassins: [0, 1, 2, 3].map(() => spawner('swamp_assassin')),
+  /** Green murloc pair inside the swamp by the swamp-dunes gate. */
+  duneGate: pack(['murloc_green', 'murloc_green']),
+  /** Attackable trees in the woods (5 plain). */
+  trees: ['swamp_tree_young', 'swamp_tree_birch', 'swamp_tree_young', 'swamp_tree_birch', 'swamp_tree_young'].map((id) => spawner(id)),
+  /** Thorn trees: they give all the damage dealt to them back to the hero (see MOBS.swamp_thorn_tree). */
+  thornTrees: [0, 1, 2].map(() => spawner('swamp_thorn_tree')),
+  /** At the user's map marks (slid onto walkable land, placed last): one more shore pack, a guard, lone archers, trees. */
+  marks: {
+    pack: { def: pack(['murloc_blue', 'murloc_green', 'murloc_green', 'murloc_green', 'murloc_green']), x: -70.8, z: 89.3 },
+    singles: ([
+      ['murloc_blue_guard', -28.8, 40.5],
+      ['swamp_archer', -67.4, 58.9], ['swamp_archer', -6.5, 35.7], ['swamp_archer', -51.5, 92.2],
+      ['swamp_tree_young', -24.4, 67.1], ['swamp_tree_birch', -30.7, 79.2],
+    ] as const).map(([id, x, z]) => ({ def: spawner(id), x, z })),
+  },
+};
+/** Dunes mobs (world.dunesMobs): animals off the roads, spar battle groups mid-location, road pairs, archers, an ambush by the entrance. */
+const SPAR = { disposition: 'neutral', idle: 'spar' } as const;
+const KITE = { combat: 'kite' } as const;
+export const DUNES_SPAWNERS = {
+  dragons: [0, 1, 2, 3].map(() => spawner('wild_dragon')),
+  lionPairs: [0, 1].map(() => pack(['wild_lion', 'wild_lion'])),
+  lions: [0, 1].map(() => spawner('wild_lion')),
+  /** Lone lions at the location's edges (coast side, far corners), placed last. */
+  edgeLions: [0, 1, 2].map(() => spawner('wild_lion')),
+  boars: [0, 1, 2].map(() => pack(['boar', 'boar', 'boar'])),
+  /** Staged fights: slot 0 (the dragon, the spar centre) against a ring of six warriors. */
+  battles: [0, 1].map((): PackDef => ({
+    slots: [{ id: 'wild_dragon', behavior: SPAR }, ...[0, 1, 2, 3, 4, 5].map(() => ({ id: 'dunes_warrior', behavior: SPAR }))],
+    link: 'social',
+  })),
+  roadPairs: [0, 1, 2, 3, 4].map(() => pack(['dunes_warrior', 'dunes_warrior'])),
+  archerPairs: [0, 1, 2].map((): PackDef => ({ slots: [{ id: 'dunes_archer', behavior: KITE }, { id: 'dunes_archer', behavior: KITE }], link: 'social' })),
+  escorts: [0, 1].map((): PackDef => ({ slots: [{ id: 'dunes_archer', behavior: KITE }, { id: 'dunes_warrior' }, { id: 'dunes_warrior' }], link: 'social' })),
+  /** Ambush between the two armour elites nearest the entrance: one hostile bandit at a campfire, four hidden among rocks. */
+  ambush: {
+    slots: [{ id: 'dunes_bandit' }, ...[0, 1, 2, 3].map(() => ({ id: 'dunes_bandit', behavior: { disposition: 'neutral', idle: 'stand' } as const }))],
+    link: 'social',
+  } as PackDef,
 };
 /** Trail spawners of the hills (indices in SPAWNERS.hills): neighbours along the road pulled into social pairs; the odd one stays single. */
 export const HILLS_PACKS: number[][] = [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12, 13]];
@@ -1193,7 +1351,10 @@ export const LAND_ELITES: Partial<Record<ZoneId, { def: SpawnerDef; x: number; z
 /** Zones whose mini-bosses are a local variant instead of «Свирепый вожак». */
 export const MINI_SPAWNER_OF: Partial<Record<ZoneId, SpawnerDef>> = {
   hills: spawner('tauren_warlord'), peaks: spawner('frost_warden'), grove: spawner('grove_dryad'), swamp: spawner('murloc_tidehunter'),
+  dunes: spawner('dune_mini_dragon'),
 };
+/** A mini-boss's partner standing next to it in one social pack (shares the mini's saved id `mini:<zone>:<i>`). */
+export const MINI_PAIR_OF: Partial<Record<ZoneId, SpawnerDef>> = { dunes: spawner('dune_mini_mystic') };
 /**
  * Spawn presets: the words for placing mobs on a location (World.addPack places a preset's pack).
  * Unit kinds outside packs, by MobDef:

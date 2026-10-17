@@ -29,6 +29,11 @@ export class Mob extends Unit {
   fleeA = 0;
   fleeT = 0;
   knock = new THREE.Vector3();
+  /** Idle 'spar': the pack mate it swings at, seconds to its next swing / to re-picking the foe (centre unit), seconds to the show blow's impact. */
+  sparFoe: Mob | null = null;
+  sparT = Math.random() * 2;
+  sparPickT = 0;
+  sparImpact = -1;
   /** The death clip is still playing (the corpse sinks once it is over). */
   dying = false;
   loot: Item[] = [];
@@ -37,6 +42,8 @@ export class Mob extends Unit {
   radius: number;
   /** Spawned by a prop (grave): no respawn, removed after death. */
   temp = false;
+  /** Debug preset pack: no rewards, kills, drops or fight log; not counted by the riser cap, skipped by the timer reset. */
+  debug = false;
   removed = false;
   /** Seconds left of the "crawling out of the ground" intro; untargetable meanwhile. */
   rise = 0;
@@ -61,6 +68,8 @@ export class Mob extends Unit {
   soulT = 0;
   /** Summoning snag (MobDef.summon): seconds since the last summon. */
   summonT = 0;
+  /** Aura (MobDef.aura): seconds to the next damage tick. */
+  auraT = 0;
   ritual = 0;
   burstDue = false;
   /** Boss: `animNext` starts in `animDelay` s (a cone clip timed to its telegraph); -1 = none. */
@@ -98,7 +107,7 @@ export class Mob extends Unit {
     const scale = def.scale * mul.scale;
     this.ch = def.static ? new StaticBody(model, scale, def.tint === undefined ? undefined : new THREE.Color(def.tint),
       def.crown === undefined ? undefined : new THREE.Color(def.crown))
-      : def.creature ? new Creature(model, scale) : new Character(model, weapon, scale, def.skin);
+      : def.creature ? new Creature(model, scale, def.hide) : new Character(model, weapon, scale, def.skin);
     this.dmg = def.dmg * mul.dmg;
     this.ch.position.copy(spawn);
     this.ch.facing = Math.random() * Math.PI * 2;
@@ -114,7 +123,8 @@ export class Mob extends Unit {
   get pos() { return this.ch.position; }
   get visible() { return this.ch.root.visible; }
   get boss() { return !!this.def.boss; }
-  get mark() { return this.def.boss ? 'boss' as const : this.def.rank ?? null; }
+  /** An elite without a drop (the mini-boss pair's mystic) has no mark: the pair shows one skull. */
+  get mark() { return this.def.boss ? 'boss' as const : this.def.rank === 'elite' && !this.def.drop ? null : this.def.rank ?? null; }
   get hittable() { return this.alive && this.awake && this.rise <= 0 && this.ritual <= 0; }
   get barY() { return (this.ch instanceof StaticBody ? this.ch.height + 0.3 : 2.15 * this.def.scale) * this.ch.root.scale.x; }
   get barRange() { return this.def.boss || this.def.rank ? 24 : 16; }
