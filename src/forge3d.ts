@@ -11,11 +11,9 @@ import { assets } from './assets';
 import { sfx } from './audio';
 import { FORGE3D as F, GACHA, RARITY, WEAPONS, type FactionId } from './config';
 import { gachaTier } from './gacha';
-import { ARMOR, PART_PREFIXES, itemModel, jewelModel, type Item } from './items';
-import { CLASS_LOOK } from './looks';
+import { ARMOR, itemModel, showcaseModel, type Item } from './items';
 import { JewelFx } from './jewelfx';
 import { magicOrb } from './orbfx';
-import type { HeroClass } from './party';
 
 let propsPromise: Promise<THREE.Group> | null = null;
 function loadProps() {
@@ -345,36 +343,19 @@ export class Forge3D {
 
   get busy() { return this.playing && !this.revealed; }
 
-  /**
-   * Loads what the item's model needs before the reveal (rings / amulets: their quality GLB; gloves: the wearer's
-   * class set part, see armourModel). `cls`: who would wear it (gloves look like that class's).
-   */
-  prepare(item: Item, cls: HeroClass): Promise<unknown> {
-    this.cls = cls;
-    if (item.kind === 'weapon') return Promise.resolve();
-    const slot = ARMOR[item.def].slot;
-    if (slot === 'ring' || slot === 'amulet') return assets.jewel(jewelModel(slot, item.rarity)).catch(() => undefined);
-    const part = CLASS_LOOK[cls].part(this.faction, item, 'arms');
-    return part ? assets.ensure([part]).catch(() => undefined) : Promise.resolve();
+  /** Loads the item's showcase model (rings / amulets / gacha gloves: items.showcaseModel) before the reveal. */
+  prepare(item: Item): Promise<unknown> {
+    const n = showcaseModel(item);
+    return n ? assets.jewel(n).catch(() => undefined) : Promise.resolve();
   }
-  private cls: HeroClass = 'warrior';
 
-  /** The armour item as a model: a jewel's showcase GLB, or one arm of the wearer's set gloves; null = not loaded. */
+  /** The armour item as its showcase model (reflections and glowing stones on); null = none or not loaded. */
   private armourModel(item: Item): THREE.Object3D | null {
-    const slot = ARMOR[item.def].slot;
-    if (slot === 'ring' || slot === 'amulet') {
-      const n = jewelModel(slot, item.rarity);
-      if (!assets.has(n)) return null;
-      const m = assets.clone(n);
-      this.jfx.dress(m);
-      return m;
-    }
-    const part = CLASS_LOOK[this.cls].part(this.faction, item, 'arms');
-    if (!part || !assets.has(part)) return null;
-    const arm = oneArm(assets.clone(part), part.startsWith('archers/'), (g) => this.mine(g));
-    // the arm lies along x in the bind pose: stand it up, the hand on top
-    arm.rotation.z = -Math.PI / 2;
-    return arm;
+    const n = showcaseModel(item);
+    if (!n || !assets.has(n)) return null;
+    const m = assets.clone(n);
+    this.jfx.dress(m);
+    return m;
   }
 
   private buildItem(item: Item) {
@@ -382,7 +363,8 @@ export class Forge3D {
     const w = item.kind === 'weapon' ? WEAPONS[item.def] : null;
     // pets, mage orbs, jewels and gloves fit by their largest side; weapons by height
     const bySide = !w || !!w.pet || !!w.orb;
-    const jewel = !w && (ARMOR[item.def].slot === 'ring' || ARMOR[item.def].slot === 'amulet');
+    // rings, amulets and gacha gloves: showcase models with the jewel treatment (reflections, twinkles, motes, sway)
+    const jewel = !w && !!showcaseModel(item);
     this.itemGlow = jewel ? F.jewel.light : 4;
     // a jewel is all highlights: a softer bloom keeps its stones and claws readable
     if (this.bloom) this.bloom.strength = jewel ? F.jewel.bloom : F.bloom.strength;
@@ -621,54 +603,4 @@ export class Forge3D {
     this.renderer.dispose();
     this.renderer.forceContextLoss(); // free the context now, see HeroPreview.dispose()
   }
-}
-
-/**
- * One arm (the right one, smaller x) of a set's gloves as a static mesh: the `arms_` meshes of a character model
- * (`all`: every mesh of a hunter set part file) baked in their bind pose, the triangles of the other arm dropped.
- * `own` registers each new geometry for disposal.
- */
-function oneArm(src: THREE.Object3D, all: boolean, own: (g: THREE.BufferGeometry) => THREE.BufferGeometry): THREE.Group {
-  src.updateMatrixWorld(true);
-  const meshes: THREE.Mesh[] = [];
-  src.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (m.isMesh && (all || PART_PREFIXES.arms.some((p) => m.name.startsWith(p)))) meshes.push(m);
-  });
-  const box = new THREE.Box3();
-  const geos = meshes.map((m) => {
-    const g = m.geometry.clone().applyMatrix4(m.matrixWorld);
-    g.deleteAttribute('skinIndex');
-    g.deleteAttribute('skinWeight');
-    g.computeBoundingBox();
-    box.union(g.boundingBox!);
-    return g.index ? g.toNonIndexed() : g;
-  });
-  const cx = (box.min.x + box.max.x) / 2;
-  const out = new THREE.Group();
-  meshes.forEach((m, mi) => {
-    const g = geos[mi];
-    const pos = g.getAttribute('position');
-    const groups = g.groups.length ? g.groups : [{ start: 0, count: pos.count, materialIndex: 0 }];
-    const keep: number[] = [];
-    const parts: { start: number; count: number; materialIndex: number }[] = [];
-    for (const gr of groups) {
-      const start = keep.length;
-      for (let v = gr.start; v < gr.start + gr.count; v += 3) {
-        if (pos.getX(v) + pos.getX(v + 1) + pos.getX(v + 2) < cx * 3) keep.push(v, v + 1, v + 2);
-      }
-      if (keep.length > start) parts.push({ start, count: keep.length - start, materialIndex: gr.materialIndex ?? 0 });
-    }
-    if (!keep.length) return;
-    const ng = new THREE.BufferGeometry();
-    for (const name of Object.keys(g.attributes)) {
-      const a = g.getAttribute(name) as THREE.BufferAttribute;
-      const arr = new Float32Array(keep.length * a.itemSize);
-      keep.forEach((v, i) => { for (let c = 0; c < a.itemSize; c++) arr[i * a.itemSize + c] = a.array[v * a.itemSize + c]; });
-      ng.setAttribute(name, new THREE.BufferAttribute(arr, a.itemSize, a.normalized));
-    }
-    for (const p of parts) ng.addGroup(p.start, p.count, p.materialIndex);
-    out.add(new THREE.Mesh(own(ng), m.material));
-  });
-  return out;
 }

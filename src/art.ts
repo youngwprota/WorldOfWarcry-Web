@@ -231,6 +231,9 @@ const PNG: Record<string, string> = {
   // rings and amulets per rarity, rendered from their showcase models (tools/blender/jewels.py)
   ...Object.fromEntries(['ring', 'amulet'].flatMap((s) =>
     ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${s}_${r}`, `armor/${s}_${r}`]))),
+  // gacha gloves per kind and rarity, rendered from their showcase models (tools/blender/gloves.py)
+  ...Object.fromEntries(['gloves_power', 'gloves_crit', 'gloves_haste'].flatMap((g) =>
+    ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${g}_${r}`, `armor/${g}_${r}`]))),
   // pet items (WEAPONS `pet_<id>`), rendered from their creatures (tools/blender/icon_fit.py)
   pet_boar: 'pet_boar', pet_wolf: 'pet_wolf', pet_bear: 'pet_bear', pet_lion: 'pet_lion', pet_bone_boar: 'pet_bone_boar',
   orb_vigor: 'orb_vigor', orb_fury: 'orb_glass',

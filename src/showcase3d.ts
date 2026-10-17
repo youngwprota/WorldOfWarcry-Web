@@ -8,7 +8,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { assets } from './assets';
 import { BANNER3D as B, RARITY } from './config';
-import { ARMOR, jewelModel, type Item } from './items';
+import { ARMOR, showcaseModel, type Item } from './items';
 import { JewelFx } from './jewelfx';
 
 const UV_VS = /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
@@ -87,7 +87,7 @@ export class Showcase3D {
   private raf = 0;
   private t0 = performance.now();
 
-  /** Resolves false when `item` has no showcase model (not a jewel, or it failed to load): show its icon instead. */
+  /** Resolves false when `item` has no showcase model (not a jewel / gloves, or it failed to load): show its icon instead. */
   constructor(private canvas: HTMLCanvasElement, lowGfx: boolean, item: Item) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !lowGfx, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, lowGfx ? 1 : 2));
@@ -100,10 +100,8 @@ export class Showcase3D {
       this.composer.addPass(new OutputPass());
     }
     this.jfx = new JewelFx(this.renderer, this.ptScale);
-    const slot = item.kind === 'armor' ? ARMOR[item.def].slot : null;
-    this.ready = slot === 'ring' || slot === 'amulet'
-      ? assets.jewel(jewelModel(slot, item.rarity)).then(() => { this.build(item, jewelModel(slot, item.rarity)); return true; }, () => false)
-      : Promise.resolve(false);
+    const name = showcaseModel(item);
+    this.ready = name ? assets.jewel(name).then(() => { this.build(item, name); return true; }, () => false) : Promise.resolve(false);
   }
 
   private mine<T extends THREE.BufferGeometry | THREE.Material>(x: T) { this.own.push(x); return x; }

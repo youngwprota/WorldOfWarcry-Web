@@ -122,7 +122,7 @@ export class GachaView {
     body.innerHTML = '<div class="g-hint">Тап — пропустить</div>';
     const item = res.item;
     const forge = this.forge3d;
-    void Promise.all([forge.ready, forge.prepare(item, this.game.heroClass)]).then(() => {
+    void Promise.all([forge.ready, forge.prepare(item)]).then(() => {
       if (this.openNow && this.item === item) this.forge3d?.play(item, () => this.showResult());
     });
   }

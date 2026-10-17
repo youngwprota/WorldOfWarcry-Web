@@ -164,7 +164,7 @@ class Assets {
 
   private jewelLoads = new Map<string, Promise<void>>();
 
-  /** A showcase jewel GLB (rings / amulets in the forge, items.jewelModel): keeps its PBR materials; loads it once. */
+  /** A showcase jewel GLB (rings / amulets / gacha gloves in the forge, items.showcaseModel): keeps its PBR materials; loads it once. */
   jewel(name: string): Promise<void> {
     let p = this.jewelLoads.get(name);
     if (!p) {

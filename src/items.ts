@@ -22,7 +22,7 @@ export function itemModel(it: Item, faction: FactionId) {
 
 /**
  * Quality pieces worn over an armour item (tools/blender/armor_gear.py): body slots above common. Loaded on demand
- * (Character.setTrims), one GLB per item, fitted per faction. Rings and amulets are not worn (see jewelModel).
+ * (Character.setTrims), one GLB per item, fitted per faction. Rings and amulets are not worn (see showcaseModel).
  */
 export function armorTrim(it: Item, faction: FactionId): string | null {
   const d = ARMOR[it.def];
@@ -31,8 +31,17 @@ export function armorTrim(it: Item, faction: FactionId): string | null {
   return trimModel(`${d.trim[faction]}_${d.slot}`, it.rarity, faction);
 }
 
-/** Showcase model of a ring / amulet of quality `rarity` (tools/blender/jewels.py): the forge and the icons only. */
-export const jewelModel = (slot: 'ring' | 'amulet', rarity: number) => `jewel_${slot}_${RARITY_IDS[rarity]}`;
+/**
+ * Showcase model of the item's quality for the forge and the icons only: a ring / amulet (tools/blender/jewels.py,
+ * one per quality) or gacha gloves (tools/blender/gloves.py, one per kind and quality); null = none (the hero wears
+ * his class set's arms whatever gloves he has on).
+ */
+export function showcaseModel(it: Item): string | null {
+  if (it.kind !== 'armor') return null;
+  const slot = ARMOR[it.def]?.slot;
+  if (slot === 'ring' || slot === 'amulet') return `jewel_${slot}_${RARITY_IDS[it.rarity]}`;
+  return slot === 'arms' && GACHA_GEAR.includes(it.def) ? `${it.def}_${RARITY_IDS[it.rarity]}` : null;
+}
 
 /** Quality piece model of armour def `id`. */
 export const trimModel = (id: string, rarity: number, faction: FactionId) => `armor_${id}_${RARITY_IDS[rarity]}_${faction}`;
@@ -135,8 +144,8 @@ for (const s of SETS) {
 }
 /**
  * Gacha gear (docs/features/gacha-gear/concept.md): gloves — how the hero hits, rings — how he moves / a special
- * effect, amulets — how he survives. Anyone wears them. Gloves look like the gloves of the wearer's class set
- * (the warrior's: the plate's, hence `source` / `trim`). Numbers are placeholders until the balance pass.
+ * effect, amulets — how he survives. Anyone wears them. On the hero gloves look like the gloves of the wearer's class
+ * set (the warrior's: the plate's, hence `source` / `trim`); in the forge and the icons — their showcase model. Numbers are placeholders until the balance pass.
  */
 const PLATE = SETS[0];
 const gloves = (id: string, human: string, orc: string, stat: BonusStat, value: number): ArmorDef =>
@@ -205,7 +214,7 @@ export function itemName(it: Item, f: FactionId) {
 
 /**
  * Icon id for icon(): the weapon's `<def>_<rarity>` PNG when there is one, else the weapon id; armour: the piece
- * `w` would wear (jewels: by rarity alone) when it has a PNG, else the slot.
+ * `w` would wear (jewels and gacha gloves: by their showcase model) when it has a PNG, else the slot.
  */
 export function itemIconId(it: Item, w?: Wearer) {
   if (it.kind === 'weapon') {
@@ -215,6 +224,8 @@ export function itemIconId(it: Item, w?: Wearer) {
   const slot = ARMOR[it.def].slot;
   // jewels: one icon per quality, rendered from their showcase model
   if (slot === 'ring' || slot === 'amulet') return hasPng(`${slot}_${RARITY_IDS[it.rarity]}`) ? `${slot}_${RARITY_IDS[it.rarity]}` : slot;
+  // gacha gloves: one icon per kind and quality, from their showcase model
+  if (hasPng(`${it.def}_${RARITY_IDS[it.rarity]}`)) return `${it.def}_${RARITY_IDS[it.rarity]}`;
   if (!w) return slot;
   const id = CLASS_LOOK[w.cls].icon(w.faction, it);
   return hasPng(id) ? id : slot;

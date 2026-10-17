@@ -567,4 +567,5 @@ def me_tris(ob):
     return [t for p in ob.data.polygons for t in range(len(p.vertices) - 2)]
 
 
-main()
+if __name__ == "__main__":  # tools/blender/gloves.py imports the helpers
+    main()
