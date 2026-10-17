@@ -71,7 +71,10 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
   const reports: ZoneReport[] = [];
 
   log('Исходный прогон…');
-  const base = summarize((await run(job([{}], { until: (Math.max(...chain.map((c) => T.bosses[c.boss].at)) + 20) * 60 }))).map((r) => r.out));
+  const baseRuns = (await run(job([{}], { until: (Math.max(...chain.map((c) => T.bosses[c.boss].at)) + 20) * 60 }))).map((r) => r.out);
+  const base = summarize(baseRuns);
+  // ranks each location fields (the bot fought them somewhere in the base runs)
+  const seen = new Set(baseRuns.flatMap((r) => r.fights.map((f) => `${f.zone}/${f.rank}`)));
   // checkpoints of the previous boss's kill, one per run (none: from the start)
   let cps: (Checkpoint | undefined)[] = [];
   for (const { zone, boss } of chain) {
@@ -96,8 +99,15 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
         for (const rk of RANKS) {
           const want = T.fights[zone]?.[rk];
           const d = med(toT.flatMap((r) => r.out.fights.filter((f) => f.win && f.zone === zone && f.rank === rk && f.t > t0).map((f) => f.dur)));
-          if (!want || !d) continue;
+          if (!want) continue;
           const path = `ZONE_SCALE.${zone}.hp.${rk}`;
+          // the location has this rank but the bot won no such fight before the minute: too hard for him then — softer
+          if (!d) {
+            if (!seen.has(`${zone}/${rk}`)) continue;
+            set(path, clamp(getPath(path) * 0.6, 0.05, 200));
+            set(`ZONE_SCALE.${zone}.dmg.${rk}`, clamp(getPath(`ZONE_SCALE.${zone}.dmg.${rk}`) * 0.6, 0.05, 200));
+            continue;
+          }
           // damped: the hero's growth depends on these fights too, a full step overshoots
           set(path, clamp(getPath(path) * clamp(want / d, 0.2, 5) ** 0.6, 0.05, 200));
         }
@@ -107,9 +117,9 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
         const sim = { ...o.sim };
         const probeAll = () => atT.map((c) => probeBoss(c, boss, sim));
         const hp0 = getPath(`MOBS.${boss}.hp`);
-        const dps = med(probeAll().map((p) => p.dps))!;
-        // the partner (Spring sister) has the same def: her HP grows with it
-        const total = hp0 * (boss === 'elf_priestess' ? 2 : 1);
+        const probes = probeAll();
+        // the fight's HP as fielded (× ZONE_TIER, + the Spring sister of the same def) scales with the def's hp
+        const dps = med(probes.map((p) => p.dps))!, total = probes[0].hp;
         set(`MOBS.${boss}.hp`, hp0 * clamp((dps * goal.fight) / total, 0.05, 20));
         // 3. its damage: bisection (geometric) to a 50% win rate at the probe minute
         let lo = getPath(`MOBS.${boss}.dmg`) / 16, hi = getPath(`MOBS.${boss}.dmg`) * 16;
@@ -177,3 +187,4 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
   for (const r of reports) r.after = metricsOf(after, r.zone, r.boss);
   return { sets, was, reports };
 }
+

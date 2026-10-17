@@ -1225,6 +1225,8 @@ export function simulateFrom(opts: Partial<SimOpts>, ctl: RunCtl[], onRun?: (don
 export interface BossProbe {
   /** Mean (no dice) fight: its length, s, and whether it is won; `dps`: the boss's HP lost per second of it. */
   dur: number; win: boolean; dps: number;
+  /** HP of the whole fight as the field has it (ZONE_TIER, the partner): the boss's MobDef hp is a share of it. */
+  hp: number;
   /** Share of `probes` dice fights won. */
   rate: number;
 }
@@ -1251,7 +1253,7 @@ export function probeBoss(cp: Checkpoint, boss: string, opts: Partial<SimOpts>, 
     x.hp = stats(x).maxHp;
     if (fight(x, foes(), false, 900).win) won++;
   }
-  return { dur: best!.dur, win: best!.win, dps: best!.dealt / Math.max(0.05, best!.dur), rate: won / probes };
+  return { dur: best!.dur, win: best!.win, dps: best!.dealt / Math.max(0.05, best!.dur), rate: won / probes, hp };
 }
 
 export interface BenchRow { label: string; ttk: number }

@@ -1,9 +1,10 @@
 // Balance tuner CLI over src/tuner.ts: the targets (src/tunetargets.ts or --targets file.json) → config numbers.
 // Run: npm run tune -- [--zone forest,cemetery] [--runs 8] [--iters 6] [--targets t.json] [--faction orc] [--write]
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { MOBS, ZONES, type FactionId, type ZoneId } from '../src/config';
 import { DEFAULT_TARGETS, type TuneTargets } from '../src/tunetargets';
 import { tune, type Metrics } from '../src/tuner';
+import { writeTuned } from '../src/tunedblock';
 import { poolThreads, poolWorker, runPool } from './pool';
 
 async function main() {
@@ -32,6 +33,11 @@ async function main() {
   console.log('\n== Правки конфига');
   for (const [p, v] of Object.entries(out.sets)) console.log(`${p.padEnd(34)} ${out.was[p]} → ${v}`);
   console.log(`\nДля проверки: npm run sim -- ${Object.entries(out.sets).map(([p, v]) => `--set ${p}=${v}`).join(' ')}`);
+  if (argv.includes('--write') && Object.keys(out.sets).length) {
+    // npm runs from the project root
+    writeFileSync('src/config.ts', writeTuned(readFileSync('src/config.ts', 'utf8'), out.sets));
+    console.log('Записано в src/config.ts (блок <tuned>)');
+  }
   console.log(`(${sec()})`);
 }
 
