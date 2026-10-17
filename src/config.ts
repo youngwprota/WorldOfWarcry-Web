@@ -172,11 +172,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     leftHand: true,
     shot: { speed: 40, arrow: { human: 'pellet_mock', orc: 'pellet_mock' }, pellets: { n: 5, spread: 40, mul: 0.4 } },
   },
-  // the hunter's pet as an item (WeaponDef.pet): `aps` = its bite rate (PETS.boar.aps)
-  boar: {
-    id: 'boar', name: 'Вепрь', type: 'crush', dmgMul: 0.8, aps: 0.9, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orc_boar', orc: 'orc_boar' }, icon: '🐗', pet: 'boar',
-  },
+  // (the hunter's pets are items too: WEAPONS[<PETS id>], generated after PETS below)
   staff_fire: {
     id: 'staff_fire', name: 'Посох огня', type: 'magic', dmgMul: 1.9, aps: 0.495, shape: 'arc', arc: 60, range: 3.2,
     anim: 'MagicAttack', model: { human: 'mage_staff', orc: 'mage_staff' }, icon: '🔥', staff: 'fire',
@@ -249,16 +245,39 @@ export interface PetDef {
   /** GLB creature (src/creature.ts). */
   model: string;
   scale: number;
-  /** Bites per second (its damage comes from the pet item, WeaponDef.pet). */
+  /** Damage type of the bite (mob resists): its item's `type`. */
+  type: DamageType;
+  /** Its item's dmgMul: the bite deals the item's own damage (WeaponDef.pet), never the hero's power. */
+  dmg: number;
+  /** Bites per second: its item's `aps`. */
   aps: number;
   /** Bite reach from its centre to the foe's edge, m. */
   range: number;
   /** Run speed, m/s: a bit above the hero's so it keeps up. */
   speed: number;
+  /** Every bite also hits all other foes within this many metres of the target (the bear's paw). */
+  cleave?: number;
+  /** Leaps at a target this far away (m) instead of running, the bite on landing deals × `mult` (the lion). */
+  pounce?: { range: number; mult: number; cd: number };
 }
+// Each pet differs by damage type (mob resists) and manner (docs/features/gacha-gear/concept.md). Placeholder numbers.
 export const PETS: Record<string, PetDef> = {
-  boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, aps: 0.9, range: 1.3, speed: 6.5 },
+  boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, type: 'crush', dmg: 0.8, aps: 0.9, range: 1.3, speed: 6.5 },
+  wolf: { id: 'wolf', name: 'Лютоволк', icon: 'boar', model: 'wild_direwolf', scale: 0.45, type: 'slash', dmg: 0.4, aps: 1.8, range: 1.2, speed: 7.5 },
+  bear: { id: 'bear', name: 'Медведь', icon: 'boar', model: 'wild_bear', scale: 0.55, type: 'chop', dmg: 1.35, aps: 0.55, range: 1.5, speed: 6.0, cleave: 2 },
+  lion: { id: 'lion', name: 'Лев', icon: 'boar', model: 'wild_lion', scale: 0.55, type: 'pierce', dmg: 0.75, aps: 0.85, range: 1.3, speed: 6.8, pounce: { range: 6, mult: 2.5, cd: 6 } },
+  bone_boar: { id: 'bone_boar', name: 'Костяной вепрь', icon: 'boar', model: 'undead_boar', scale: 1.0, type: 'magic', dmg: 0.75, aps: 0.9, range: 1.3, speed: 6.5 },
 };
+/** Pet size by item quality (RARITY index); the bite grows with the item's own damage (quality, level, sharpening). */
+export const PET_RARITY = { scale: [1, 1.04, 1.08, 1.12, 1.17, 1.22] };
+// every pet is also a class-slot item under its own id (WeaponDef.pet, the hunter's `off`): in the bag, the gacha
+// and copies; it never swings, its damage is its own (weaponDamage of the item: `dmg` × quality, no hero power)
+for (const p of Object.values(PETS)) {
+  WEAPONS[p.id] = {
+    id: p.id, name: p.name, type: p.type, dmgMul: p.dmg, aps: p.aps, shape: 'arc', arc: 0, range: 0,
+    anim: 'SwordAttack', model: { human: p.model, orc: p.model }, icon: '🐾', pet: p.id,
+  };
+}
 
 export const SHARPEN = { max: 10, perLevel: 0.08, cost: (lvl: number) => 40 + lvl * lvl * 25 };
 
@@ -1007,7 +1026,7 @@ export const ORBS: Record<OrbKind, { color: number; css: string; label: string; 
 export const fmtOrb = (k: OrbKind, n = 1) => `+${Math.round(ORBS[k].value * n)}`;
 
 /** Every stat of the hero (and of mobs: crit, critDmg, dodge in MobDef). All are whole points. */
-export type StatId = OrbKind | 'defense' | 'dodge' | 'crit' | 'critDmg';
+export type StatId = OrbKind | 'defense' | 'dodge' | 'crit' | 'critDmg' | 'haste' | 'leech';
 /** Stats that also take percent bonuses: value = (sum of the flat parts) × (1 + sum of the percents / 100). */
 export type PctStat = 'hp' | 'regen' | 'power';
 export const PCT_STATS: readonly PctStat[] = ['hp', 'regen', 'power'];
@@ -1063,6 +1082,10 @@ export const STAT_CURVE = {
   crit: { base: 0, max: 0.6, k: 100 },
   /** Damage multiplier of a critical hit. */
   critDmg: { base: 1.5, max: 1.5, k: 100 },
+  /** Attack speed multiplier (gloves): every weapon swings this much faster. */
+  haste: { base: 1, max: 0.5, k: 100 },
+  /** Share of the damage the hero deals that comes back as HP (rings). */
+  leech: { base: 0, max: 0.2, k: 100 },
 };
 /** Defense: incoming damage × 100 / (100 + defense), at most this share is taken off. */
 export const DEFENSE_CAP = 0.75;
@@ -1494,7 +1517,9 @@ export const GACHA = {
   token: { normal: 0, elite: 0, mini: 0, boss: 0 } as Record<MobRank, number>,
   /** Locations whose kills never give a pull (bosses there too): the first one is beaten on the forest's own drops alone. */
   noTokens: ['forest'] as ZoneId[],
-  banner: { def: 'hammer', name: 'Молот Короля-лича', subtitle: 'Выкован из костей павших королей. Шанс повышен!' },
+  banner: { kind: 'armor' as const, def: 'ring_blood', name: 'Кольцо Короля-лича', subtitle: 'Пьёт кровь врагов и отдаёт её хозяину' },
+  /** Orbs (one quality each) a non-legendary gacha tier gives, by RARITY index: Fury / Vigor + Wind / Ward. */
+  orbs: [[0], [1, 2], [3]] as number[][],
   /** Hammer blows per pull; the rarity colour can climb after each, legendary only on the last one. */
   strikes: 5,
   /** Reveal timing, seconds: delay between hammer blows, then the final flash. */
@@ -1503,6 +1528,54 @@ export const GACHA = {
 };
 /** Chance a kill of a `rank` mob from location `zone` gives a gacha pull (GACHA.token, none in GACHA.noTokens). */
 export const tokenChance = (rank: MobRank, zone: ZoneId) => (GACHA.noTokens.includes(zone) ? 0 : GACHA.token[rank]);
+
+/**
+ * Magic look of a mage orb model (src/orbfx.ts): shell nebula colours (`deep` inside, `glow` wisps and rim), its swirl
+ * and rise speed; `motes` around it: count, `mode` 0 = circling, 1 = rising like embers / bubbles, 2 = gliding over a
+ * sphere around it; `speed`, `moteSize` (share of the orb radius); `halo`: strength of the soft glow around it.
+ */
+export interface OrbFx { deep: number; glow: number; swirl: number; rise: number; motes: number; mode: 0 | 1 | 2; speed: number; moteSize: number; halo: number }
+export const ORB_FX: Record<string, OrbFx> = {
+  // Fury: embers rising out of a red-hot swirl
+  orb_glass: { deep: 0x3a0804, glow: 0xff6a1a, swirl: 0.9, rise: 0.5, motes: 26, mode: 1, speed: 0.8, moteSize: 0.29, halo: 0.55 },
+  // Vigor: calm green life, bubbles drifting up
+  orb_vigor: { deep: 0x06321a, glow: 0x5dff8a, swirl: 0.4, rise: 0.25, motes: 22, mode: 1, speed: 0.45, moteSize: 0.32, halo: 0.55 },
+  // Wind: a fast vortex, motes whirling around
+  orb_swift: { deep: 0x06243e, glow: 0x8af0ff, swirl: 2.4, rise: 0.1, motes: 30, mode: 0, speed: 2.2, moteSize: 0.22, halo: 0.55 },
+  // Ward: a slow violet shell of twinkles
+  orb_ward: { deep: 0x1c0840, glow: 0xc58aff, swirl: 0.5, rise: 0.1, motes: 34, mode: 2, speed: 0.5, moteSize: 0.24, halo: 0.55 },
+  // Fortune: golden glitter circling
+  orb_fortune: { deep: 0x3a2604, glow: 0xffd84a, swirl: 0.8, rise: 0.15, motes: 36, mode: 0, speed: 0.9, moteSize: 0.21, halo: 0.55 },
+  // Demon: dark blood swirl, sparks of hellfire rising
+  orb_demon: { deep: 0x200204, glow: 0xff2a10, swirl: 1.5, rise: 0.6, motes: 36, mode: 1, speed: 1.0, moteSize: 0.27, halo: 0.55 },
+};
+
+/**
+ * Gacha banner showcase (src/showcase3d.ts): the banner jewel over a magic circle. `size` = the jewel's largest side
+ * (m); camera height / distance / look-at height; backdrop colours top / bottom; twinkles, motes, the item light.
+ */
+export const BANNER3D = {
+  fov: 34,
+  minAspect: 0.75,
+  cameraY: 0.3,
+  cameraZ: 4.2,
+  lookY: -0.2,
+  size: 1.3,
+  lean: 0.45,
+  swing: 0.6,
+  swaySpeed: 0.7,
+  circle: 2.6,
+  circleY: -0.95,
+  top: 0x160820,
+  bottom: 0x3a0812,
+  /** Rays behind the jewel (the Lich King's ring: blood), the magic circle's colour. */
+  ray: 0xff2448,
+  rune: 0xffb43a,
+  glints: 70,
+  motes: 140,
+  light: 1.4,
+  bloom: { strength: 0.3, radius: 0.55, threshold: 0.9 },
+};
 
 /** 3D forge scene of the gacha (src/forge3d.ts). Positions in metres; `top` = anvil top, y offsets are added to it. */
 export const FORGE3D = {
@@ -1515,6 +1588,15 @@ export const FORGE3D = {
   /** Camera push-in (m) over the three blows. */
   push: 0.45,
   anvilScale: 0.4,
+  /** A pet's largest side, as a share of `itemSize`. */
+  petSize: 1.3,
+  /** Largest side of a mage orb or a glove, as a share of `itemSize`. */
+  gearSize: 0.7,
+  /**
+   * Rings and amulets (showcase models, tools/blender/jewels.py): largest side (share of `itemSize`), strength of the
+   * metal's reflections, stone glow (feeds the bloom); twinkles on the piece and motes circling it, by gacha tier.
+   */
+  jewel: { size: 0.95, env: 0.4, glow: 0.8, diamond: 0.25, light: 1.2, metal: 0.75, bloom: 0.35, lean: 0.45, swing: 0.75, swaySpeed: 0.9, glints: [16, 28, 44, 64], motes: [0, 40, 80, 150] },
   anvilYaw: 0,
   ingot: [0, 0.04, 0] as [number, number, number],
   ingotYaw: 0,

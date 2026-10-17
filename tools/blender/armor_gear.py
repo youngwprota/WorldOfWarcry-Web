@@ -3,8 +3,8 @@
 The game shows armour by borrowing body parts of other characters (src/items.ts SETS: guard / knight / lord =
 soldier / human_knight / paladin and orc_warrior / orc_grunt / orc_chieftain). Quality adds rigid pieces on top,
 each hung on one bone: helmet band, gem, fins, horns, crown, halo (head); chest emblem and pauldrons (chest);
-bracers (arms); knee guards and a belt buckle (legs); a pendant (amulet) and a ring. Common pieces get nothing,
-except the ring and the amulet. Pieces are fitted to the set's own meshes (collections unit_<model> of the blend).
+bracers (arms); knee guards and a belt buckle (legs). Common pieces get nothing. Rings and amulets are not worn:
+they are showcase models (tools/blender/jewels.py). Pieces are fitted to the set's own meshes (collections unit_<model> of the blend).
 
 Space: the characters' mesh space (cm, Y up, face toward +Z) — the same space as the game's skinned geometry, so a
 piece hangs on its bone with the bone's inverse bind matrix (attachTrim in src/rig.ts). GLB nodes are named
@@ -32,7 +32,6 @@ SETS = {
     "human": [("guard", "soldier"), ("knight", "human_knight"), ("lord", "paladin")],
     "orc": [("guard", "orc_warrior"), ("knight", "orc_grunt"), ("lord", "orc_chieftain")],
 }
-HERO = {"human": "peasant", "orc": "orc_peon"}
 PREFIXES = {
     "head": ("head_", "helmet_", "face_plate_"),
     "chest": ("chest_", "torso_", "cape_"),
@@ -355,56 +354,6 @@ def legs_piece(model, r):
     return out
 
 
-def amulet_piece(faction, r):
-    """Pendant on the chest, fitted to the bulkiest chest of the faction (it hangs over any of them)."""
-    k, c = RARITIES.index(r), colors(r)
-    models = [HERO[faction]] + [m for _, m in SETS[faction]]
-    s3 = bone(models[0], "spine_03")[0]
-    ya = s3.y + 9
-    zf = max(max((p.z for p in pick(points(m, "chest"), y=(ya - 3, ya + 3), x=(-5, 5))), default=s3.z) for m in models)
-    b = Build()
-    ctr = Vector((0, ya - 3, zf + 1.0))
-    for s in (-1, 1):  # chain
-        top = Vector((s * 9, ya + 9, zf - 7))
-        b.slab((ctr + top) / 2, FWD, top - ctr, (top - ctr).length, 0.9, 0.9, c["steel"] if k < 3 else c["trim"])
-    b.dome(ctr, FWD, UP, 3 + 0.45 * k, 3 + 0.45 * k, 1.0, c["trim"] if k else (0.6, 0.42, 0.22), seg=8, rings=2)
-    b.gem(ctr + FWD * 0.8, FWD, 1.6 + 0.35 * k, 1.5, c["gem"])
-    if k >= 3:
-        for i in range(6):
-            a = 2 * math.pi * i / 6
-            b.spike(ctr + Vector((math.cos(a), math.sin(a), 0)) * (3 + 0.45 * k), (math.cos(a), math.sin(a), 0), 1.8 + 0.4 * k, 0.6, c["trim"])
-    if k >= 4:
-        for s in (-1, 1):
-            b.spike(ctr + Vector((s * 3.5, 1.5, 0)), (s, 0.6, 0), 5 + k, 1.0, c["trim"])
-    if k >= 5:
-        for i in range(3):
-            b.crystal(ctr + Vector(((i - 1) * 5, 8, 3)), (0, 1, 0.2), 2.4, 0.8, c["gem"])
-    return {"spine_03": b}
-
-
-def ring_piece(faction, r):
-    """A ring on the right middle finger (the hand that holds the weapon), with a glow above the hand on rare+."""
-    k, c = RARITIES.index(r), colors(r)
-    models = [HERO[faction]] + [m for _, m in SETS[faction]]
-    f0 = bone(models[0], "middle_01_r")[0]
-    pts = sum((points(m, "arms", {"middle_01_r"}, 0.5) for m in models), [])
-    hb = bone(models[0], "hand_r")[0]
-    d = (f0 - hb).normalized()
-    if pts:
-        cen = sum(pts, Vector()) / len(pts)
-        rad = max((p - cen - d * d.dot(p - cen)).length for p in pts)
-    else:
-        cen, rad = f0, 2.5
-    b = Build()
-    b.band(cen, d, UP, rad + 0.2, rad + 0.2, 1.6 + 0.2 * k, 0.6, c["trim"] if k else (0.6, 0.42, 0.22), seg=10)
-    b.gem(cen + UP * (rad + 1.0), UP, 0.9 + 0.2 * k, 1.0, c["gem"])
-    if k >= 5:
-        for i in range(3):
-            a = 2 * math.pi * i / 3
-            b.crystal(cen + Vector((0, math.cos(a), math.sin(a))) * (rad + 5), d, 1.8, 0.6, c["gem"])
-    return {"middle_01_r": b}
-
-
 # ---------- Blender objects ----------
 
 def materials():
@@ -481,11 +430,6 @@ def build():
                     glb = f"armor_{set_id}_{slot}_{r}_{faction}"
                     obs = [to_object(b, f"{glb}__{bn}", col, mats, at) for bn, b in fn(model, r).items()]
                     items.append((glb, obs))
-        for k, r in enumerate(RARITIES):
-            at = (-3.0 + 1.2 * k, -24.0 - 7.5 - 9.0 * fi, 0.0)
-            for slot, fn in (("amulet", amulet_piece), ("ring", ring_piece)):
-                glb = f"armor_{slot}_{r}_{faction}"
-                items.append((glb, [to_object(b, f"{glb}__{bn}", col, mats, at) for bn, b in fn(faction, r).items()]))
     return items
 
 

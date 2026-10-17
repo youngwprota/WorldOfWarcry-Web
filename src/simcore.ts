@@ -233,6 +233,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const petItem = h.weapons[1] && WEAPONS[h.weapons[1].def].pet ? h.weapons[1] : null;
   const pet = petItem ? PETS[WEAPONS[petItem.def].pet!] : null;
   let petCd = 0.6;
+  let pounceCd = 0; // the lion opens with a leap (PetDef.pounce), then every pounce.cd s
   const B = STAVES.fire.burn;
   let burn = 0, burnTick = 0, burnDps = 0, iceN = 0, windN = 0;
   const gusts: number[] = []; // landing times of wind orbs
@@ -267,6 +268,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     const r = RESIST_MULT[d.resist[w.type] ?? 'normal'];
     const dmg = weaponDamage(it, st.power, st.powerMul) * heroCrit() * foeHits() * r * mult * roll() * vuln();
     mhp -= dmg;
+    hp = Math.min(st.maxHp, hp + dmg * st.leech); // ring of blood
     return dmg;
   };
   /** One swing of a hand (counters too). */
@@ -296,18 +298,24 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       if (w.guard || w.orb || w.pet) continue; // shields, mage orbs and pets never swing
       hd.cd -= DT;
       if (hd.cd > 0 || busy > 0) continue;
-      const per = 1 / w.aps;
+      const per = 1 / (w.aps * st.haste);
       // uptime: the hero spends part of the fight repositioning — swings come later
       hd.cd = per / OPT.uptime;
       swings++;
       strike(hd.it);
     }
     // the pet: always on the target (slams do not stop it), its item's own damage (no hero power), no crits or dodges
+    // (the bear's cleave is not modelled: the fights here are one on one)
     if (pet && petItem) {
       petCd -= DT;
+      pounceCd -= DT;
       if (petCd <= 0) {
-        petCd += 1 / pet.aps;
-        mhp -= weaponDamage(petItem) * RESIST_MULT[d.resist[WEAPONS[petItem.def].type] ?? 'normal'] * roll() * vuln();
+        petCd += 1 / (pet.aps * st.haste);
+        const leap = pet.pounce && pounceCd <= 0 ? pet.pounce.mult : 1;
+        if (leap > 1) pounceCd = pet.pounce!.cd;
+        const dmg = weaponDamage(petItem) * leap * RESIST_MULT[d.resist[WEAPONS[petItem.def].type] ?? 'normal'] * roll() * vuln();
+        mhp -= dmg;
+        hp = Math.min(st.maxHp, hp + dmg * st.leech);
       }
     }
     if (burn > 0) {
@@ -357,7 +365,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
 }
 
 // ---------- loot and gear ----------
-const VALUE: Record<StatId, number> = { power: 1, hp: 0.35, regen: 1.5, speed: 0.2, defense: 1, dodge: 2, crit: 1.5, critDmg: 1 };
+const VALUE: Record<StatId, number> = { power: 1, hp: 0.35, regen: 1.5, speed: 0.2, defense: 1, dodge: 2, crit: 1.5, critDmg: 1, haste: 1.5, leech: 1.5 };
 const rewardOf = (u: Unit): OrbReward => {
   if (u.kind === 'prop') return BREAKABLES[u.def].reward as OrbReward;
   const d = MOBS[u.def];

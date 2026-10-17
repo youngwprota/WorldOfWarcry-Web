@@ -247,16 +247,21 @@ const PNG: Record<string, string> = {
   ...Object.fromEntries(['staff_fire', 'staff_ice', 'staff_wind', 'sword', 'axe', 'hammer', 'polearm', 'shield_tower',
     'shield_buckler', 'shield_spiked', 'bow', 'gun'].flatMap((def) =>
     ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${def}_${r}`, `${def}_${r}`]))),
-  // armour item icons per rarity and faction (src/looks.ts CLASS_LOOK.icon): plate sets, hunter / caster skins, jewels
+  // armour item icons per rarity and faction (src/looks.ts CLASS_LOOK.icon): plate sets, hunter / caster skins
   ...Object.fromEntries([
     ...['guard', 'knight', 'lord', 'archer', 'caster'].flatMap((set) => ['head', 'chest', 'arms', 'legs'].map((slot) => `${set}_${slot}`)),
-    'ring', 'amulet',
   ].flatMap((piece) => ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].flatMap((r) =>
     ['human', 'orc'].map((f) => [`${piece}_${r}_${f}`, `armor/${piece}_${r}_${f}`])))),
+  // rings and amulets per rarity, rendered from their showcase models (tools/blender/jewels.py)
+  ...Object.fromEntries(['ring', 'amulet'].flatMap((s) =>
+    ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${s}_${r}`, `armor/${s}_${r}`]))),
+  // gacha gloves per kind and rarity, rendered from their showcase models (tools/blender/gloves.py)
+  ...Object.fromEntries(['gloves_power', 'gloves_crit', 'gloves_haste'].flatMap((g) =>
+    ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${g}_${r}`, `armor/${g}_${r}`]))),
   orb_vigor: 'orb_vigor', orb_fury: 'orb_glass',
   orb_swift: 'orb_swift', orb_ward: 'orb_ward', orb_fortune: 'orb_fortune', orb_demon: 'orb_demon',
-  // pets (config PETS), rendered from their models
-  boar: 'pet_boar',
+  // pet items (WEAPONS[<PETS id>]), rendered from their models: pet_portrait.py <glb> <png> 35 1 10, then icon_shrink.py
+  boar: 'pet_boar', wolf: 'pet_wolf', bear: 'pet_bear', lion: 'pet_lion', bone_boar: 'pet_bone_boar',
 };
 /** The id has a pack PNG (art() draws it instead of the vector). */
 export const hasPng = (id: string) => !!PNG[id];

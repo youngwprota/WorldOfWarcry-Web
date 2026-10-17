@@ -79,8 +79,8 @@ for (const f of Object.values(FACTIONS)) {
   f.preview.forEach((m) => models.add(m)); // the faction choice scene
 }
 for (const w of Object.values(WEAPONS)) {
-  // (mage orbs are GLB creatures, below)
-  if (!w.orb && !w.pet) Object.values(w.model).forEach((m) => models.add(m)); // pets are GLB creatures (PETS)
+  // (mage orbs and hunter pets are GLB creatures, below)
+  if (!w.orb && !w.pet) Object.values(w.model).forEach((m) => models.add(m));
   if (w.shot) Object.values(w.shot.arrow).forEach((m) => models.add(m));
 }
 for (const c of Object.values(CLASSES)) Object.values(c.model ?? {}).forEach((m) => models.add(m));
@@ -145,6 +145,8 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   }
   setMuted(save.muted);
   game = new Game(save, input, ui, labels);
+  // dev only: the running game for console / automated checks
+  if (import.meta.env.DEV) (window as unknown as { game: Game }).game = game;
   game.camera.aspect = app.clientWidth / app.clientHeight;
   game.camera.updateProjectionMatrix();
   ui.showHud(true);

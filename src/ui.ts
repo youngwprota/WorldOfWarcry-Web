@@ -367,7 +367,7 @@ export class UI {
     const box = $('weapons');
     box.innerHTML = [0, 1].map((i) => {
       const it = items[i];
-      const title = !it ? '' : WEAPONS[it.def].guard ? `title="${WEAPONS[it.def].name}"` : `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"`;
+      const title = !it ? '' : !WEAPONS[it.def].dmgMul ? `title="${WEAPONS[it.def].name}"` : `title="${WEAPONS[it.def].name}: ${Math.round(dmg(it))} урона"`;
       return cellHtml(it, `data-w="${i}" ${title}`, i ? 'shield' : 'sword', '', it ? 'wslot active' : 'wslot', w);
     }).join('');
     const side = (ids: ArmorSlot[]) => ids.map((id) => {

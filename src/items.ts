@@ -1,5 +1,5 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
-import { DAMAGE_TYPE_NAME, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type StatId, type WeaponDef } from './config';
+import { DAMAGE_TYPE_NAME, PETS, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type StatId, type WeaponDef } from './config';
 import { CLASS_DAMAGE_ICON, DAMAGE_TYPE_ICON, icon } from './icons';
 import { art, hasPng } from './art';
 import { CLASSES, weaponClass, type HeroClass } from './party';
@@ -24,19 +24,29 @@ export function itemModel(it: Item, faction: FactionId) {
 }
 
 /**
- * Quality pieces worn over an armour item (tools/blender/armor_gear.py): body slots above common, the ring and the
- * amulet at every quality. Loaded on demand (Character.setTrims), one GLB per item, fitted per faction.
+ * Quality pieces worn over an armour item (tools/blender/armor_gear.py): body slots above common. Loaded on demand
+ * (Character.setTrims), one GLB per item, fitted per faction. Rings and amulets are not worn (see showcaseModel).
  */
 export function armorTrim(it: Item, faction: FactionId): string | null {
   const d = ARMOR[it.def];
-  if (!d) return null;
-  const jewel = d.slot === 'ring' || d.slot === 'amulet';
   // pieces are fitted to the warrior's plate only (the hunter's and the mage's sets have their own textured parts)
-  if (!jewel && (it.rarity === 0 || !d.trim)) return null;
-  return trimModel(jewel ? d.slot : `${d.trim![faction]}_${d.slot}`, it.rarity, faction);
+  if (!d || it.rarity === 0 || !d.trim) return null;
+  return trimModel(`${d.trim[faction]}_${d.slot}`, it.rarity, faction);
 }
 
-/** Quality piece model of armour def (or jewel slot) `id`. */
+/**
+ * Showcase model of the item's quality for the forge and the icons only: a ring / amulet (tools/blender/jewels.py,
+ * one per quality) or gacha gloves (tools/blender/gloves.py, one per kind and quality); null = none (the hero wears
+ * his class set's arms whatever gloves he has on).
+ */
+export function showcaseModel(it: Item): string | null {
+  if (it.kind !== 'armor') return null;
+  const slot = ARMOR[it.def]?.slot;
+  if (slot === 'ring' || slot === 'amulet') return `jewel_${slot}_${RARITY_IDS[it.rarity]}`;
+  return slot === 'arms' && GACHA_GEAR.includes(it.def) ? `${it.def}_${RARITY_IDS[it.rarity]}` : null;
+}
+
+/** Quality piece model of armour def `id`. */
 export const trimModel = (id: string, rarity: number, faction: FactionId) => `armor_${id}_${RARITY_IDS[rarity]}_${faction}`;
 
 /** Every per-quality GLB model (loaded up-front by main.ts). */
@@ -80,9 +90,14 @@ export const PART_PREFIXES: Record<VisualPart, string[]> = {
   legs: ['legs_', 'leg_', 'hip_', 'hips_', 'kilt_'],
 };
 
+/** Art icon of each bonus stat (the stat window's). */
+export const BONUS_ICON: Record<BonusStat, string> = {
+  hp: 'heart', regen: 'regen', power: 'hit', speed: 'run', defense: 'defense', dodge: 'dodge', crit: 'crit', critDmg: 'critdmg', haste: 'fist', leech: 'heart',
+};
 export const BONUS_NAME: Record<BonusStat, string> = {
   hp: 'Здоровье', regen: 'Реген, хп/с', power: 'Урон', speed: 'Скорость',
   defense: 'Защита', dodge: 'Уклонение', crit: 'Шанс крита', critDmg: 'Урон крита',
+  haste: 'Скорость атаки', leech: 'Вампиризм',
 };
 
 export interface ArmorDef {
@@ -110,10 +125,10 @@ const SETS: { id: string; cls: HeroClass; of: Record<FactionId, string>; src?: R
 ];
 /** The class's armour set id (`<set>_<slot>`). */
 export const CLASS_SET = Object.fromEntries(SETS.map((s) => [s.cls, s.id])) as Record<HeroClass, string>;
+// (gloves are not part of a set: they come from the gacha, see GACHA_GEAR below)
 const PIECES: { slot: VisualPart; noun: string; defense: number; bonus: { stat: BonusStat; value: number } }[] = [
   { slot: 'head', noun: 'Шлем', defense: 5, bonus: { stat: 'regen', value: 1 } },
   { slot: 'chest', noun: 'Нагрудник', defense: 9, bonus: { stat: 'hp', value: 18 } },
-  { slot: 'arms', noun: 'Перчатки', defense: 3, bonus: { stat: 'power', value: 4 } },
   { slot: 'legs', noun: 'Сапоги', defense: 6, bonus: { stat: 'speed', value: 3 } },
 ];
 
@@ -129,8 +144,29 @@ for (const s of SETS) {
     };
   }
 }
-ARMOR.ring_swift = { id: 'ring_swift', slot: 'ring', name: { human: 'Кольцо ветра', orc: 'Кольцо следопыта' }, defense: 0, bonus: { stat: 'speed', value: 4 }, alwaysBonus: true };
-ARMOR.amulet_spring = { id: 'amulet_spring', slot: 'amulet', name: { human: 'Амулет родника', orc: 'Тотем крови' }, defense: 2, bonus: { stat: 'regen', value: 1 }, alwaysBonus: true };
+/**
+ * Gacha gear (docs/features/gacha-gear/concept.md): gloves — how the hero hits, rings — how he moves / a special
+ * effect, amulets — how he survives. Anyone wears them. On the hero gloves look like the gloves of the wearer's class
+ * set (the warrior's: the plate's, hence `source` / `trim`); in the forge and the icons — their showcase model. Numbers are placeholders until the balance pass.
+ */
+const PLATE = SETS[0];
+const gloves = (id: string, human: string, orc: string, stat: BonusStat, value: number): ArmorDef =>
+  ({ id, slot: 'arms', name: { human, orc }, source: PLATE.src, trim: PLATE.trim, defense: 4, bonus: { stat, value }, alwaysBonus: true });
+const jewel = (id: string, slot: 'ring' | 'amulet', human: string, orc: string, defense: number, stat: BonusStat, value: number): ArmorDef =>
+  ({ id, slot, name: { human, orc }, defense, bonus: { stat, value }, alwaysBonus: true });
+for (const d of [
+  gloves('gloves_power', 'Рукавицы силы', 'Кулаки вождя', 'power', 5),
+  gloves('gloves_crit', 'Перчатки меткости', 'Хватка следопыта', 'crit', 6),
+  gloves('gloves_haste', 'Перчатки проворства', 'Лапы ловкача', 'haste', 6),
+  jewel('ring_swift', 'ring', 'Кольцо ветра', 'Кольцо следопыта', 0, 'speed', 4),
+  jewel('ring_shadow', 'ring', 'Кольцо тени', 'Кольцо сумрака', 0, 'dodge', 5),
+  jewel('ring_blood', 'ring', 'Кольцо крови', 'Клык крови', 0, 'leech', 4),
+  jewel('amulet_spring', 'amulet', 'Амулет родника', 'Тотем крови', 2, 'regen', 1),
+  jewel('amulet_heart', 'amulet', 'Сердце льва', 'Сердце вепря', 2, 'hp', 20),
+  jewel('amulet_ward', 'amulet', 'Оберег', 'Костяной оберег', 6, 'defense', 4),
+]) ARMOR[d.id] = d;
+/** Armour the gacha gives (and nothing else drops these). */
+export const GACHA_GEAR = ['gloves_power', 'gloves_crit', 'gloves_haste', 'ring_swift', 'ring_shadow', 'ring_blood', 'amulet_spring', 'amulet_heart', 'amulet_ward'];
 
 export const BAG_SIZE = 128;
 
@@ -180,7 +216,7 @@ export function itemName(it: Item, f: FactionId) {
 
 /**
  * Icon id for icon(): the weapon's `<def>_<rarity>` PNG when there is one, else the weapon id; armour: the piece
- * `w` would wear (jewels by rarity and faction) when it has a PNG, else the slot.
+ * `w` would wear (jewels and gacha gloves: by their showcase model) when it has a PNG, else the slot.
  */
 export function itemIconId(it: Item, w?: Wearer) {
   if (it.kind === 'weapon') {
@@ -188,9 +224,12 @@ export function itemIconId(it: Item, w?: Wearer) {
     return hasPng(tier) ? tier : it.def;
   }
   const slot = ARMOR[it.def].slot;
+  // jewels: one icon per quality, rendered from their showcase model
+  if (slot === 'ring' || slot === 'amulet') return hasPng(`${slot}_${RARITY_IDS[it.rarity]}`) ? `${slot}_${RARITY_IDS[it.rarity]}` : slot;
+  // gacha gloves: one icon per kind and quality, from their showcase model
+  if (hasPng(`${it.def}_${RARITY_IDS[it.rarity]}`)) return `${it.def}_${RARITY_IDS[it.rarity]}`;
   if (!w) return slot;
-  const jewel = slot === 'ring' || slot === 'amulet';
-  const id = jewel ? `${slot}_${RARITY_IDS[it.rarity]}_${w.faction}` : CLASS_LOOK[w.cls].icon(w.faction, it);
+  const id = CLASS_LOOK[w.cls].icon(w.faction, it);
   return hasPng(id) ? id : slot;
 }
 
@@ -205,7 +244,10 @@ export function cellHtml(it: Item | null | undefined, attrs = '', placeholder = 
     const ph = !placeholder ? '' : hasPng(placeholder) ? art(placeholder, 30, 'ic ph') : icon(placeholder, '#ffffff55', 30, 'ic');
     return `<button class="cell empty ${cls}" ${attrs}>${ph}${extra}</button>`;
   }
-  const badge = it.kind === 'weapon' && !WEAPONS[it.def].guard ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#4a2a12', 12)}</span>` : '';
+  // weapons and pets: their damage type; gacha gear: the stat it gives (three kinds share one look per slot)
+  const badge = it.kind === 'weapon'
+    ? (!WEAPONS[it.def].guard && !WEAPONS[it.def].orb ? `<span class="badge">${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#4a2a12', 12)}</span>` : '')
+    : GACHA_GEAR.includes(it.def) ? `<span class="badge stat">${art(BONUS_ICON[ARMOR[it.def].bonus.stat], 14)}</span>` : '';
   return `<button class="cell r${it.rarity} ${cls}" ${attrs}>${art(itemIconId(it, w), 34, 'ic')}${badge}` +
     `<span class="lv">${it.lvl}</span>${it.sharpen ? `<span class="sh">+${it.sharpen}</span>` : ''}${extra}</button>`;
 }
@@ -226,7 +268,13 @@ export function itemLines(it: Item): [string, string][] {
       return out;
     }
     if (w.orb) return [orbLine(w.orb)];
-    if (w.pet) return [['Урон укуса', String(Math.round(weaponDamage(it)))], ['Тип', DAMAGE_TYPE_NAME[w.type]], ['Укусов/с', String(w.aps)]];
+    if (w.pet) {
+      const p = PETS[w.pet];
+      const out: [string, string][] = [['Урон укуса', String(Math.round(weaponDamage(it)))], ['Тип', DAMAGE_TYPE_NAME[w.type]], ['Укусов/с', String(w.aps)]];
+      if (p.cleave) out.push(['Удар лапой', `все в ${p.cleave} м`]);
+      if (p.pounce) out.push(['Прыжок', `до ${p.pounce.range} м, ×${p.pounce.mult}`]);
+      return out;
+    }
     return [
       ['Урон', String(Math.round(weaponDamage(it)))],
       ['Тип', DAMAGE_TYPE_NAME[w.type]],
@@ -235,7 +283,8 @@ export function itemLines(it: Item): [string, string][] {
     ];
   }
   const s = armorStats(it);
-  const out: [string, string][] = [['Защита', String(s.defense)]];
+  // (rings have no defense: only their bonus)
+  const out: [string, string][] = s.defense ? [['Защита', String(s.defense)]] : [];
   if (s.bonus) out.push([BONUS_NAME[s.bonus.stat], `+${s.bonus.value}`]);
   return out;
 }
@@ -286,9 +335,11 @@ const RENAMED: Record<string, string> = {
 };
 
 export function normalizeItem(it: Partial<Item> & { def: string }): Item {
-  // the old peasant, guard, knight and lord sets became the one warrior plate
+  // the old peasant, guard, knight and lord sets became the one warrior plate; set gloves became gacha gloves
   const old = /^(peasant|guard|knight|lord)_(head|chest|arms|legs)$/.exec(it.def);
-  const def = old ? `plate_${old[2]}` : RENAMED[it.def] ?? it.def;
+  // pet items of the gacha-gear branch were `pet_<PETS id>`; now the item id is the pet's own (WEAPONS[<id>].pet)
+  const pet = /^pet_(\w+)$/.exec(it.def);
+  const def = /^[a-z]+_arms$/.test(it.def) ? 'gloves_power' : old ? `plate_${old[2]}` : pet && PETS[pet[1]] ? pet[1] : RENAMED[it.def] ?? it.def;
   const kind = it.kind ?? 'weapon';
   return { uid: it.uid ?? newUid(), kind, def, rarity: fixedRarity(kind, def) ?? it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
 }

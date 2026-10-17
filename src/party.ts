@@ -3,7 +3,7 @@
  * Each class has two gear slots: a weapon (save.weapons[0]) and its own class item (save.weapons[1]: the warrior's
  * shield, the hunter's pet, the mage's orb); each keeps its own pair (SaveData.kits).
  */
-import { RARITY_IDS, type FactionId } from './config';
+import { PETS, RARITY_IDS, type FactionId } from './config';
 import type { VisualPart } from './items';
 
 export type HeroClass = 'warrior' | 'hunter' | 'mage';
@@ -48,7 +48,7 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
   hunter: {
     name: 'Охотник', icon: 'cls_hunter', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
     model: { human: 'human_archer', orc: 'orc_archer' },
-    weapons: ['bow', 'polearm', 'gun'], off: ['boar'], offName: 'Питомец', kit: { hand: 'bow', left: 'boar', bag: ['polearm', 'gun'] }, locked: true,
+    weapons: ['bow', 'polearm', 'gun'], off: Object.keys(PETS), offName: 'Питомец', kit: { hand: 'bow', left: 'boar', bag: ['polearm', 'gun'] }, locked: true,
   },
   mage: {
     name: 'Маг', icon: 'cls_mage', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',

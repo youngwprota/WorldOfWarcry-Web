@@ -21,7 +21,7 @@ export interface HeroBuild {
 
 /** A new hero's points (source `base`). */
 export const BASE_STATS: Record<StatId, number> = {
-  power: HERO.power, hp: HERO.hp, regen: HERO.regen, speed: HERO.speed, defense: 0, dodge: 0, crit: 0, critDmg: 0,
+  power: HERO.power, hp: HERO.hp, regen: HERO.regen, speed: HERO.speed, defense: 0, dodge: 0, crit: 0, critDmg: 0, haste: 0, leech: 0,
 };
 
 /** One stat taken apart, as the stat window shows it. */
@@ -69,6 +69,8 @@ export function curve(c: { base: number; max: number; k: number }, p: number) {
 export const dodgeChance = (p = 0) => curve(STAT_CURVE.dodge, p);
 export const critChance = (p = 0) => curve(STAT_CURVE.crit, p);
 export const critMul = (p = 0) => curve(STAT_CURVE.critDmg, p);
+export const hasteMul = (p = 0) => curve(STAT_CURVE.haste, p);
+export const leechShare = (p = 0) => curve(STAT_CURVE.leech, p);
 /** Average damage multiplier from crits (DPS, the simulator's quick estimate). */
 export const critAvg = (crit = 0, critDmg = 0) => 1 + critChance(crit) * (critMul(critDmg) - 1);
 /** Run speed, m/s: 100 points = HERO.baseSpeed, the points above it on the speed curve. */
@@ -76,7 +78,7 @@ export const runSpeed = (points: number) => HERO.baseSpeed * curve(STAT_CURVE.sp
 
 /** Totals from equipped armour and jewellery. */
 export function gearOf(equip: HeroBuild['equip']) {
-  const g = { defense: 0, hp: 0, regen: 0, power: 0, speed: 0, dodge: 0, crit: 0, critDmg: 0 } as Record<StatId, number>;
+  const g = { defense: 0, hp: 0, regen: 0, power: 0, speed: 0, dodge: 0, crit: 0, critDmg: 0, haste: 0, leech: 0 } as Record<StatId, number>;
   for (const it of Object.values(equip)) {
     if (!it) continue;
     const s = armorStats(it);
@@ -112,6 +114,12 @@ export function heroStats(b: HeroBuild) {
     dodge: dodgeChance(p('dodge')),
     crit: critChance(p('crit')),
     critMul: critMul(p('critDmg')),
+    hastePts: p('haste'),
+    leechPts: p('leech'),
+    /** Attack speed multiplier of every weapon (and the pet). */
+    haste: hasteMul(p('haste')),
+    /** Share of dealt damage healed. */
+    leech: leechShare(p('leech')),
   };
 }
 
@@ -125,7 +133,7 @@ export function orbMul(weapons: HeroBuild['weapons']) {
  * Plain-swing DPS of the swinging weapons (a shield never swings beside a weapon, an orb never swings); `resist`
  * applies each one's damage type.
  */
-export function heroDps(weapons: HeroBuild['weapons'], power: number, powerMul: number, crit: number, resist?: Partial<Record<DamageType, ResistTier>>) {
+export function heroDps(weapons: HeroBuild['weapons'], power: number, powerMul: number, crit: number, resist?: Partial<Record<DamageType, ResistTier>>, haste = 1) {
   let dps = 0;
   for (const it of weapons) {
     if (!it) continue;
@@ -135,7 +143,7 @@ export function heroDps(weapons: HeroBuild['weapons'], power: number, powerMul: 
     // a pet item bites with its own damage, without the hero's power
     dps += (w.pet ? weaponDamage(it) : weaponDamage(it, power, powerMul)) * w.aps * attackMul(w) * r;
   }
-  return dps * crit;
+  return dps * crit * haste;
 }
 
 /** Incoming damage multiplier from the shields in hand. */

@@ -71,11 +71,10 @@ pairs.forEach(([c, w, l], i) => {
   const left = new URLSearchParams(location.search).get('left');
   if (left || l) attachWeapon(g, left || l!, true);
   // ?trims=armor_guard_head_rare_human,… — armour quality pieces on the character (fit check)
-  // ?trimq=rare — every armour-set character wears its own set's pieces of that quality, plus a ring and an amulet
+  // ?trimq=rare — every armour-set character wears its own set's pieces of that quality
   const q = new URLSearchParams(location.search).get('trimq');
   const set = q ? TRIM_SETS[c] : undefined;
-  const auto = set ? [...['head', 'chest', 'arms', 'legs'].map((p) => `armor_${set[0]}_${p}_${q}_${set[1]}`),
-    `armor_ring_${q}_${set[1]}`, `armor_amulet_${q}_${set[1]}`] : [];
+  const auto = set ? ['head', 'chest', 'arms', 'legs'].map((p) => `armor_${set[0]}_${p}_${q}_${set[1]}`) : [];
   for (const t of [...auto, ...(new URLSearchParams(location.search).get('trims')?.split(',').filter(Boolean) ?? [])]) {
     assets.gear(t).then(() => attachTrim(g, t));
   }

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Character } from './character';
 import { Creature } from './creature';
 import {
-  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, RARITY, STAT_CURVE, STAT_SOURCE_NAME, STAVES, WEAPONS, isPctStat, type PetDef, type StatId,
+  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, PET_RARITY, RARITY, STAT_CURVE, STAT_SOURCE_NAME, STAVES, WEAPONS, isPctStat, type PetDef, type StatId,
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
@@ -32,11 +32,15 @@ const STAT_UI: Record<StatId, { name: string; icon: string; note: string }> = {
   crit: { name: 'Шанс крита', icon: 'crit', note: `предел ${pct(STAT_CURVE.crit.base + STAT_CURVE.crit.max)}` },
   critDmg: { name: 'Урон крита', icon: 'critdmg', note: `предел ${pct(STAT_CURVE.critDmg.base + STAT_CURVE.critDmg.max)}` },
   dodge: { name: 'Уклонение', icon: 'dodge', note: `от любых ударов, предел ${pct(STAT_CURVE.dodge.max)}` },
+  haste: { name: 'Скорость атаки', icon: 'fist', note: `все удары и укусы питомца, предел +${pct(STAT_CURVE.haste.max)}` },
+  leech: { name: 'Вампиризм', icon: 'heart', note: `доля нанесённого урона в здоровье, предел ${pct(STAT_CURVE.leech.max)}` },
 };
 
 /** Where the pet stands beside the hero on the preview stage (hero-local, m); the hero steps aside for it. */
 const PET_AT = new THREE.Vector3(0.75, 0, -0.35);
 const HERO_AT_WITH_PET = new THREE.Vector3(-0.4, 0, 0.2);
+/** The pet (and its quality) the hero has on: HeroPreview.petKey. */
+const petKey = (g: Game) => (g.petDef ? `${g.petDef.id}:${g.petItem?.rarity ?? 0}` : '');
 
 /**
  * Rotatable 3D hero for the character sheet (own small renderer, disposed on close): the class on the field and,
@@ -49,13 +53,17 @@ class HeroPreview {
   private stage = new THREE.Group();
   private ch: Character;
   private pet: Creature | null = null;
+  /** Which pet the stage was laid out for (petKey). */
+  readonly petKey: string;
   private clock = new THREE.Clock();
   private raf = 0;
   yaw = 0.4;
   private vel = 0;
   private dragX: number | null = null;
 
-  constructor(private canvas: HTMLCanvasElement, model: string, pet: PetDef | null = null) {
+  /** `petRarity`: the pet item's quality (its size, PET_RARITY). */
+  constructor(private canvas: HTMLCanvasElement, model: string, pet: PetDef | null = null, petRarity = 0) {
+    this.petKey = pet ? `${pet.id}:${petRarity}` : '';
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -73,7 +81,7 @@ class HeroPreview {
     this.ch = new Character(model, null, 1);
     this.stage.add(this.ch.root);
     if (pet) {
-      this.pet = new Creature(pet.model, pet.scale);
+      this.pet = new Creature(pet.model, pet.scale * PET_RARITY.scale[petRarity]);
       this.pet.position.copy(PET_AT);
       this.stage.add(this.pet.root);
       this.ch.position.copy(HERO_AT_WITH_PET);
@@ -242,6 +250,8 @@ export class Inventory {
       crit: pct1(s.crit),
       critDmg: pct1(s.critMul),
       dodge: pct1(s.dodge),
+      haste: `×${s.haste.toFixed(2)}`,
+      leech: pct1(s.leech),
     };
     const total = isPctStat(k)
       ? `${fmtK(b.sum)} × ${b.mult.toFixed(2)} = <b>${fmtK(k === 'hp' ? Math.round(b.value) : b.value)}${k === 'regen' ? ' хп/с' : ''}</b>`
@@ -270,6 +280,8 @@ export class Inventory {
       stat('crit', pct1(s.crit), `${s.critPts} очков`),
       stat('critDmg', pct1(s.critMul), `${s.critDmgPts} очков`),
       stat('dodge', pct1(s.dodge), `${s.dodgePts} очков`),
+      stat('haste', `×${s.haste.toFixed(2)}`, `${s.hastePts} очков`),
+      stat('leech', pct1(s.leech), `${s.leechPts} очков`),
     ].join('');
     this.showWin('Характеристики', `${f.name} · ${w.name}`, rows, () => this.statWrap.classList.add('hidden'));
   }
@@ -325,7 +337,7 @@ export class Inventory {
       canvas.replaceWith(fresh);
       canvas = fresh;
     }
-    this.preview = new HeroPreview(canvas, this.game.heroModel(), this.game.petDef);
+    this.preview = new HeroPreview(canvas, this.game.heroModel(), this.game.petDef, this.game.petItem?.rarity ?? 0);
   }
 
   private switchClass(c: HeroClass) {
@@ -360,6 +372,8 @@ export class Inventory {
       const st = `${c === g.heroClass ? ' on' : ''}${g.classOpen(c) ? '' : ' locked'}`;
       return `<button class="cls${st}" data-cls="${c}" style="--c1:${d.color[0]};--c2:${d.color[1]}" title="${d.name}">${art(d.icon, 30)}</button>`;
     }).join('');
+    // another pet (or its quality: the size) put on from the bag: the stage is laid out for it, so a new preview
+    if (this.preview && this.preview.petKey !== petKey(g)) this.newPreview();
     this.dressPreview();
     void g.outfitReady.then(() => this.dressPreview()); // parts loaded on demand (the hunter sets)
     g.newItems = 0;

@@ -165,6 +165,18 @@ class Assets {
     return p;
   }
 
+  private jewelLoads = new Map<string, Promise<void>>();
+
+  /** A showcase jewel GLB (rings / amulets / gacha gloves in the forge, items.showcaseModel): keeps its PBR materials; loads it once. */
+  jewel(name: string): Promise<void> {
+    let p = this.jewelLoads.get(name);
+    if (!p) {
+      p = this.loadProps([name]).catch((e) => { this.jewelLoads.delete(name); throw e; });
+      this.jewelLoads.set(name, p);
+    }
+    return p;
+  }
+
   /** Static GLB props (the mage's staff tiers, WeaponDef.tiers) that keep their own materials; cloned like FBX models. */
   async loadProps(names: string[]) {
     await Promise.all(
@@ -358,6 +370,7 @@ class Assets {
 
   /** Merged, static geometry for props (cheap to instance). */
   has(name: string) { return this.sources.has(name); }
+  hasCreature(name: string) { return this.creatures.has(name); }
 
   /** A model built in code (src/mocks.ts) under `name`: cloned like a loaded one. */
   register(name: string, model: THREE.Group) { this.sources.set(name, model); }
