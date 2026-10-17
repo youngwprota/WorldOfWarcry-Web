@@ -75,8 +75,11 @@ const ORB_AT = new THREE.Vector3(-0.45, 1.9, -0.1);
  * cache the sphere of whatever pose it meets first. Call with up-to-date world matrices.
  */
 export function fixSkinBounds(m: THREE.SkinnedMesh) {
-  m.computeBoundingSphere();
-  const s = m.boundingSphere!;
+  // the bind-pose sphere of the shared geometry: SkinnedMesh.computeBoundingSphere skins every vertex on the CPU
+  // (hundreds of mobs at load), and the 1.5x margin below covers the animated poses anyway
+  const g = m.geometry;
+  if (!g.boundingSphere) g.computeBoundingSphere();
+  const s = (m.boundingSphere = g.boundingSphere!.clone());
   s.radius = s.radius * 1.5 + 0.6 / (m.matrixWorld.getMaxScaleOnAxis() || 1);
   m.frustumCulled = true;
 }

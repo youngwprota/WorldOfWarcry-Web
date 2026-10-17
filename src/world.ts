@@ -9,7 +9,7 @@ import {
 } from './island';
 import type { Gate } from './island';
 import {
-  GroundLayers, bakeGroundMaps, bakeWorldMap, buildCobbles, buildGrassField, buildGround, buildRitual, buildMist, groundColorTexture, windTime, zoneTexture, type Pond,
+  GroundLayers, bakeGroundMaps, bakeWorldMap, WORLD_MAP_SHADE, buildCobbles, buildGrassField, buildGround, buildRitual, buildMist, groundColorTexture, windTime, zoneTexture, type Pond,
 } from './terrain';
 import { buildOcean, buildPond, pondR } from './water';
 import { applyScenery, patchScenery, scenery, type SceneryLook } from './atmos';
@@ -2969,6 +2969,10 @@ export class World {
   drawMap(g: CanvasRenderingContext2D, X: (x: number) => number, Y: (z: number) => number, ppm: number, worldMap = false) {
     g.fillStyle = '#2a86d0'; // open sea beyond the baked square (same colour as its deep-water edge)
     g.fillRect(-1e4, -1e4, 2e4, 2e4);
+    if (worldMap) {
+      g.fillStyle = WORLD_MAP_SHADE;
+      g.fillRect(-1e4, -1e4, 2e4, 2e4);
+    }
     g.imageSmoothingEnabled = true;
     const pic = worldMap ? (this.worldMapCanvas ??= bakeWorldMap(this.mapCanvas)) : this.mapCanvas;
     g.drawImage(pic, X(MAP_BOX.x), Y(MAP_BOX.z), MAP_BOX.size * ppm, MAP_BOX.size * ppm);

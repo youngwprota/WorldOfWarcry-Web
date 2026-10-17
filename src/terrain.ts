@@ -131,6 +131,8 @@ const GRASS_OF: Record<ZoneId, number> = { forest: 1, cemetery: 0.7, peaks: 0.06
  * The world map's picture: the minimap one in a dark brown shade, with brown lines along the ridges between locations
  * where they block the way; the passages stay open (a closed gate is drawn over it by World.drawMap).
  */
+/** The world map's darker look over the minimap colours (World.drawMap shades the open sea around it the same). */
+export const WORLD_MAP_SHADE = '#2a180c38';
 export function bakeWorldMap(map: HTMLCanvasElement) {
   const M = map.width;
   const k = MAP_BOX.size / M;
@@ -138,7 +140,7 @@ export function bakeWorldMap(map: HTMLCanvasElement) {
   out.width = out.height = M;
   const g = out.getContext('2d')!;
   g.drawImage(map, 0, 0);
-  g.fillStyle = '#2a180c38';
+  g.fillStyle = WORLD_MAP_SHADE;
   g.fillRect(0, 0, M, M);
   const lines = g.createImageData(M, M);
   for (let j = 0; j < M; j++) {

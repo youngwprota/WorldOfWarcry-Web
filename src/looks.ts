@@ -30,7 +30,8 @@ const skinIcon = (skin: string) => (f: FactionId, it: Item) => `${skin}_${ARMOR[
 export const CLASS_LOOK: Record<HeroClass, ClassLook> = {
   warrior: {
     part: (f, it) => ARMOR[it.def].source?.[f],
-    set: (f) => Object.fromEntries(BODY_PARTS.map((p) => [p, ARMOR[`${WARRIOR_DEBUG_SET}_${p}`].source![f]])) as Record<VisualPart, string>,
+    // gloves left the set (gacha gear), so no `plate_arms`; every plate piece wears the same source character
+    set: (f) => allParts(ARMOR[`${WARRIOR_DEBUG_SET}_chest`].source![f]),
     trims: true,
     keep: [],
     icon: (f, it) => `${ARMOR[it.def].trim?.[f]}_${ARMOR[it.def].slot}_${RARITY_IDS[it.rarity]}_${f}`,
@@ -76,4 +77,4 @@ export function classPreview(c: HeroClass, f: FactionId, rarity: number | null) 
 
 /** Quality pieces of the warrior's debug look (none at common, like armorTrim). */
 export const debugSetTrims = (f: FactionId, rarity: number) =>
-  rarity > 0 ? BODY_PARTS.map((p) => trimModel(`${ARMOR[`${WARRIOR_DEBUG_SET}_${p}`].trim![f]}_${p}`, rarity, f)) : [];
+  rarity > 0 ? BODY_PARTS.map((p) => trimModel(`${ARMOR[`${WARRIOR_DEBUG_SET}_chest`].trim![f]}_${p}`, rarity, f)) : [];
