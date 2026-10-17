@@ -1276,6 +1276,8 @@ export const FORGE3D = {
   /** Camera push-in (m) over the three blows. */
   push: 0.45,
   anvilScale: 0.4,
+  /** A pet's largest side, as a share of `itemSize`. */
+  petSize: 1.3,
   anvilYaw: 0,
   ingot: [0, 0.04, 0] as [number, number, number],
   ingotYaw: 0,

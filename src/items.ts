@@ -268,7 +268,8 @@ export function itemLines(it: Item): [string, string][] {
     ];
   }
   const s = armorStats(it);
-  const out: [string, string][] = [['Защита', String(s.defense)]];
+  // (rings have no defense: only their bonus)
+  const out: [string, string][] = s.defense ? [['Защита', String(s.defense)]] : [];
   if (s.bonus) out.push([BONUS_NAME[s.bonus.stat], `+${s.bonus.value}`]);
   return out;
 }

@@ -340,7 +340,8 @@ export class Forge3D {
       // a pet rises as its creature (skinned: cloned with its own skeleton), standing in its bind pose
       m = pet ? assets.cloneCreature(itemModel(item, this.faction)).model : assets.clone(itemModel(item, this.faction));
       const b = new THREE.Box3().setFromObject(m);
-      const h = b.max.y - b.min.y || 1;
+      // a pet is long, not tall: fit its largest side, a bit bigger than a weapon
+      const h = (pet ? Math.max(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z) / F.petSize : b.max.y - b.min.y) || 1;
       m.scale.multiplyScalar(F.itemSize / h);
       m.position.y = -((b.min.y + b.max.y) / 2) * (F.itemSize / h);
     } else {
