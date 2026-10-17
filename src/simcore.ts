@@ -233,6 +233,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const pet = petIt ? PETS[WEAPONS[petIt.def].pet!] : CLASSES[h.cls].pet ? PETS[START_PET] : null;
   const petMul = PET_RARITY.dmg[petIt?.rarity ?? 0];
   let petCd = 0.6;
+  let pounceCd = 0; // the lion opens with a leap (PetDef.pounce), then every pounce.cd s
   const B = STAVES.fire.burn;
   let burn = 0, burnTick = 0, burnDps = 0, iceN = 0, windN = 0;
   const gusts: number[] = []; // landing times of wind orbs
@@ -267,6 +268,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
     const r = RESIST_MULT[d.resist[w.type] ?? 'normal'];
     const dmg = weaponDamage(it, st.power, st.powerMul) * heroCrit() * foeHits() * r * mult * roll() * vuln();
     mhp -= dmg;
+    hp = Math.min(st.maxHp, hp + dmg * st.leech); // ring of blood
     return dmg;
   };
   /** One swing of a hand (counters too). */
@@ -303,11 +305,17 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       strike(hd.it);
     }
     // the pet: always on the target (slams do not stop it), × the plain blow of the weapon, no crits or dodges
+    // (the bear's cleave is not modelled: the fights here are one on one)
     if (pet && h.weapons[0]) {
       petCd -= DT;
+      pounceCd -= DT;
       if (petCd <= 0) {
         petCd += 1 / (pet.aps * st.haste);
-        mhp -= weaponDamage(h.weapons[0], st.power, st.powerMul) * pet.dmg * petMul * RESIST_MULT[d.resist[pet.type] ?? 'normal'] * roll() * vuln();
+        const leap = pet.pounce && pounceCd <= 0 ? pet.pounce.mult : 1;
+        if (leap > 1) pounceCd = pet.pounce!.cd;
+        const dmg = weaponDamage(h.weapons[0], st.power, st.powerMul) * pet.dmg * petMul * leap * RESIST_MULT[d.resist[pet.type] ?? 'normal'] * roll() * vuln();
+        mhp -= dmg;
+        hp = Math.min(st.maxHp, hp + dmg * st.leech);
       }
     }
     if (burn > 0) {
