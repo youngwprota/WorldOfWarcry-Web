@@ -1642,4 +1642,45 @@ export const KILL_FX = { knockMul: 2, maxKnock: 5, shake: 0.31, blood: 14 };
 
 // Numbers picked by the balance tuner (npm run tune -- --write / balance.html → «Цели»): rewritten as a whole, delete to undo.
 // <tuned>
+GACHA.token.boss = 1;
+GACHA.token.elite = 0.05;
+GACHA.token.mini = 0.2;
+GACHA.token.normal = 0.01;
+MOBS.bandit_chief.dmg = 13.6;
+MOBS.bandit_chief.hp = 1975;
+MOBS.death.dmg = 44.5;
+MOBS.death.hp = 9593;
+MOBS.elf_priestess.dmg = 10.6;
+MOBS.elf_priestess.hp = 1863;
+MOBS.elf_queen.dmg = 35.7;
+MOBS.elf_queen.hp = 6018;
+MOBS.murloc_king.dmg = 6.54;
+MOBS.murloc_king.hp = 2314;
+MOBS.orc_shaman.dmg = 17;
+MOBS.orc_shaman.hp = 4953;
+MOBS.sand_boar.dmg = 4.11;
+MOBS.sand_boar.hp = 1312;
+ZONE_SCALE.cemetery.dmg.normal = 0.6;
+ZONE_SCALE.cemetery.hp.elite = 0.787;
+ZONE_SCALE.cemetery.hp.mini = 0.756;
+ZONE_SCALE.cemetery.hp.normal = 0.309;
+ZONE_SCALE.forest.dmg.elite = 0.6;
+ZONE_SCALE.forest.dmg.mini = 0.36;
+ZONE_SCALE.forest.hp.elite = 0.675;
+ZONE_SCALE.forest.hp.mini = 0.352;
+ZONE_SCALE.forest.hp.normal = 0.891;
+ZONE_SCALE.grove.dmg.mini = 0.36;
+ZONE_SCALE.grove.hp.elite = 1.13;
+ZONE_SCALE.grove.hp.mini = 0.881;
+ZONE_SCALE.hills.dmg.elite = 0.6;
+ZONE_SCALE.hills.dmg.mini = 0.6;
+ZONE_SCALE.hills.dmg.normal = 0.216;
+ZONE_SCALE.hills.hp.elite = 0.829;
+ZONE_SCALE.hills.hp.mini = 0.993;
+ZONE_SCALE.hills.hp.normal = 0.594;
+ZONE_SCALE.hills.token = 0.532;
+ZONE_SCALE.peaks.hp.elite = 1.69;
+ZONE_SCALE.peaks.hp.mini = 1.15;
+ZONE_SCALE.peaks.hp.normal = 6.2;
+ZONE_SCALE.peaks.token = 16;
 // </tuned>
