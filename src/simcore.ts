@@ -790,7 +790,37 @@ export interface RunOut {
 
 export const wname = (it: Item | null) => (it ? `${it.def}${'⁰¹²³⁴⁵'[it.rarity]}${it.lvl > 1 ? `×${it.lvl}` : ''}` : '—');
 
-function run(seed: number): RunOut {
+/**
+ * A run's state at a boss's first kill (after its loot and respawns): the bot goes on from there with `RunCtl.from`.
+ * `data` is private to the sim (a structuredClone of the hero, the units, the output so far, the rng).
+ */
+export interface Checkpoint { boss: string; t: number; data: unknown }
+interface CpData { t: number; kills: number; nextSnap: number; rs: number; gates: string[]; h: Hero; units: Unit[]; out: RunOut; spent: number[] }
+export interface RunCtl {
+  /** Go on from this state (cloned: one checkpoint feeds many runs). */
+  from?: Checkpoint;
+  /** Save a checkpoint at the first kill of each of these bosses. */
+  keep?: string[];
+  /** End the run right after this boss's first kill. */
+  stopAt?: string;
+}
+
+function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string, Checkpoint> } {
+  const cps: Record<string, Checkpoint> = {};
+  let h!: Hero, units!: Unit[], out!: RunOut;
+  let t = 0;
+  let kills = 0;
+  let nextSnap = 0;
+  const spent = new Map<Unit, number>();
+  const capped = (u: Unit) => u.zone === 'forest' && !u.temp && u.charges.length > 1 && Math.max(...u.charges) >= 3600;
+  dpsCache.clear();
+  openGates = new Set();
+  if (ctl.from) {
+    const c = structuredClone(ctl.from.data) as CpData;
+    ({ h, units, out, t, kills, nextSnap, rs } = c);
+    openGates = new Set(c.gates);
+    c.spent.forEach((n, i) => { if (n) spent.set(units[i], n); });
+  } else {
   rs = seed * 7919;
   const f = FACTIONS[OPT.faction];
   const classes = OPT.cls === 'party' ? CLASS_IDS : [OPT.cls];
@@ -807,27 +837,21 @@ function run(seed: number): RunOut {
   const kits = {} as Hero['kits'];
   const gear = {} as Hero['gear'];
   for (const c of classes) { const k = startKit(c); kits[c] = Object.fromEntries(ZONE_IDS.map((z) => [z, k])) as Record<ZoneId, Kit>; gear[c] = {}; }
-  const h: Hero = {
+  h = {
     faction: OPT.faction, src: {}, pct: {}, equip: gear[classes[0]], weapons: kits[classes[0]].forest, cls: classes[0], classes, kits, gear,
     hp: 0, bag, pulls: 0, pity: 0, gacha: new Set(), spot: { s: sCamp, off: 0 },
   };
   h.hp = stats(h).maxHp;
-  const units = buildUnits();
-  const capped = (u: Unit) => u.zone === 'forest' && !u.temp && u.charges.length > 1 && Math.max(...u.charges) >= 3600;
-  const spent = new Map<Unit, number>();
-  const out: RunOut = {
+  units = buildUnits();
+  out = {
     snaps: [], bossAt: {}, bossDur: {}, gachaShare: {}, openAt: { forest: 0 }, fights: [], pulls: [], deaths: 0, classTime: {}, path: [], events: [],
     cycle: { total: units.filter(capped).reduce((a, u) => a + u.charges.length, 0), done: 0, atBoss: {} },
   };
-  dpsCache.clear();
-  openGates = new Set();
+  }
   openGate();
   let open = openZones();
   const camp: Spot = { s: sCamp, off: 0 };
   const campHome = camp;
-  let t = 0;
-  let kills = 0;
-  let nextSnap = 0;
   // estimates are kept until the hero grows by 3% or changes gear
   let ver = 0, verPower = 0, verHp = 0, verGear = '';
   type Est = FightOut & { rate?: number; cls: HeroClass };
@@ -976,7 +1000,20 @@ function run(seed: number): RunOut {
     return v;
   };
 
+  /** A boss first killed in this step of the loop: checkpoint / stop after its loot and respawns. */
+  let firstKill: string | null = null;
+  const afterKill = () => {
+    if (!firstKill) return false;
+    const b = firstKill;
+    firstKill = null;
+    if (ctl.keep?.includes(b) || ctl.stopAt === b) {
+      const data: CpData = { t, kills, nextSnap, rs, gates: [...openGates], h, units, out, spent: units.map((u) => spent.get(u) ?? 0) };
+      cps[b] = { boss: b, t, data: structuredClone(data) };
+    }
+    return ctl.stopAt === b;
+  };
   while (t < OPT.until) {
+    if (afterKill()) break;
     if (t >= nextSnap) { snap(); nextSnap = (Math.floor(t / 60) + 1) * 60; }
     checkVer();
     const st = stats(h);
@@ -1084,6 +1121,7 @@ function run(seed: number): RunOut {
         if (!out.bossAt[d.id]) {
           out.bossAt[d.id] = t; out.bossDur[d.id] = r.dur; out.cycle.atBoss[d.id] = out.cycle.done / out.cycle.total;
           out.gachaShare[d.id] = gachaShare();
+          firstKill = d.id;
         }
         // the first kill opens the boss's passages (boss.unlocks → GATES)
         if (d.boss.unlocks.some((g) => !openGates.has(g))) {
@@ -1113,7 +1151,8 @@ function run(seed: number): RunOut {
       m.n = (i + 1) % m.charges.length;
     }
   }
-  return out;
+  afterKill();
+  return { out, cps };
 }
 
 // ---------- entry points ----------
@@ -1163,10 +1202,17 @@ export function simMap(): SimMap {
 
 /** `opts.runs` runs from seeds seed, seed+1, …; `onRun` after each (progress). */
 export function simulate(opts: Partial<SimOpts> = {}, onRun?: (done: number) => void): RunOut[] {
+  return simulateFrom(opts, [], onRun).map((r) => r.out);
+}
+/**
+ * Runs with checkpoints: run i starts from `ctl[i].from` when given (else from seed `opts.seed + i`), keeps / stops at
+ * the bosses `ctl[i]` names. `opts.until` still caps the time.
+ */
+export function simulateFrom(opts: Partial<SimOpts>, ctl: RunCtl[], onRun?: (done: number) => void) {
   OPT = { ...DEFAULT_OPTS, ...opts };
   Math.random = rand;
-  const runs: RunOut[] = [];
-  for (let i = 0; i < OPT.runs; i++) { runs.push(run(OPT.seed + i)); onRun?.(i + 1); }
+  const runs: ReturnType<typeof run>[] = [];
+  for (let i = 0; i < OPT.runs; i++) { runs.push(run(OPT.seed + i, ctl[i] ?? ctl[0] ?? {})); onRun?.(i + 1); }
   return runs;
 }
 
