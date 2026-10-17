@@ -37,7 +37,7 @@ export interface SimOpts {
 }
 const ZONE_IDS = CONFIG.ZONES.map((z) => z.id);
 export const DEFAULT_OPTS: SimOpts = {
-  faction: 'human', cls: 'party', weapon: '', off: '', runs: 20, until: 45 * 60, dodge: 0.6, uptime: 0.8, combo: 0.85, bossWin: 0.5, seed: 1, keep: false, probes: 12,
+  faction: 'human', cls: 'party', weapon: '', off: '', runs: 10, until: 90 * 60, dodge: 0.6, uptime: 0.8, combo: 0.85, bossWin: 0.5, seed: 1, keep: false, probes: 12,
 };
 let OPT: SimOpts = { ...DEFAULT_OPTS };
 
@@ -756,6 +756,8 @@ export interface BotEvent {
 }
 export interface RunOut {
   snaps: Snap[]; bossAt: Record<string, number>; bossDur: Record<string, number>; fights: FightRec[]; pulls: number[]; deaths: number;
+  /** When each location opened (its passage unlocked by a boss), s; the forest is open from the start. */
+  openAt: Partial<Record<ZoneId, number>>;
   /** Seconds of fighting by class on the field. */
   classTime: Partial<Record<HeroClass, number>>;
   /**
@@ -796,7 +798,7 @@ function run(seed: number): RunOut {
   const capped = (u: Unit) => u.zone === 'forest' && !u.temp && u.charges.length > 1 && Math.max(...u.charges) >= 3600;
   const spent = new Map<Unit, number>();
   const out: RunOut = {
-    snaps: [], bossAt: {}, bossDur: {}, fights: [], pulls: [], deaths: 0, classTime: {}, path: [], events: [],
+    snaps: [], bossAt: {}, bossDur: {}, openAt: { forest: 0 }, fights: [], pulls: [], deaths: 0, classTime: {}, path: [], events: [],
     cycle: { total: units.filter(capped).reduce((a, u) => a + u.charges.length, 0), done: 0, atBoss: {} },
   };
   dpsCache.clear();
@@ -1013,7 +1015,9 @@ function run(seed: number): RunOut {
       const r = fight(h, foesOf(group));
       t += r.dur;
       // a pack is one row of the mobs table: its members' ids joined by '+'
-      const key = group.map((x) => x.def).sort().join('+');
+      const n = new Map<string, number>();
+      for (const x of group) n.set(x.def, (n.get(x.def) ?? 0) + 1);
+      const key = [...n].sort(([a], [b]) => (a < b ? -1 : 1)).map(([d, k]) => (k > 1 ? `${d}×${k}` : d)).join('+');
       const first = !out.fights.some((f) => f.def === key && f.depth === u.depth);
       out.fights.push({ def: key, depth: u.depth, t, first, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: st.maxHp, win: r.win, cls: h.cls });
       out.classTime[h.cls] = (out.classTime[h.cls] ?? 0) + r.dur;
@@ -1052,7 +1056,12 @@ function run(seed: number): RunOut {
       if (d.boss) {
         if (!out.bossAt[d.id]) { out.bossAt[d.id] = t; out.bossDur[d.id] = r.dur; out.cycle.atBoss[d.id] = out.cycle.done / out.cycle.total; }
         // the first kill opens the boss's passages (boss.unlocks → GATES)
-        if (d.boss.unlocks.some((g) => !openGates.has(g))) { openGate(...d.boss.unlocks); open = openZones(); regear(h); }
+        if (d.boss.unlocks.some((g) => !openGates.has(g))) {
+          openGate(...d.boss.unlocks);
+          open = openZones();
+          for (const z of open) out.openAt[z] ??= t;
+          regear(h);
+        }
       }
     }
     // the gacha: every pull right away
@@ -1159,6 +1168,8 @@ export interface MobAvg { swings: number; dur: number; takenPct: number; t: numb
 export interface MobSum { key: string; n: number; first: MobAvg; all: MobAvg; losses: number }
 export interface SimSummary {
   runs: number; bosses: BossSum[]; pulls: Record<10 | 20 | 30, number | undefined>; deaths?: number; mobs: MobSum[];
+  /** Each location: median time it opened (runs that opened it). */
+  zones: { zone: ZoneId; p50?: number; n: number }[];
   /** Share of all fighting time by class on the field (0…1). */
   classShare: Partial<Record<HeroClass, number>>;
   /** The forest cycle: charges in it, median time it closes (runs that closed it, of `runs`). */
@@ -1188,5 +1199,6 @@ export function summarize(runs: RunOut[]): SimSummary {
   const classShare = Object.fromEntries(Object.entries(time).map(([c, s]) => [c, s / total]));
   const closed = runs.map((r) => r.cycle.doneAt).filter((x): x is number => x !== undefined);
   const cycle = { total: runs[0]?.cycle.total ?? 0, doneAt: pct(closed, 0.5), closed: closed.length };
-  return { runs: runs.length, bosses, pulls: { 10: pullsBy(10), 20: pullsBy(20), 30: pullsBy(30) }, deaths: pct(runs.map((r) => r.deaths), 0.5), mobs, classShare, cycle };
+  const zones = ZONE_IDS.map((zone) => { const at = runs.map((r) => r.openAt[zone]).filter((x): x is number => x !== undefined); return { zone, p50: pct(at, 0.5), n: at.length }; });
+  return { runs: runs.length, bosses, zones, pulls: { 10: pullsBy(10), 20: pullsBy(20), 30: pullsBy(30) }, deaths: pct(runs.map((r) => r.deaths), 0.5), mobs, classShare, cycle };
 }

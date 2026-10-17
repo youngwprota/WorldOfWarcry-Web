@@ -1,8 +1,8 @@
 // Balance simulator CLI over src/simcore.ts (the same core runs on balance.html). Prints a per-minute curve and when each boss falls.
-// Run: npm run sim -- [--faction human|orc] [--class party|warrior|hunter|mage] [--weapon sword] [--off shield_tower] [--runs 20] [--until 45]
+// Run: npm run sim -- [--faction human|orc] [--class party|warrior|hunter|mage] [--weapon sword] [--off shield_tower] [--runs 10] [--until 90]
 //                     [--dodge 0.6] [--uptime 0.8] [--combo 0.85] [--seed 1] [--keep] [--log] [--mobs] [--bench]
 //                     [--set MOBS.bandit_chief.hp=6000 --set GACHA.token.normal=0.05 ...] (what-if: config edits for this run)
-import { ORBS, type FactionId, type OrbKind } from '../src/config';
+import { MOBS, ORBS, ZONES, type FactionId, type OrbKind } from '../src/config';
 import { CLASSES, type HeroClass } from '../src/party';
 import { BOSSES, DEFAULT_OPTS, TRAIL, applySet, bench, simMap, simulate, summarize, BENCH_HP, type SimOpts } from '../src/simcore';
 
@@ -89,18 +89,20 @@ say(`   тропа: лагерь s=${TRAIL.camp.toFixed(0)}, форт s=${TRAIL.
 if (LOG) {
   say('\n== Минуты (прогон 1): время зона | урон HP реген защ | убийств смертей круток | оружие | шанс победы над боссами');
   for (const s of runs[0].snaps) {
-    say(`${mmss(s.t)} ${s.zone.padEnd(8)} | ${String(s.power).padStart(4)} ${String(s.maxHp).padStart(5)} ${String(s.regen).padStart(3)} ${String(s.defense).padStart(3)} | ${String(s.kills).padStart(3)} ${String(s.deaths).padStart(2)} ${String(s.pulls).padStart(2)} | ${s.weapons.padEnd(18)} | ${BOSSES.map((b) => `${b.name} ${Math.round(s.win[b.id] * 100)}%`).join(' ')}`);
+    say(`${mmss(s.t)} ${s.zone.padEnd(8)} | ${String(s.power).padStart(4)} ${String(s.maxHp).padStart(5)} ${String(s.regen).padStart(3)} ${String(s.defense).padStart(3)} | ${String(s.kills).padStart(3)} ${String(s.deaths).padStart(2)} ${String(s.pulls).padStart(2)} | ${s.weapons.padEnd(18)} | ${BOSSES.filter((b) => s.win[b.id] > 0).map((b) => `${b.name} ${Math.round(s.win[b.id] * 100)}%`).join(' ')}`);
   }
 }
 say('\n== Боссы: первое убийство (медиана [p10–p90]), сколько прогонов успели, длительность того боя');
-for (const b of sum.bosses) say(`${b.name.padEnd(8)} ${mmss(b.p50)} [${mmss(b.p10)}–${mmss(b.p90)}]  ${b.won}/${sum.runs}  бой ${b.dur?.toFixed(0) ?? '—'} с  цикл леса ${b.cycle === undefined ? '—' : Math.round(b.cycle * 100) + '%'}`);
+const zoneName = (id: string) => ZONES.find((z) => z.id === id)?.name ?? id;
+for (const b of sum.bosses) say(`${b.name.padEnd(19)} ${zoneName(MOBS[b.id].boss!.zone).padEnd(16)} ${mmss(b.p50)} [${mmss(b.p10)}–${mmss(b.p90)}]  ${b.won}/${sum.runs}  бой ${b.dur?.toFixed(0) ?? '—'} с  цикл леса ${b.cycle === undefined ? '—' : Math.round(b.cycle * 100) + '%'}`);
+say(`Локации открыты (медиана, прогонов): ${sum.zones.filter((z) => z.n).map((z) => `${zoneName(z.zone)} ${mmss(z.p50).trim()} (${z.n}/${sum.runs})`).join(', ')}`);
 say(`Цикл леса (${sum.cycle.total} зарядов до 12-часового кулдауна): закрыт в ${sum.cycle.closed}/${sum.runs}, медиана ${mmss(sum.cycle.doneAt)}`);
 say(`\nКрутки (медиана): 10 мин ${sum.pulls[10]}, 20 мин ${sum.pulls[20]}, 30 мин ${sum.pulls[30]}; смертей за прогон ${sum.deaths}`);
 say(`Время в боях по классам: ${Object.entries(sum.classShare).map(([c, s]) => `${CLASSES[c as HeroClass].name} ${Math.round(s * 100)}%`).join(', ') || '—'}`);
 if (MOBS_TABLE) {
   say('\n== Мобы: боёв | первый бой: когда, ударов, с, урон по герою % HP | все бои: ударов, с, % HP | поражений');
   const cols = (a: { swings: number; dur: number; takenPct: number }) => `${a.swings.toFixed(1).padStart(5)} ${a.dur.toFixed(1).padStart(5)} ${(Math.round(a.takenPct) + '%').padStart(5)}`;
-  for (const m of sum.mobs) say(`${m.key.padEnd(22)} ${String(m.n).padStart(4)} | ${mmss(m.first.t)} ${cols(m.first)} | ${cols(m.all)} | ${m.losses}`);
+  for (const m of sum.mobs) say(`${m.key.padEnd(44)} ${String(m.n).padStart(4)} | ${mmss(m.first.t)} ${cols(m.first)} | ${cols(m.all)} | ${m.losses}`);
 }
 say(`\n(${((Date.now() - t0) / 1000).toFixed(1)} с)`);
 console.log(lines.join('\n'));
