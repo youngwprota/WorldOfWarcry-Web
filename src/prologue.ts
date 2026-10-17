@@ -145,7 +145,7 @@ export class Prologue {
     labels.appendChild(this.layer);
     this.fx = new FloatingText(this.layer, this.camera);
     this.particles = new Particles(this.scene);
-    this.pickups = new Pickups(this.scene);
+    this.pickups = new Pickups(this.scene, this.camera);
     this.pickups.onCollect = (k) => this.collect(k as OrbKind);
     this.mark.className = 'qmark';
     this.heroBar.className = 'herohp';

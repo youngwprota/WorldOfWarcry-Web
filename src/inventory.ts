@@ -77,16 +77,12 @@ class HeroPreview {
       this.pet.position.copy(PET_AT);
       this.stage.add(this.pet.root);
       this.ch.position.copy(HERO_AT_WITH_PET);
+      // the pair still turns around the stage origin, but at the starting yaw the hero stands in the middle like the other classes
+      this.stage.position.x = -HERO_AT_WITH_PET.clone().applyAxisAngle(THREE.Object3D.DEFAULT_UP, this.yaw).x;
     }
     this.scene.add(this.stage);
-    // with a pet: further back and a bit lower, so both fit
-    if (pet) {
-      this.camera.position.set(0, 1.25, 5.6);
-      this.camera.lookAt(0, 0.65, 0);
-    } else {
-      this.camera.position.set(0, 1.05, 4.4);
-      this.camera.lookAt(0, 0.85, 0);
-    }
+    this.camera.position.set(0, 1.05, 4.4);
+    this.camera.lookAt(0, 0.85, 0);
 
     canvas.addEventListener('pointerdown', (e) => { this.dragX = e.clientX; this.vel = 0; canvas.setPointerCapture(e.pointerId); });
     canvas.addEventListener('pointermove', (e) => {
@@ -321,8 +317,15 @@ export class Inventory {
   }
 
   private newPreview() {
-    this.preview?.dispose();
-    this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, this.game.heroModel(), this.game.petDef);
+    let canvas = this.ui.modal.querySelector<HTMLCanvasElement>('#i-canvas')!;
+    if (this.preview) {
+      this.preview.dispose();
+      // the old context was force-lost and a canvas keeps its context for life: a new renderer needs a new canvas
+      const fresh = canvas.cloneNode() as HTMLCanvasElement;
+      canvas.replaceWith(fresh);
+      canvas = fresh;
+    }
+    this.preview = new HeroPreview(canvas, this.game.heroModel(), this.game.petDef);
   }
 
   private switchClass(c: HeroClass) {

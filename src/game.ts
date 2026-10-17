@@ -8,8 +8,8 @@ import {
   ATTACK_HIT, FACTIONS, PETS, tokenChance, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
   mobRank, zoneResist, ZONE_FOES, ZONE_SUN, type DamageType, type ResistTier, type ItemDrop, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
-import { ArenaFog, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, Telegraphs, type Bolt } from './fx';
-import { Glows, SunLight } from './vfx';
+import { ArenaFog, DROP_TINT, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, StatAuras, Telegraphs, type Bolt } from './fx';
+import { Glows, SunLight, type GlowOpts } from './vfx';
 import {
   ARMOR, BAG_SIZE, CLASS_SET, armorTrim, copyGain, dropAny, dropIconId, dropItem, fixedRarity, rollDrop, itemClass, itemIcon, itemModel, itemName, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
@@ -59,6 +59,20 @@ const RARITY_HEX = RARITY.map((r) => new THREE.Color(r.color).getHex());
 /** Dust kicked up by running, by location (Game.footDust). */
 const DUST: Partial<Record<ZoneId, number>> = {
   forest: 0xb8a07a, cemetery: 0x8c8298, peaks: 0xeef4ff, dunes: 0xe6cf98, hills: 0xa8a090, grove: 0xd0a060, swamp: 0x8a9468,
+};
+/** Twinkles round a flying stat drop and along its trail: small, bright, flickering. */
+const ORB_SPARK: Record<OrbKind, GlowOpts> = {
+  power: { shape: 'sparkle', color: DROP_TINT.power, bright: 1.9, size: 0.09, life: 0.45, spread: 0.4, speed: 0.4, drag: 2, spin: 3, flicker: 9 },
+  hp: { shape: 'sparkle', color: DROP_TINT.hp, bright: 1.8, size: 0.09, life: 0.45, spread: 0.4, speed: 0.4, drag: 2, spin: 3, flicker: 9 },
+  regen: { shape: 'sparkle', color: DROP_TINT.regen, bright: 1.9, size: 0.09, life: 0.45, spread: 0.4, speed: 0.4, drag: 2, spin: 3, flicker: 9 },
+  speed: { shape: 'sparkle', color: DROP_TINT.speed, bright: 1.8, size: 0.09, life: 0.45, spread: 0.4, speed: 0.4, drag: 2, spin: 3, flicker: 9 },
+};
+/** Where a stat drop sinks into the hero: the stat's shaped sparks rise round the body and flicker (with StatAuras' column). */
+const ORB_ABSORB: Record<OrbKind, [number, GlowOpts]> = {
+  power: [5, { shape: 'triangle', spin: 4, color: DROP_TINT.power, bright: 1.6, size: 0.13, life: 0.8, up: 1.5, spread: 1.1, drag: 1, flicker: 6 }],
+  hp: [5, { shape: 'diamond', spin: 1, color: DROP_TINT.hp, bright: 1.5, size: 0.15, life: 0.8, up: 1.5, spread: 1.1, drag: 1, flicker: 6 }],
+  regen: [5, { shape: 'sparkle', spin: 2, color: DROP_TINT.regen, bright: 1.6, size: 0.16, life: 0.8, up: 1.5, spread: 1.1, drag: 1, flicker: 6 }],
+  speed: [5, { shape: 'star', spin: 4, color: DROP_TINT.speed, bright: 1.6, size: 0.13, life: 0.8, up: 1.5, spread: 1.1, drag: 1, flicker: 6 }],
 };
 /** Slack over the weapon's range for a hit to land (unit edge to hero centre); targeting and swings use the same. */
 const STRIKE_PAD = 0.35;
@@ -135,6 +149,7 @@ export class Game {
   /** Glowing particles, stat orbs flying in, the sun's shafts (src/vfx.ts). */
   private glows: Glows;
   private pickups: Pickups;
+  private auras: StatAuras;
   private sunFx: SunLight;
   private lowGfx = false;
   private footT = 0;
@@ -288,9 +303,12 @@ export class Game {
     this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, text: hb.querySelector('span')! };
     this.particles = new Particles(this.scene);
     this.glows = new Glows(this.scene);
-    this.pickups = new Pickups(this.scene);
+    this.pickups = new Pickups(this.scene, this.camera);
     this.pickups.onCollect = (k) => this.collect(k);
-    this.pickups.onTrail = (pos, k) => this.glows.emit(pos, 1, { color: ORBS[k].color, bright: 1.5, size: 0.12, life: 0.35 });
+    this.pickups.onSparkle = (pos, k) => this.glows.emit(pos, 1, ORB_SPARK[k]);
+    this.pickups.onSpawn = (pos, k) => this.glows.emit(pos, 1, { color: DROP_TINT[k], bright: 1.5, size: 0.8, life: 0.22, shrink: 1.8 });
+    this.auras = new StatAuras(this.scene);
+    this.pickups.onArrive = (pos, k) => this.orbArrive(pos, k);
     this.sunFx = new SunLight(this.scene);
     this.arrows = new Arrows(this.scene);
     this.telegraphs = new Telegraphs(this.scene);
@@ -1390,6 +1408,7 @@ export class Game {
     this.glows.setViewport(this.ui.size().h * (this.lowGfx ? 1 : Math.min(devicePixelRatio || 1, 2)));
     this.glows.update(dt);
     this.pickups.update(dt, hp);
+    this.auras.update(dt, hp);
     if (this.lowGfx) { this.sunFx.strength = 0; this.sunFx.update(dt, v1, v1, hp); return; }
     // campfires near the hero: embers rising and a thin smoke
     for (const f of this.world.fires) {
@@ -1485,6 +1504,12 @@ export class Game {
     if (this.lowGfx || Math.abs(p.x - this.hero.position.x) > 30 || Math.abs(p.z - this.hero.position.z) > 30) return;
     this.puffs.cloud(p, 0.7, DUST[this.world.zoneAt(p.x, p.z).id] ?? 0xb8a07a, 5, 1);
     this.waves.add(p, 1.6, 0xffffff, 0.4);
+  }
+
+  private orbArrive(pos: THREE.Vector3, k: OrbKind) {
+    this.glows.emit(fxA.copy(this.hero.position).setY(0.9), ORB_ABSORB[k][0], ORB_ABSORB[k][1]);
+    this.glows.emit(pos, 1, { color: DROP_TINT[k], bright: 1.4, size: 0.9, life: 0.2, shrink: 1.6 });
+    this.auras.trigger(k);
   }
 
   private collect(k: OrbKind) {

@@ -13,10 +13,11 @@ export const WEAPON_GRIPS: Record<string, {
   /**
    * Hold out of a fight (bows, the gun, polearms, staves): set in the character's space, not the hand's, which swings
    * with the clips. `lean` tips its top forward, `yaw` turns its face, `roll` turns it about its own long axis first
-   * (radians); `drop`: the fist slides up a long shaft so its bottom is that many cm below the palm (off the ground).
+   * (radians); `drop`: the fist slides up a long shaft so its bottom is that many cm below the palm (off the ground);
+   * `mix`: how far the out-of-fight hold stays toward the hand's hold (0 the rest pose, 1 the hold), turn and slide alike.
    * The holder turns into the main hold as a swing or an attack clip starts (Swinger.raise, Character.atkW, aimBlend).
    */
-  rest?: { lean?: number; yaw?: number; roll?: number; drop?: number };
+  rest?: { lean?: number; yaw?: number; roll?: number; drop?: number; mix?: number };
   /** Clips that swing it with the left hand: Character moves it there when one starts and back when it ends. */
   left?: string[];
 }> = {
@@ -81,9 +82,9 @@ const QUALITY = /_(common|uncommon|rare|epic|legendary|mythic)$/;
 
 /**
  * Mage staves: shortened and held at the bottom of the shaft wrap (45-55% of the height), whatever staff model a staff
- * def uses. At rest upright beside the body, the fist higher up the shaft (held in the fist it lay level, head forward).
+ * def uses. Out of a fight halfway between upright beside the body (the fist up the shaft) and the hand's hold.
  */
-const STAFF_GRIP = { grip: 0.46, scale: 0.75, rest: { lean: 0.1, drop: 55 } };
+const STAFF_GRIP = { grip: 0.46, scale: 0.75, rest: { lean: 0.1, drop: 55, mix: 0.5 } };
 const staffModels = new Set(Object.values(WEAPONS).filter((w) => w.staff).flatMap((w) => [...Object.values(w.model), ...(w.tiers ?? [])]));
 
 /** Palm centre in hand_r space (cm). */
@@ -154,6 +155,7 @@ export function attachWeapon(character: THREE.Object3D, weapon: string, left = f
   if (left) mirrorX(holder);
   if (cfg.rest) {
     holder.userData.qAim = holder.quaternion.clone();
+    holder.userData.restMix = cfg.rest.mix ?? 0;
     holder.userData.qRest = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), cfg.rest.yaw ?? 0)
       .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), cfg.rest.lean ?? 0))
       .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), cfg.rest.roll ?? 0));
@@ -241,6 +243,8 @@ export function aimBlend(holder: THREE.Object3D | null, k: number, model: THREE.
   holder.parent.getWorldQuaternion(qHand);
   model.getWorldQuaternion(qModel);
   qRestLocal.copy(qHand).invert().multiply(qModel).multiply(holder.userData.qRest as THREE.Quaternion);
+  const mix = holder.userData.restMix as number;
+  k = mix + (1 - mix) * k;
   holder.quaternion.slerpQuaternions(qRestLocal, a, k);
   const offset = holder.children[0];
   const pRest = offset.userData.pRest as THREE.Vector3 | undefined;

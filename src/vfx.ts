@@ -22,7 +22,15 @@ export interface GlowOpts {
   spread?: number;
   /** Size at the end of life as a share of the start one. */
   shrink?: number;
+  shape?: GlowShape;
+  /** Random spin, rad/s either way (shaped particles only show it). */
+  spin?: number;
+  /** Twinkle rate, Hz (each particle randomised ±40% and out of phase); 0 = steady. */
+  flicker?: number;
 }
+
+export type GlowShape = 'round' | 'diamond' | 'triangle' | 'sparkle' | 'star';
+const SHAPE_ID: Record<GlowShape, number> = { round: 0, diamond: 1, triangle: 2, sparkle: 3, star: 4 };
 
 /**
  * Soft round glowing particles as one THREE.Points: sparks, motes, embers, souls, twinkles. Pooled (`max`), CPU-moved,
@@ -42,6 +50,10 @@ export class Glows {
   private grav: Float32Array;
   private drag: Float32Array;
   private shrink: Float32Array;
+  private shape: Float32Array;
+  private rot: Float32Array;
+  private spin: Float32Array;
+  private flick: Float32Array;
   private next = 0;
   private live = 0;
   private uPx: { value: number };
@@ -59,20 +71,46 @@ export class Glows {
     this.grav = new Float32Array(max);
     this.drag = new Float32Array(max);
     this.shrink = new Float32Array(max);
+    this.shape = new Float32Array(max);
+    this.rot = new Float32Array(max);
+    this.spin = new Float32Array(max);
+    this.flick = new Float32Array(max);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
     g.setAttribute('color', new THREE.BufferAttribute(this.col, 3));
     g.setAttribute('size', new THREE.BufferAttribute(this.size, 1));
     g.setAttribute('alpha', new THREE.BufferAttribute(this.alpha, 1));
+    g.setAttribute('shape', new THREE.BufferAttribute(this.shape, 1));
+    g.setAttribute('rot', new THREE.BufferAttribute(this.rot, 1));
     this.uPx = { value: 400 };
+    // shaped particles: signed distance (negative inside) in point space -1..1, a soft rim and a brighter centre
     const m = new THREE.ShaderMaterial({
       uniforms: { uPx: this.uPx },
-      vertexShader: `attribute float size; attribute float alpha; attribute vec3 color; varying vec3 vC; varying float vA; uniform float uPx;
-        void main(){ vC = color; vA = alpha; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
+      vertexShader: `attribute float size; attribute float alpha; attribute vec3 color; attribute float shape; attribute float rot;
+        varying vec3 vC; varying float vA; varying float vS; varying vec2 vR; uniform float uPx;
+        void main(){ vC = color; vA = alpha; vS = shape; vR = vec2(cos(rot), sin(rot));
+          vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
           gl_PointSize = alpha > 0.0 ? size * uPx * projectionMatrix[1][1] / -mv.z : 0.0; }`,
-      fragmentShader: `varying vec3 vC; varying float vA;
-        void main(){ float d = length(gl_PointCoord - 0.5) * 2.0; float a = (1.0 - smoothstep(0.0, 1.0, d)); a *= a;
-          float core = 1.0 - smoothstep(0.0, 0.35, d); gl_FragColor = vec4(vC * (1.0 + core), vA * a); }`,
+      fragmentShader: `varying vec3 vC; varying float vA; varying float vS; varying vec2 vR;
+        float triangle(vec2 p, float r){ const float k = 1.7320508; p.x = abs(p.x) - r; p.y = p.y + r / k;
+          if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0; p.x -= clamp(p.x, -2.0 * r, 0.0); return -length(p) * sign(p.y); }
+        float star5(vec2 p, float r, float rf){ const vec2 k1 = vec2(0.809017, -0.587785); const vec2 k2 = vec2(-0.809017, -0.587785);
+          p.x = abs(p.x); p -= 2.0 * max(dot(k1, p), 0.0) * k1; p -= 2.0 * max(dot(k2, p), 0.0) * k2; p.x = abs(p.x); p.y -= r;
+          vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, 1.0); float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, r);
+          return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y); }
+        void main(){
+          vec2 q = (gl_PointCoord - 0.5) * 2.0;
+          if (vS < 0.5) { float d = length(q); float a = (1.0 - smoothstep(0.0, 1.0, d)); a *= a;
+            float core = 1.0 - smoothstep(0.0, 0.35, d); gl_FragColor = vec4(vC * (1.0 + core), vA * a); return; }
+          q = vec2(q.x * vR.x - q.y * vR.y, q.x * vR.y + q.y * vR.x); q.y = -q.y;
+          float sd;
+          if (vS < 1.5) sd = (abs(q.x) * 1.35 + abs(q.y) - 0.9) * 0.6;
+          else if (vS < 2.5) sd = triangle(q, 0.78);
+          else if (vS < 3.5) sd = (sqrt(abs(q.x)) + sqrt(abs(q.y)) - 0.92) * 0.5;
+          else sd = star5(q, 0.88, 0.45);
+          float a = 1.0 - smoothstep(-0.1, 0.04, sd);
+          float core = 1.0 - smoothstep(-0.45, -0.1, sd);
+          gl_FragColor = vec4(vC * (0.75 + 0.6 * core), vA * a); }`,
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     });
     this.points = new THREE.Points(g, m);
@@ -109,8 +147,13 @@ export class Glows {
       this.grav[i] = o.gravity ?? 0;
       this.drag[i] = o.drag ?? 1;
       this.shrink[i] = o.shrink ?? 0.3;
+      this.shape[i] = SHAPE_ID[o.shape ?? 'round'];
+      this.rot[i] = Math.random() * Math.PI * 2;
+      this.spin[i] = (Math.random() * 2 - 1) * (o.spin ?? 0);
+      this.flick[i] = (o.flicker ?? 0) * Math.PI * 2 * (0.6 + Math.random() * 0.8);
     }
     this.live = Math.min(this.n, this.live + count);
+    this.points.geometry.attributes.shape.needsUpdate = true;
   }
 
   update(dt: number) {
@@ -129,10 +172,17 @@ export class Glows {
       this.pos[i * 3 + 1] = Math.max(0.03, this.pos[i * 3 + 1] + this.vel[i * 3 + 1] * dt);
       this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
       this.alpha[i] = Math.min(1, k * 8) * (1 - k);
+      if (this.flick[i] > 0) {
+        // a sharp twinkle: mostly dim, brief bright peaks; the slot index offsets the phase
+        const s = 0.5 + 0.5 * Math.sin(this.age[i] * this.flick[i] + i * 2.4);
+        this.alpha[i] *= 0.2 + 0.8 * s * s;
+      }
       this.size[i] = this.base[i] * (1 - (1 - this.shrink[i]) * k);
+      this.rot[i] += this.spin[i] * dt;
     }
     this.live = alive;
     const g = this.points.geometry;
+    g.attributes.rot.needsUpdate = true;
     g.attributes.position.needsUpdate = true;
     g.attributes.color.needsUpdate = true;
     g.attributes.size.needsUpdate = true;
