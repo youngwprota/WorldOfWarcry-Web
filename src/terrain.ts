@@ -9,7 +9,7 @@ import { ATMOS, ATMOS_GLSL, atmosUniforms } from './atmos';
 import { pondDist, type Pond } from './water';
 import { ZONE_LIGHT, ZONES, type ZoneId } from './config';
 import {
-  ARENA, BRANCH_PATHS, FORT, GATE, ISLAND, LAND_TRAILS, OLD_TRAIL, MAP_BOX, NZ, PATH, PATH_W, ZGRID, ZONE_IDS, ZONE_INDEX, angleOf, fbm, heightAt, outside, rimCliff, smooth,
+  ARENA, BRANCH_PATHS, FORT, GATE, ISLAND, LAND_TRAILS, OLD_TRAIL, MAP_BOX, NZ, PATH, PATH_W, ZGRID, ZONE_IDS, ZONE_INDEX, angleOf, fbm, gateDist, heightAt, outside, ridgeDist, rimCliff, smooth,
   zoneGrid, zoneWeights,
 } from './island';
 
@@ -127,6 +127,38 @@ const CEM_DIRT = '#a49cc8';
 
 /** How thick grass grows per location (0..1); the shader thins it further with noise. */
 const GRASS_OF: Record<ZoneId, number> = { forest: 1, cemetery: 0.7, peaks: 0.06, swamp: 0.95, grove: 0.8, dunes: 0.1, hills: 0.5 };
+/**
+ * The world map's picture: the minimap one in a dark brown shade, with brown lines along the ridges between locations
+ * where they block the way; the passages stay open (a closed gate is drawn over it by World.drawMap).
+ */
+export function bakeWorldMap(map: HTMLCanvasElement) {
+  const M = map.width;
+  const k = MAP_BOX.size / M;
+  const out = document.createElement('canvas');
+  out.width = out.height = M;
+  const g = out.getContext('2d')!;
+  g.drawImage(map, 0, 0);
+  g.fillStyle = '#2a180c38';
+  g.fillRect(0, 0, M, M);
+  const lines = g.createImageData(M, M);
+  for (let j = 0; j < M; j++) {
+    for (let i = 0; i < M; i++) {
+      const x = MAP_BOX.x + (i + 0.5) * k;
+      const z = MAP_BOX.z + (j + 0.5) * k;
+      if (outside(x, z) > 0) continue;
+      const a = (1 - smooth(0.35, 0.9, ridgeDist(x, z))) * smooth(4.5, 6.5, gateDist(x, z));
+      if (a <= 0) continue;
+      const o = (j * M + i) * 4;
+      lines.data[o] = 0x3a; lines.data[o + 1] = 0x24; lines.data[o + 2] = 0x14; lines.data[o + 3] = a * 170;
+    }
+  }
+  const lc = document.createElement('canvas');
+  lc.width = lc.height = M;
+  lc.getContext('2d')!.putImageData(lines, 0, 0);
+  g.drawImage(lc, 0, 0);
+  return out;
+}
+
 /** Height range packed into GroundLayers (b channel): metres = HEIGHT_LO + b * HEIGHT_K. */
 const HEIGHT_LO = -1;
 const HEIGHT_K = 3.2;
@@ -165,6 +197,11 @@ export function bakeGroundMaps(ponds: Pond[]) {
   const wetSand = new THREE.Color(0xc9b07a);
   const deep = new THREE.Color(0x2a86d0);
   const shallow = new THREE.Color(0x63d6ee);
+  const pondShallow = new THREE.Color(0x78d8cc);
+  const pondDeep = new THREE.Color(0x2392bc);
+  // swamp water as it looks in game: the murky palette lifted 40% towards its sky reflection
+  const murkyShallow = new THREE.Color(0x66763c).lerp(new THREE.Color(0x9cb8a4), 0.4);
+  const murkyDeep = new THREE.Color(0x34482c).lerp(new THREE.Color(0x9cb8a4), 0.4);
   const c = new THREE.Color();
   const t = new THREE.Color();
   const srgb = { r: 0, g: 0, b: 0 };
@@ -216,6 +253,13 @@ export function bakeGroundMaps(ponds: Pond[]) {
         if (d < 2.5) c.lerp(darkDirt, (1 - smooth(-0.5, 2.5, d)) * 0.8);
         // the bed under the see-through shallows: sand under clear water, dark silt in the swamp
         if (d < 0) c.lerp(p.murky ? silt : bed, smooth(-0.1, -1.4, d) * 0.85);
+        // the maps show the water itself shallow at the edge to deep in the middle (water.ts palette)
+        if (d < 0) {
+          t.copy(p.murky ? murkyShallow : pondShallow).lerp(p.murky ? murkyDeep : pondDeep, smooth(0, -3, d));
+          t.getRGB(srgb, THREE.SRGBColorSpace);
+          const o = (j * N + i) * 4;
+          sea.data[o] = srgb.r * 255; sea.data[o + 1] = srgb.g * 255; sea.data[o + 2] = srgb.b * 255; sea.data[o + 3] = 255;
+        }
         grass *= smooth(-0.3, 0.7, d);
       }
       const h = heightAt(x, z);

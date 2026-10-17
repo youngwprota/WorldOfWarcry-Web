@@ -63,6 +63,9 @@ export interface MapMark {
   drop?: { icon: string; color: string; cls?: HeroClass; any?: boolean };
 }
 
+/** Map-only stand-ins: every hunter mark on the maps shows the hunter's bow silhouette (icons.ts cls_hunter). */
+const MAP_ICON: Record<string, string> = { bow: 'cls_hunter' };
+
 /** An item icon on a tile of its quality colour (elites and bosses' drops on the maps); `cls`: whose item, a badge at the corner. */
 function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number, id: string, color: string, s: number, cls?: HeroClass, any = false) {
   // the tile is filled with the quality colour (thin dark edge), the item's own icon on it in white
@@ -73,12 +76,13 @@ function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number
   g.roundRect(x - r, y - r, r * 2, r * 2, 5 * s);
   g.fill();
   g.stroke();
+  id = MAP_ICON[id] ?? id;
   // the bow has no plain icon: its common-quality one
   const png = hasPng(id) ? id : !hasIcon(id) && hasPng(`${id}_common`) ? `${id}_common` : null;
   const img = png ? whiteArt(png) : iconImage(id, '#fff', Math.max(8, Math.ceil(r * 1.6 * g.getTransform().a)));
   const h = r * 0.8;
   if (img && (!(img instanceof HTMLImageElement) || img.complete)) g.drawImage(img, x - h, y - h, h * 2, h * 2);
-  if (cls) classBadge(g, x + r * 0.85, y - r * 0.85, r * 0.55, cls, s);
+  if (cls) classBadge(g, x + r * 0.85, y - r * 0.85, r * 0.75, cls, s);
   if (any) {
     // a random weapon of the class: «?» at the bottom-right corner
     g.font = `900 ${Math.round(r * 1.1)}px Rubik, sans-serif`;
@@ -115,8 +119,8 @@ function classBadge(g: CanvasRenderingContext2D, x: number, y: number, r: number
   g.fill();
   g.stroke();
   if (!hasIcon(d.icon)) return;
-  const img = iconImage(d.icon, '#fff', Math.max(8, Math.ceil(r * 1.6 * g.getTransform().a)));
-  if (img.complete) g.drawImage(img, x - r * 0.8, y - r * 0.8, r * 1.6, r * 1.6);
+  const img = iconImage(d.icon, '#fff', Math.max(8, Math.ceil(r * 1.8 * g.getTransform().a)));
+  if (img.complete) g.drawImage(img, x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8);
 }
 
 /**

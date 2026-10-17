@@ -9,7 +9,7 @@ import {
 } from './island';
 import type { Gate } from './island';
 import {
-  GroundLayers, bakeGroundMaps, buildCobbles, buildGrassField, buildGround, buildRitual, buildMist, groundColorTexture, windTime, zoneTexture, type Pond,
+  GroundLayers, bakeGroundMaps, bakeWorldMap, buildCobbles, buildGrassField, buildGround, buildRitual, buildMist, groundColorTexture, windTime, zoneTexture, type Pond,
 } from './terrain';
 import { buildOcean, buildPond, pondR } from './water';
 import { applyScenery, patchScenery, scenery, type SceneryLook } from './atmos';
@@ -220,6 +220,7 @@ export class World {
   readonly ponds: Pond[] = [{ x: 11, z: -83, r: 5 }];
   /** Baked island picture (ground + ocean) for the minimap and the world map; see mapToCanvas. */
   readonly mapCanvas: HTMLCanvasElement;
+  private worldMapCanvas?: HTMLCanvasElement;
   readonly gate = GATE;
   /** Fog of war over unexplored land (state is loaded/saved by Game). */
   readonly fog: FogOfWar;
@@ -2919,11 +2920,12 @@ export class World {
    * Draws the baked island (ground + ocean) and the closed barrier onto a map canvas.
    * X / Y map world x / z to canvas pixels, `ppm` is pixels per metre.
    */
-  drawMap(g: CanvasRenderingContext2D, X: (x: number) => number, Y: (z: number) => number, ppm: number) {
+  drawMap(g: CanvasRenderingContext2D, X: (x: number) => number, Y: (z: number) => number, ppm: number, worldMap = false) {
     g.fillStyle = '#2a86d0'; // open sea beyond the baked square (same colour as its deep-water edge)
     g.fillRect(-1e4, -1e4, 2e4, 2e4);
     g.imageSmoothingEnabled = true;
-    g.drawImage(this.mapCanvas, X(MAP_BOX.x), Y(MAP_BOX.z), MAP_BOX.size * ppm, MAP_BOX.size * ppm);
+    const pic = worldMap ? (this.worldMapCanvas ??= bakeWorldMap(this.mapCanvas)) : this.mapCanvas;
+    g.drawImage(pic, X(MAP_BOX.x), Y(MAP_BOX.z), MAP_BOX.size * ppm, MAP_BOX.size * ppm);
     g.strokeStyle = '#b06bff';
     g.lineWidth = Math.max(4, 1.2 * ppm);
     g.lineCap = 'round';

@@ -4,6 +4,8 @@ import { drawMarks } from './ui';
 import type { Game } from './game';
 import { MAP_BOX } from './island';
 
+const MAP_INSET = 19;
+
 /** The minimap itself expands into a big pannable / zoomable panel; the game keeps running. */
 export class MapView {
   private panel: HTMLDivElement;
@@ -23,7 +25,7 @@ export class MapView {
     this.panel = document.createElement('div');
     this.panel.id = 'bigmap';
     this.panel.className = 'ui-block';
-    this.panel.innerHTML = '<canvas></canvas>';
+    this.panel.innerHTML = '<canvas></canvas><div class="bm-tools"><button data-z="1">+</button><button data-z="-1">−</button></div>';
     document.getElementById('hud')!.appendChild(this.panel);
     this.canvas = this.panel.querySelector('canvas')!;
     this.ctx = this.canvas.getContext('2d')!;
@@ -34,6 +36,7 @@ export class MapView {
     c.addEventListener('pointercancel', this.up);
     c.addEventListener('wheel', this.wheel, { passive: false });
     addEventListener('keydown', this.key);
+    this.panel.querySelector('.bm-tools')!.addEventListener('click', this.zoomBtn);
   }
 
   toggle() { if (this.isOpen) this.close(); else this.open(); }
@@ -48,8 +51,11 @@ export class MapView {
     this.panel.classList.add('show');
     void this.panel.offsetWidth; // commit the collapsed size so the expand transition runs
     const hud = document.getElementById('hud')!;
-    const d = Math.min(hud.clientWidth - 20, hud.clientHeight * 0.62);
+    // the frame ring (skin.css, 9 px outside the box) keeps the settings button's 10 px from the screen edges
+    const d = Math.min(hud.clientWidth - 2 * MAP_INSET, hud.clientHeight * 0.62);
     this.panel.style.width = this.panel.style.height = `${d}px`;
+    this.panel.style.right = `${MAP_INSET}px`;
+    this.panel.style.top = `calc(${MAP_INSET}px + env(safe-area-inset-top))`;
     this.panel.classList.add('open');
     cancelAnimationFrame(this.raf);
     this.loop();
@@ -59,13 +65,13 @@ export class MapView {
     if (!this.isOpen) return;
     this.isOpen = false;
     this.panel.classList.remove('open');
-    this.panel.style.width = this.panel.style.height = '';
+    this.panel.style.width = this.panel.style.height = this.panel.style.right = this.panel.style.top = '';
     setTimeout(() => {
       if (this.isOpen) return;
       this.panel.classList.remove('show');
       cancelAnimationFrame(this.raf);
       document.getElementById('minimap')!.style.visibility = '';
-    }, 260);
+    }, 380);
   }
 
   private key = (e: KeyboardEvent) => { if (this.isOpen && e.code === 'Escape') this.close(); };
@@ -94,7 +100,7 @@ export class MapView {
     if (this.pointers.size === 2) {
       const d = this.pinchDist();
       this.tapStart = null;
-      if (this.pinch > 0) this.scale = Math.min(30, Math.max(2.2, this.scale * (d / this.pinch)));
+      if (this.pinch > 0) this.zoomBy(d / this.pinch);
       this.pinch = d;
     }
   };
@@ -112,8 +118,17 @@ export class MapView {
 
   private wheel = (e: WheelEvent) => {
     e.preventDefault();
-    this.scale = Math.min(30, Math.max(2.2, this.scale * Math.exp(-e.deltaY * 0.0015)));
+    this.zoomBy(Math.exp(-e.deltaY * 0.0015));
   };
+
+  private zoomBtn = (e: Event) => {
+    const z = (e.target as HTMLElement).closest<HTMLElement>('button')?.dataset.z;
+    if (!z) return;
+    sfx.click();
+    this.zoomBy(Number(z) > 0 ? 1.4 : 1 / 1.4);
+  };
+
+  private zoomBy(k: number) { this.scale = Math.min(30, Math.max(2.2, this.scale * k)); }
 
   private pinchDist() {
     const [a, b] = [...this.pointers.values()];
@@ -152,21 +167,7 @@ export class MapView {
     g.clip();
     // island + ocean (baked), closed barrier
     const world = this.game.world;
-    world.drawMap(g, X, Y, s);
-    // static obstacles: buildings, trees, rocks
-    for (const o of world.obstacles) {
-      if (o.r < 0.4) continue;
-      g.fillStyle = o.r > 1.5 ? '#3b3530cc' : '#21301d99';
-      g.beginPath();
-      g.arc(X(o.x), Y(o.z), Math.max(1, o.r * s), 0, 7);
-      g.fill();
-    }
-    for (const p of world.ponds) {
-      g.fillStyle = '#3d8fb0';
-      g.beginPath();
-      g.ellipse(X(p.x), Y(p.z), p.r * s, p.r * 0.8 * s, 0, 0, 7);
-      g.fill();
-    }
+    world.drawMap(g, X, Y, s, true);
     world.fog.drawOnMap(g, X, Y, s);
     // mobs and breakable props (one unit type); bosses, micro-bosses and elites get their own marks
     g.fillStyle = '#ff4a4a';

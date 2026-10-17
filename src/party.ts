@@ -41,17 +41,17 @@ export interface ClassDef {
 /** Order = order of the buttons, bottom-right of the HUD. */
 export const CLASSES: Record<HeroClass, ClassDef> = {
   warrior: {
-    name: 'Воин', icon: 'shield', color: ['#ff7a6a', '#c0352c'], key: 'Digit1',
+    name: 'Воин', icon: 'cls_warrior', color: ['#ff7a6a', '#c0352c'], key: 'Digit1',
     weapons: ['sword', 'axe', 'hammer'], off: ['shield_spiked'], offName: 'Щит',
     kit: { hand: 'sword', left: 'shield_spiked', bag: ['axe', 'hammer'] },
   },
   hunter: {
-    name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
+    name: 'Охотник', icon: 'cls_hunter', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
     model: { human: 'human_archer', orc: 'orc_archer' },
     weapons: ['bow', 'polearm', 'gun'], off: ['boar'], offName: 'Питомец', kit: { hand: 'bow', left: 'boar', bag: ['polearm', 'gun'] }, locked: true,
   },
   mage: {
-    name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
+    name: 'Маг', icon: 'cls_mage', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
     model: { human: 'mage', orc: 'orc_shaman' },
     weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_fury', 'orb_vigor', 'orb_swift', 'orb_ward', 'orb_fortune', 'orb_demon'], offName: 'Сфера',
     kit: { hand: 'staff_fire', left: 'orb_fury', bag: ['staff_ice', 'staff_wind'] }, locked: true,

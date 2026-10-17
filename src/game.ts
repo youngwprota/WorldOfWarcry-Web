@@ -379,7 +379,7 @@ export class Game {
   /** What a mob is shown to drop: the class its boss opens (the bow over the forest boss), or its item's own icon. */
   private dropBadge(d: MobDef): DropBadge | null {
     const cls = d.boss?.unlockClass;
-    if (cls) return { icon: CLASSES[cls].icon, color: CLASSES[cls].color[0] };
+    if (cls) return { icon: CLASSES[cls].icon, color: '#3c4048' }; // dark grey, so the white icon stands out
     return d.drop ? dropBadgeOf(d.drop) : null;
   }
 
@@ -3014,8 +3014,8 @@ const rndSort = () => Math.random() - 0.5;
 type DropBadge = { icon: string; color: string; any?: boolean };
 /** A drop's badge: its icon in its quality colour; `any`: a random weapon of the class (dropAny). */
 const dropBadgeOf = (d: ItemDrop): DropBadge => ({ icon: dropIconId(d), color: RARITY[d.rarity].color, any: dropAny(d) });
-/** The class whose item a mob drops (null: anyone's, rings and amulets). */
-const dropClass = (d: MobDef['drop'] & {}) => (d.kind === 'weapon' ? weaponClass(d.def) : ARMOR[d.def].cls ?? null) ?? undefined;
+/** The class badge on a drop's map mark: armour only (a weapon's icon already tells its class; rings and amulets are anyone's). */
+const dropClass = (d: MobDef['drop'] & {}) => (d.kind === 'weapon' ? undefined : ARMOR[d.def].cls ?? undefined);
 
 /** "+500 хп · +25 хп/с" */
 function bonusText(b: Partial<Record<OrbKind, number>> | undefined) {

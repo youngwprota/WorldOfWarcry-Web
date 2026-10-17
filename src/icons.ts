@@ -35,6 +35,11 @@ const SVG: Record<string, string> = {
   shield: '<path d="M12 2l9 3.5v6c0 5.5-4 9-9 10.5C7 20.5 3 17 3 11.5v-6z"/>',
   anvil: '<path d="M2 5h16c0 3 2 4 4 4v2h-6.5L13 14v3h3v4.5H7V17h3v-3l-3-3H4.5C3 9.4 2 7.4 2 5z"/>',
 };
+// class button icons (art.ts cls_*) keep their weapon's silhouette on the map's drop badge
+SVG.cls_warrior = SVG.shield;
+// the class icon's bow alone (no arrow), shifted so the bow itself sits in the middle
+SVG.cls_hunter = '<g transform="rotate(45 12 12) translate(-4.3 0) scale(0.375)"><path d="M32 4C46 4 54 18 54 32C54 46 46 60 32 60L32 53.7C41.7 53.7 46.65 43 46.65 32C46.65 21 41.7 10.3 32 10.3Z"/><path d="M30 6h4v52h-4z"/></g>';
+SVG.cls_mage = SVG.staff;
 
 /** Any UI icon: silhouette in `color` with an ink outline. */
 const imgCache = new Map<string, HTMLImageElement>();
