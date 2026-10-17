@@ -1,4 +1,4 @@
-"""Item icon: blender -b --factory-startup -P icon_render.py -- in.glb out.png [contrast=1.15] [glass_darken=0] [roll=40]
+"""Item icon: blender -b --factory-startup -P icon_render.py -- in.glb out.png [contrast=1.15] [glass_darken=0] [roll=40] [yaw=0]
 Writes a 512px PNG (+ .raw.png); icon_shrink.py then boxes it down to 128px."""
 import bpy, sys, math, zlib, struct, numpy as np
 from mathutils import Vector
@@ -7,17 +7,21 @@ glb, out = args[:2]
 CONTRAST = float(args[2]) if len(args) > 2 else 1.15
 DARKEN = float(args[3]) if len(args) > 3 else 0.0  # glass darkening towards the centre (orbs)
 ROLL = float(args[4]) if len(args) > 4 else 40.0  # in-plane tilt of the item (orbs with horns: 0)
+YAW = float(args[5]) if len(args) > 5 else 0.0  # turn about the vertical axis (pets: 3/4 view)
 S = 512
 K = 3  # supersample: render at S*K, outline at full res, then box-downsample
 N = S * K
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=glb)
 sc = bpy.context.scene
+# skinned models (pets) render in the rest pose: the bounds below read unposed vertices
+for o in sc.objects:
+    if o.type == 'ARMATURE': o.data.pose_position = 'REST'
 objs = [o for o in sc.objects if o.type == 'MESH']
 root = bpy.data.objects.new('root', None); sc.collection.objects.link(root)
 for o in sc.objects:
     if o.parent is None and o is not root: o.parent = root
-root.rotation_euler = (0, math.radians(ROLL), 0)  # diagonal, head top-right
+root.rotation_euler = (0, math.radians(ROLL), math.radians(YAW))  # diagonal, head top-right
 bpy.context.view_layer.update()
 pts = [o.matrix_world @ v.co for o in objs for v in o.data.vertices]
 lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))

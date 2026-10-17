@@ -181,8 +181,6 @@ const ART: Record<string, string> = {
   flame: `${P('M32 3C36 15 50 22 50 40C50 52 42 61 32 61C22 61 14 52 14 40C14 30 20 25 24 18C26 26 28 28 31 29C30 20 31 11 32 3Z', '#ff7a2a')}
     ${N('M32 33C36 38 41 42 41 49C41 55 37 59 32 59C27 59 23 55 23 49C23 44 27 41 32 33Z', '#ffd23f')}${H('M20 38C20 32 23 27 26 23', 2.5)}`,
 };
-// pet items (WEAPONS `pet_<id>`) without a rendered PNG show the boar's head
-for (const p of ['boar', 'wolf', 'bear', 'lion', 'bone_boar']) ART[`pet_${p}`] ??= ART.boar;
 
 /** Sprite of each stat: HUD stats panel and kill-reward chips. */
 export const STAT_ICON: Record<OrbKind, string> = { power: 'dps', hp: 'heart', regen: 'regen', speed: 'run' };
@@ -231,6 +229,8 @@ const PNG: Record<string, string> = {
     'ring', 'amulet',
   ].flatMap((piece) => ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].flatMap((r) =>
     ['human', 'orc'].map((f) => [`${piece}_${r}_${f}`, `armor/${piece}_${r}_${f}`])))),
+  // pet items (WEAPONS `pet_<id>`), rendered from their creatures (tools/blender/icon_fit.py)
+  pet_boar: 'pet_boar', pet_wolf: 'pet_wolf', pet_bear: 'pet_bear', pet_lion: 'pet_lion', pet_bone_boar: 'pet_bone_boar',
   orb_vigor: 'orb_vigor', orb_fury: 'orb_glass',
   orb_swift: 'orb_swift', orb_ward: 'orb_ward', orb_fortune: 'orb_fortune', orb_demon: 'orb_demon',
 };
