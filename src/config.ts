@@ -1253,7 +1253,7 @@ export const GACHA = {
   token: { normal: 0, elite: 0, mini: 0, boss: 0 } as Record<MobRank, number>,
   /** Locations whose kills never give a pull (bosses there too): the first one is beaten on the forest's own drops alone. */
   noTokens: ['forest'] as ZoneId[],
-  banner: { kind: 'armor' as const, def: 'ring_blood', name: 'Кольцо Короля-лича', subtitle: 'Пьёт кровь врагов и отдаёт её хозяину. Шанс повышен!' },
+  banner: { kind: 'armor' as const, def: 'ring_blood', name: 'Кольцо Короля-лича', subtitle: 'Пьёт кровь врагов и отдаёт её хозяину' },
   /** Orbs (one quality each) a non-legendary gacha tier gives, by RARITY index: Fury / Vigor + Wind / Ward. */
   orbs: [[0], [1, 2], [3]] as number[][],
   /** Hammer blows per pull; the rarity colour can climb after each, legendary only on the last one. */
@@ -1264,6 +1264,54 @@ export const GACHA = {
 };
 /** Chance a kill of a `rank` mob from location `zone` gives a gacha pull (GACHA.token, none in GACHA.noTokens). */
 export const tokenChance = (rank: MobRank, zone: ZoneId) => (GACHA.noTokens.includes(zone) ? 0 : GACHA.token[rank]);
+
+/**
+ * Magic look of a mage orb model (src/orbfx.ts): shell nebula colours (`deep` inside, `glow` wisps and rim), its swirl
+ * and rise speed; `motes` around it: count, `mode` 0 = circling, 1 = rising like embers / bubbles, 2 = gliding over a
+ * sphere around it; `speed`, `moteSize` (share of the orb radius); `halo`: strength of the soft glow around it.
+ */
+export interface OrbFx { deep: number; glow: number; swirl: number; rise: number; motes: number; mode: 0 | 1 | 2; speed: number; moteSize: number; halo: number }
+export const ORB_FX: Record<string, OrbFx> = {
+  // Fury: embers rising out of a red-hot swirl
+  orb_glass: { deep: 0x3a0804, glow: 0xff6a1a, swirl: 0.9, rise: 0.5, motes: 26, mode: 1, speed: 0.8, moteSize: 0.29, halo: 0.55 },
+  // Vigor: calm green life, bubbles drifting up
+  orb_vigor: { deep: 0x06321a, glow: 0x5dff8a, swirl: 0.4, rise: 0.25, motes: 22, mode: 1, speed: 0.45, moteSize: 0.32, halo: 0.55 },
+  // Wind: a fast vortex, motes whirling around
+  orb_swift: { deep: 0x06243e, glow: 0x8af0ff, swirl: 2.4, rise: 0.1, motes: 30, mode: 0, speed: 2.2, moteSize: 0.22, halo: 0.55 },
+  // Ward: a slow violet shell of twinkles
+  orb_ward: { deep: 0x1c0840, glow: 0xc58aff, swirl: 0.5, rise: 0.1, motes: 34, mode: 2, speed: 0.5, moteSize: 0.24, halo: 0.55 },
+  // Fortune: golden glitter circling
+  orb_fortune: { deep: 0x3a2604, glow: 0xffd84a, swirl: 0.8, rise: 0.15, motes: 36, mode: 0, speed: 0.9, moteSize: 0.21, halo: 0.55 },
+  // Demon: dark blood swirl, sparks of hellfire rising
+  orb_demon: { deep: 0x200204, glow: 0xff2a10, swirl: 1.5, rise: 0.6, motes: 36, mode: 1, speed: 1.0, moteSize: 0.27, halo: 0.55 },
+};
+
+/**
+ * Gacha banner showcase (src/showcase3d.ts): the banner jewel over a magic circle. `size` = the jewel's largest side
+ * (m); camera height / distance / look-at height; backdrop colours top / bottom; twinkles, motes, the item light.
+ */
+export const BANNER3D = {
+  fov: 34,
+  minAspect: 0.75,
+  cameraY: 0.3,
+  cameraZ: 4.2,
+  lookY: -0.2,
+  size: 1.3,
+  lean: 0.45,
+  swing: 0.6,
+  swaySpeed: 0.7,
+  circle: 2.6,
+  circleY: -0.95,
+  top: 0x160820,
+  bottom: 0x3a0812,
+  /** Rays behind the jewel (the Lich King's ring: blood), the magic circle's colour. */
+  ray: 0xff2448,
+  rune: 0xffb43a,
+  glints: 70,
+  motes: 140,
+  light: 1.4,
+  bloom: { strength: 0.3, radius: 0.55, threshold: 0.9 },
+};
 
 /** 3D forge scene of the gacha (src/forge3d.ts). Positions in metres; `top` = anvil top, y offsets are added to it. */
 export const FORGE3D = {

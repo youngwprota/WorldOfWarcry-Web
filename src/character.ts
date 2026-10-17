@@ -6,6 +6,7 @@ import { Swinger, type SwingKind } from './swing';
 import { PART_PREFIXES, type VisualPart } from './items';
 import { ATTACK_HIT, type AttackAnim, type BossAnim } from './config';
 import { FLOAT_TIME, patchFloat } from './floaters';
+import { magicOrb } from './orbfx';
 
 const shadowTex = (() => {
   const c = document.createElement('canvas');
@@ -221,6 +222,7 @@ export class Character {
     this.orbCore = this.orb.getObjectByName(`${name}_core`) ?? null;
     // the glass must not hide the core behind it
     this.orb.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material | undefined; if (m?.transparent) m.depthWrite = false; });
+    magicOrb(this.orb, name);
     this.root.add(this.orb);
   }
 
