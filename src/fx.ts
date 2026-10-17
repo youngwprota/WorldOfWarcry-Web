@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ORBS, type OrbKind } from './config';
+import type { OrbKind } from './config';
 
 const tmp = new THREE.Vector3();
 
@@ -200,66 +200,345 @@ export class Telegraphs {
 }
 
 export type PickupKind = OrbKind;
-interface Pickup { mesh: THREE.Mesh; kind: PickupKind; vel: THREE.Vector3; t: number; active: boolean; }
+/** `hist`: the last TRAIL_N flight positions (newest at `head`), `hn` of them filled. */
+interface Pickup { pos: THREE.Vector3; vel: THREE.Vector3; t: number; phase: number; hist: Float32Array; head: number; hn: number }
 
-/** Stat orbs: burst out, then home in on the hero (GDD 4: "сами притягиваются"). */
-export class Pickups {
-  private pool: Pickup[] = [];
-  private orbGeo = new THREE.IcosahedronGeometry(0.2, 1);
-  private mats: Record<PickupKind, THREE.Material>;
-  onCollect: (kind: PickupKind) => void = () => {};
+const PICKUP_CAP = 120;
+const BURST_T = 0.2;
+const TRAIL_N = 14;
+const TRAIL_W = 0.17;
+/** × the twinkle life (0.45 s, game.ts) ≈ 9 alive round each drop. */
+const SPARK_RATE = 20;
+const TRAIL_SLOTS = PICKUP_CAP * 4;
+const tA = new THREE.Vector3();
+const tB = new THREE.Vector3();
+const side = new THREE.Vector3();
+/** Drop colours: the ORBS hues, softened toward the game's painted palette. */
+export const DROP_TINT: Record<PickupKind, number> = { power: 0xc8553d, hp: 0x6fb46a, regen: 0x5ea8c4, speed: 0xd9ad4f };
+const pm = new THREE.Matrix4();
+const pq = new THREE.Quaternion();
+const pe = new THREE.Euler();
+const ps = new THREE.Vector3();
+const pp = new THREE.Vector3();
 
-  constructor(private scene: THREE.Scene) {
-    this.mats = {
-      power: this.orbMat('power'), hp: this.orbMat('hp'), regen: this.orbMat('regen'), speed: this.orbMat('speed'),
-    };
-  }
-
-  private orbMat(k: OrbKind) {
-    return new THREE.MeshBasicMaterial({ color: ORBS[k].color });
-  }
-
-  spawn(pos: THREE.Vector3, kind: PickupKind) {
-    let p = this.pool.find((x) => !x.active);
-    if (!p) {
-      if (this.pool.length > 220) return;
-      const mesh = new THREE.Mesh(this.orbGeo, this.mats.power);
-      this.scene.add(mesh);
-      p = { mesh, kind, vel: new THREE.Vector3(), t: 0, active: false };
-      this.pool.push(p);
+/** Shapes are faceted (non-indexed, flat normals) and centred on the origin, about 0.4 m across. */
+function pickupGeo(kind: PickupKind) {
+  let g: THREE.BufferGeometry;
+  if (kind === 'power') g = new THREE.OctahedronGeometry(0.17).scale(0.8, 1.7, 0.8);
+  else if (kind === 'hp') {
+    const s = new THREE.Shape();
+    s.moveTo(0, -0.18);
+    s.bezierCurveTo(-0.08, -0.1, -0.2, -0.02, -0.2, 0.07);
+    s.bezierCurveTo(-0.2, 0.17, -0.07, 0.2, 0, 0.1);
+    s.bezierCurveTo(0.07, 0.2, 0.2, 0.17, 0.2, 0.07);
+    s.bezierCurveTo(0.2, -0.02, 0.08, -0.1, 0, -0.18);
+    g = new THREE.ExtrudeGeometry(s, { depth: 0.08, curveSegments: 5, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.025, bevelSegments: 1 });
+  } else if (kind === 'regen') {
+    // lathe profile bottom-up: round belly (circle r 0.13 at y -0.05), then the tapering point
+    const pts: THREE.Vector2[] = [];
+    for (const deg of [-90, -70, -45, -15, 15, 40]) {
+      const a = (deg * Math.PI) / 180;
+      pts.push(new THREE.Vector2(Math.cos(a) * 0.13, -0.05 + Math.sin(a) * 0.13));
     }
-    p.active = true;
-    p.kind = kind;
+    pts.push(new THREE.Vector2(0.05, 0.14), new THREE.Vector2(0, 0.23));
+    g = new THREE.LatheGeometry(pts, 8);
+  } else {
+    const s = new THREE.Shape();
+    s.moveTo(-0.02, 0.24);
+    s.lineTo(0.12, 0.24);
+    s.lineTo(0.03, 0.06);
+    s.lineTo(0.12, 0.06);
+    s.lineTo(-0.08, -0.24);
+    s.lineTo(-0.01, -0.02);
+    s.lineTo(-0.1, -0.02);
+    g = new THREE.ExtrudeGeometry(s, { depth: 0.06, bevelEnabled: false });
+  }
+  g.center();
+  g = g.toNonIndexed();
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * Stat drops (GDD 4: "сами притягиваются"): pop out, then steer smoothly into the hero, each with a glowing ribbon
+ * trail. Every stat has its own shape and idle motion (power: spinning crystal, hp: beating heart, regen: bobbing
+ * drop, speed: flickering bolt). One InstancedMesh per stat plus one mesh for all trails: five draw calls at most.
+ */
+export class Pickups {
+  private live: Record<PickupKind, Pickup[]> = { power: [], hp: [], regen: [], speed: [] };
+  private free: Pickup[] = [];
+  private meshes = {} as Record<PickupKind, THREE.InstancedMesh>;
+  private tints = {} as Record<PickupKind, THREE.Color>;
+  private trail: THREE.Mesh;
+  private tPos = new Float32Array(TRAIL_SLOTS * TRAIL_N * 2 * 3);
+  private tCol = new Float32Array(TRAIL_SLOTS * TRAIL_N * 2 * 4);
+  onCollect: (kind: PickupKind) => void = () => {};
+  /** About SPARK_RATE times a second per drop in flight: twinkles round it that stay behind along the trail. */
+  onSparkle: (pos: THREE.Vector3, kind: PickupKind) => void = () => {};
+  /** A drop popped out (the spawn flash). */
+  onSpawn: (pos: THREE.Vector3, kind: PickupKind) => void = () => {};
+  /** A drop reached the hero (the absorb flash), right before onCollect. */
+  onArrive: (pos: THREE.Vector3, kind: PickupKind) => void = () => {};
+
+  constructor(scene: THREE.Scene, private camera: THREE.Camera) {
+    // one triangle strip per drop slot: two vertices per history sample, (TRAIL_N - 1) quads
+    const idx = new Uint16Array(TRAIL_SLOTS * (TRAIL_N - 1) * 6);
+    let w = 0;
+    for (let s = 0; s < TRAIL_SLOTS; s++) {
+      for (let j = 0; j < TRAIL_N - 1; j++) {
+        const a = (s * TRAIL_N + j) * 2;
+        idx.set([a, a + 1, a + 2, a + 1, a + 3, a + 2], w);
+        w += 6;
+      }
+    }
+    // -1 / +1 across the ribbon: the shader fades the colour to nothing at both edges (a misty, blurred band)
+    const edge = new Float32Array(TRAIL_SLOTS * TRAIL_N * 2);
+    for (let i = 0; i < edge.length; i++) edge[i] = i % 2 ? 1 : -1;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.tPos, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('tint', new THREE.BufferAttribute(this.tCol, 4).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('edge', new THREE.BufferAttribute(edge, 1));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    g.setDrawRange(0, 0);
+    this.trail = new THREE.Mesh(g, new THREE.ShaderMaterial({
+      vertexShader: `attribute vec4 tint; attribute float edge; varying vec4 vT; varying float vE;
+        void main(){ vT = tint; vE = edge; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `varying vec4 vT; varying float vE;
+        void main(){ float a = 1.0 - vE * vE; a *= a; gl_FragColor = vec4(vT.rgb * (0.7 + 0.5 * a), vT.a * a); }`,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    }));
+    this.trail.frustumCulled = false;
+    this.trail.renderOrder = 5;
+    scene.add(this.trail);
+    for (const k of Object.keys(this.live) as PickupKind[]) {
+      // trails a little above white: the post glow softens them into light
+      this.tints[k] = new THREE.Color(DROP_TINT[k]).multiplyScalar(1.3);
+      const c = new THREE.Color(DROP_TINT[k]);
+      // emissive lifts the lit side a bit above white, so the post glow gives the drop a soft shine; facets still read
+      const mat = new THREE.MeshLambertMaterial({ color: c.clone().multiplyScalar(0.8), emissive: c.clone().multiplyScalar(0.8) });
+      const mesh = new THREE.InstancedMesh(pickupGeo(k), mat, PICKUP_CAP);
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      scene.add(mesh);
+      this.meshes[k] = mesh;
+    }
+  }
+
+  /** False when that stat's pool is full (the caller pays the drop at once). */
+  spawn(pos: THREE.Vector3, kind: PickupKind) {
+    const list = this.live[kind];
+    if (list.length >= PICKUP_CAP) return false;
+    const p = this.free.pop() ?? { pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, phase: 0, hist: new Float32Array(TRAIL_N * 3), head: 0, hn: 0 };
     p.t = 0;
-    p.mesh.geometry = this.orbGeo;
-    p.mesh.material = this.mats[kind];
-    p.mesh.visible = true;
-    p.mesh.position.copy(pos).setY(0.8);
+    p.hn = 0;
+    p.phase = Math.random() * Math.PI * 2;
+    p.pos.copy(pos).setY(0.8);
     const a = Math.random() * Math.PI * 2;
-    const s = 2 + Math.random() * 3;
-    p.vel.set(Math.cos(a) * s, 5 + Math.random() * 3, Math.sin(a) * s);
+    const s = 3 + Math.random() * 3;
+    p.vel.set(Math.cos(a) * s, 5 + Math.random() * 2, Math.sin(a) * s);
+    list.push(p);
+    this.onSpawn(p.pos, kind);
+    return true;
   }
 
   update(dt: number, hero: THREE.Vector3) {
-    for (const p of this.pool) {
-      if (!p.active) continue;
-      p.t += dt;
-      const m = p.mesh;
-      m.rotation.y += dt * 4;
-      if (p.t < 0.45) {
-        p.vel.y -= 20 * dt;
-        m.position.addScaledVector(p.vel, dt);
-        if (m.position.y < 0.3) { m.position.y = 0.3; p.vel.y *= -0.4; p.vel.x *= 0.5; p.vel.z *= 0.5; }
-        continue;
+    let slot = 0;
+    for (const k of Object.keys(this.live) as PickupKind[]) {
+      const list = this.live[k];
+      const mesh = this.meshes[k];
+      let n = 0;
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        if (this.move(p, k, dt, hero)) { this.free.push(p); continue; }
+        list[n] = p;
+        this.pose(p, k);
+        mesh.setMatrixAt(n++, pm);
+        this.ribbon(p, this.tints[k], slot++);
       }
-      tmp.set(hero.x, 1, hero.z).sub(m.position);
-      const d = tmp.length();
-      m.position.addScaledVector(tmp.normalize(), Math.min(d, (6 + p.t * 10) * dt));
-      if (d < 0.5) {
-        p.active = false;
-        m.visible = false;
-        this.onCollect(p.kind);
+      list.length = n;
+      mesh.count = n;
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    const g = this.trail.geometry;
+    g.setDrawRange(0, slot * (TRAIL_N - 1) * 6);
+    g.attributes.position.needsUpdate = true;
+    g.attributes.tint.needsUpdate = true;
+  }
+
+  /**
+   * True when the drop reached the hero. A short pop up and out, then steering: the velocity turns toward the hero a
+   * little more every frame while the speed grows, so the path is one smooth curve with no corner.
+   */
+  private move(p: Pickup, k: PickupKind, dt: number, hero: THREE.Vector3) {
+    p.t += dt;
+    tmp.set(hero.x, 1, hero.z).sub(p.pos);
+    const d = tmp.length();
+    if (p.t < BURST_T) p.vel.y -= 16 * dt;
+    else {
+      const speed = Math.min(28, 9 + (p.t - BURST_T) * 40);
+      tA.copy(tmp).multiplyScalar(speed / Math.max(d, 1e-4));
+      p.vel.lerp(tA, Math.min(1, dt * (5 + (p.t - BURST_T) * 25)));
+    }
+    const step = p.vel.length() * dt;
+    if (p.t >= BURST_T && d <= Math.max(0.45, step)) {
+      this.onArrive(p.pos, k);
+      this.onCollect(k);
+      return true;
+    }
+    p.pos.addScaledVector(p.vel, dt);
+    if (p.pos.y < 0.35) { p.pos.y = 0.35; p.vel.y = Math.max(0, p.vel.y); }
+    if (Math.random() < dt * SPARK_RATE) this.onSparkle(p.pos, k);
+    p.head = (p.head + 1) % TRAIL_N;
+    p.hist[p.head * 3] = p.pos.x;
+    p.hist[p.head * 3 + 1] = p.pos.y;
+    p.hist[p.head * 3 + 2] = p.pos.z;
+    p.hn = Math.min(TRAIL_N, p.hn + 1);
+    return false;
+  }
+
+  /** The `j`-th newest position of the drop's history. */
+  private sample(p: Pickup, j: number, out: THREE.Vector3) {
+    const i = (p.head - j + TRAIL_N) % TRAIL_N;
+    return out.set(p.hist[i * 3], p.hist[i * 3 + 1], p.hist[i * 3 + 2]);
+  }
+
+  /** Writes the drop's trail into strip `slot`: camera-facing, tapering and fading from the drop backwards. */
+  private ribbon(p: Pickup, c: THREE.Color, slot: number) {
+    const cam = this.camera.position;
+    const last = Math.max(1, p.hn - 1);
+    let v = slot * TRAIL_N * 2;
+    for (let j = 0; j < TRAIL_N; j++) {
+      // past the filled history the strip collapses onto the oldest sample (zero width, invisible)
+      const jj = Math.min(j, p.hn - 1);
+      this.sample(p, jj, tA);
+      // segment direction: toward the newer neighbour, or from the older one at the newest sample
+      if (jj > 0) this.sample(p, jj - 1, tB).sub(tA);
+      else if (p.hn > 1) tB.copy(tA).sub(this.sample(p, 1, side));
+      else tB.copy(p.vel);
+      side.subVectors(cam, tA).cross(tB);
+      const f = j < p.hn ? 1 - j / last : 0;
+      const len = side.length();
+      if (len > 1e-6) side.multiplyScalar((TRAIL_W * f) / len); else side.set(0, 0, 0);
+      const a = f * f;
+      for (let s = -1; s <= 1; s += 2) {
+        this.tPos[v * 3] = tA.x + side.x * s;
+        this.tPos[v * 3 + 1] = tA.y + side.y * s;
+        this.tPos[v * 3 + 2] = tA.z + side.z * s;
+        this.tCol[v * 4] = c.r;
+        this.tCol[v * 4 + 1] = c.g;
+        this.tCol[v * 4 + 2] = c.b;
+        this.tCol[v * 4 + 3] = a;
+        v++;
       }
+    }
+  }
+
+  /** Writes the drop's matrix into `pm`: the stat's idle motion on top of its flight position. */
+  private pose(p: Pickup, k: PickupKind) {
+    const t = p.t + p.phase;
+    // grows out of nothing over the first 0.15 s
+    let s = Math.min(1, p.t / 0.15);
+    let bob = 0;
+    if (k === 'power') {
+      pe.set(0.25, t * 6, 0.15);
+      bob = Math.sin(t * 4) * 0.05;
+    } else if (k === 'hp') {
+      // lub-dub: two quick pulses, then a rest, 1.2 beats a second
+      const b = (t * 1.2) % 1;
+      s *= 1 + 0.22 * Math.exp(-((b - 0.08) ** 2) * 900) + 0.14 * Math.exp(-((b - 0.26) ** 2) * 900);
+      pe.set(0, Math.sin(t * 2.2) * 0.7, 0);
+      bob = Math.sin(t * 3) * 0.04;
+    } else if (k === 'regen') {
+      pe.set(Math.sin(t * 3.1) * 0.25, t * 1.5, Math.cos(t * 2.7) * 0.25);
+      bob = Math.sin(t * 5) * 0.08;
+    } else {
+      s *= 0.9 + Math.random() * 0.25;
+      // leans into its flight like a thrown spark
+      pe.set(Math.max(-0.6, Math.min(0.6, p.vel.z * 0.06)), t * 7, Math.max(-0.6, Math.min(0.6, -p.vel.x * 0.06)));
+    }
+    pq.setFromEuler(pe);
+    ps.setScalar(Math.max(0.001, s));
+    pp.copy(p.pos);
+    pp.y += bob;
+    pm.compose(pp, pq, ps);
+  }
+}
+
+const AURA_LIFE = 0.75;
+/** Playback rate of the whole aura (timing, streaks, arc) over its authored AURA_LIFE. */
+const AURA_SPEED = 1.1;
+const AURA_VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+
+type AuraUniforms = { uC: { value: THREE.Color }; uA: { value: number }; uT: { value: number } };
+interface Aura { group: THREE.Group; column: THREE.Mesh; arc: THREE.Mesh; u: AuraUniforms; t: number }
+
+const auraMat = (u: AuraUniforms, frag: string) => new THREE.ShaderMaterial({
+  uniforms: u, vertexShader: AURA_VERT, fragmentShader: frag,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+});
+
+/**
+ * The buff column a hero gets when a stat drop sinks in: a see-through glowing cylinder with light streaks running up
+ * it and a band rising, and a swirl arc round the body, all in the stat's colour.
+ * One per stat, following the hero; a drop arriving while it shows re-pulses it instead of adding another.
+ */
+export class StatAuras {
+  private auras = {} as Record<PickupKind, Aura>;
+
+  constructor(scene: THREE.Scene) {
+    const colGeo = new THREE.CylinderGeometry(0.75, 0.75, 1.9, 28, 1, true).translate(0, 0.95, 0);
+    const arcGeo = new THREE.CylinderGeometry(0.85, 0.85, 0.07, 20, 1, true, 0, 2.2);
+    for (const k of Object.keys(DROP_TINT) as PickupKind[]) {
+      const u = { uC: { value: new THREE.Color(DROP_TINT[k]).multiplyScalar(1.3) }, uA: { value: 0 }, uT: { value: 0 } };
+      // uv.x runs round the column, uv.y bottom to top; 14 columns of which about half carry a streak
+      const column = new THREE.Mesh(colGeo, auraMat(u, `uniform vec3 uC; uniform float uA; uniform float uT; varying vec2 vUv;
+        void main(){
+          float body = pow(max(1.0 - vUv.y, 1e-4), 1.6) * 0.3;
+          float c = floor(vUv.x * 14.0); float h = fract(sin(c * 12.9898) * 43758.5);
+          float line = (1.0 - smoothstep(0.0, 0.12, abs(fract(vUv.x * 14.0) - 0.5))) * step(0.45, h);
+          float seg = fract(vUv.y * 0.9 - uT * (1.2 + h) + h);
+          float streak = line * smoothstep(0.0, 0.5, seg) * smoothstep(1.0, 0.7, seg) * (1.0 - vUv.y * 0.5);
+          // squared by hand: pow() of a negative base is NaN on GPUs, and one NaN pixel wrecks the post glow blur
+          float bd = (vUv.y - uT * 1.3) * 14.0;
+          float band = exp(-bd * bd) * 0.5;
+          float foot = smoothstep(0.06, 0.0, vUv.y) * 0.6;
+          gl_FragColor = vec4(uC * (1.0 + streak), uA * (body + streak * 0.9 + band + foot)); }`));
+      // the arc's tail fades along its sweep
+      const arc = new THREE.Mesh(arcGeo, auraMat(u, `uniform vec3 uC; uniform float uA; varying vec2 vUv;
+        void main(){ float a = vUv.x * vUv.x * (1.0 - abs(vUv.y - 0.5) * 2.0); gl_FragColor = vec4(uC * 1.4, uA * a * 1.2); }`));
+      const group = new THREE.Group();
+      group.add(column, arc);
+      group.visible = false;
+      column.renderOrder = arc.renderOrder = 5;
+      scene.add(group);
+      this.auras[k] = { group, column, arc, u, t: AURA_LIFE };
+    }
+  }
+
+  trigger(k: PickupKind) {
+    const a = this.auras[k];
+    // a fresh one starts from the beginning; one already showing jumps back to full without the grow-in
+    a.t = a.t >= AURA_LIFE ? 0 : Math.min(a.t, 0.12);
+    a.group.visible = true;
+  }
+
+  update(dt: number, hero: THREE.Vector3) {
+    for (const k of Object.keys(this.auras) as PickupKind[]) {
+      const a = this.auras[k];
+      if (a.t >= AURA_LIFE) continue;
+      a.t += dt * AURA_SPEED;
+      if (a.t >= AURA_LIFE) { a.group.visible = false; continue; }
+      const x = a.t / AURA_LIFE;
+      // quick swell in, a hold, then a soft fade
+      const env = Math.min(1, a.t / 0.08) * (x < 0.45 ? 1 : 1 - (x - 0.45) / 0.55);
+      a.u.uA.value = env;
+      a.u.uT.value = a.t;
+      a.group.position.set(hero.x, 0, hero.z);
+      const s = 0.85 + 0.15 * Math.min(1, a.t / 0.15);
+      a.column.scale.set(s, 0.9 + 0.1 * x, s);
+      a.arc.rotation.y = -a.t * 9;
+      a.arc.position.y = 0.3 + x * 1.1;
     }
   }
 }

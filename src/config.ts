@@ -19,6 +19,7 @@ export type AttackAnim = WeaponAnim | BossAnim;
 export const ATTACK_HIT: Record<string, number> = {
   SwordAttack: 0.6, AxeAttack: 0.83, MagicAttack: 1.13, SlashAdvance: 0.73, MeleeHigh: 0.32, MeleeLong: 1.07, MeleeHorizontal: 0.97,
   'orc_boar:attack': 9 / 24, 'undead_boar:attack': 9 / 24, 'human_murloc:attack': 0.6 / 1.3,
+  'murloc_dartfrog:attack': 0.6 / 1.3, 'murloc_treefrog:attack': 0.6 / 1.3,
   'wild_bear:attack': 0.58, 'wild_direwolf:attack': 0.375, 'wild_lion:attack': 0.4, 'wild_dragon:attack': 1.04,
 };
 /** When a mob's damage lands: on the clip's hit marker, sped up only if the attack period is too short for it. */
@@ -67,8 +68,6 @@ export interface WeaponDef {
   anim: WeaponAnim;
   model: Record<FactionId, string>;
   icon: string;
-  /** Hunter's pet (config PETS id): the item only puts that creature beside the hero, it never swings. */
-  pet?: string;
   stun?: number; // chance
   /** Plain swings hit only the current target (the combo finisher still hits an area). */
   single?: boolean;
@@ -85,10 +84,11 @@ export interface WeaponDef {
   /** Held in the left hand (the bow). */
   leftHand?: boolean;
   /**
-   * Bow: the blow looses an arrow (model by faction) flying at `speed` m/s that homes in on the target and hits on
-   * arrival; the finisher is a volley of `volley` arrows at the nearest units in range.
+   * Bow, gun: the blow looses an arrow (model by faction) flying at `speed` m/s that homes in on the target and hits
+   * on arrival. `pellets` (the gun): instead, `n` pellets fan out over `spread`° toward the target, each flies straight
+   * and hits the first unit on its line within reach for × `mul` of the weapon's damage.
    */
-  shot?: { speed: number; arrow: Record<FactionId, string>; volley: number };
+  shot?: { speed: number; arrow: Record<FactionId, string>; pellets?: { n: number; spread: number; mul: number } };
   /** Mage staff of this element (STAVES): the mage's weapon (src/party.ts), held in the left hand. */
   staff?: StaffElement;
   /**
@@ -98,11 +98,21 @@ export interface WeaponDef {
    * and added to the crit multiplier.
    */
   orb?: { regen?: number; power?: number; speed?: number; defense?: number; pull?: number; critDmg?: [number, number] };
+  /**
+   * The hunter's pet (his class slot, config PETS id): an item of its own that never swings; the pet bites the
+   * hunter's target with this item's damage (quality, copies, sharpening — not the hero's power, bow or crits).
+   */
+  pet?: string;
   /** Model per rarity (RARITY index), GLB props with their own materials (src/assets.ts loadProps); over `model`. */
   tiers?: string[];
   /** The item exists only at this rarity (RARITY index): the mage's orbs. */
   rarity?: number;
 }
+
+/** Share of the gun's pellets that hit a lone target on average (the fan's edges miss): for DPS and the simulator. */
+export const PELLET_HIT = 0.6;
+/** One attack of the weapon on one target, in weapon damages (a gun's volley: its pellets that hit). */
+export const attackMul = (w: WeaponDef) => (w.shot?.pellets ? w.shot.pellets.n * w.shot.pellets.mul * PELLET_HIT : 1);
 
 export type MobRank = 'normal' | 'elite' | 'mini' | 'boss';
 export const mobRank = (d: MobDef): MobRank => (d.boss ? 'boss' : d.rank ?? 'normal');
@@ -115,20 +125,21 @@ export const casterModel = (faction: FactionId, rarity: number) => `casters/${fa
 export const WEAPONS: Record<string, WeaponDef> = {
   sword: {
     id: 'sword', name: 'Меч', type: 'slash', dmgMul: 1, aps: 1.15, shape: 'arc', arc: 140, range: 2.3,
-    anim: 'SwordAttack', model: { human: 'sword_human_knight', orc: 'sword_orc_warrior' }, icon: '🗡️', single: true,
+    anim: 'SwordAttack', model: { human: 'sword_common', orc: 'sword_common' }, icon: '🗡️', single: true,
   },
   axe: {
     id: 'axe', name: 'Топор', type: 'chop', dmgMul: 1.25, aps: 0.95, shape: 'arc', arc: 160, range: 2.3,
-    anim: 'AxeAttack', model: { human: 'axe', orc: 'axe_orc_grunt' }, icon: '🪓',
+    anim: 'AxeAttack', model: { human: 'axe_common', orc: 'axe_common' }, icon: '🪓',
   },
   hammer: {
     id: 'hammer', name: 'Молот', type: 'crush', dmgMul: 1.7, aps: 0.7, shape: 'circle', arc: 360, range: 2.1,
-    anim: 'AxeAttack', model: { human: 'hammer_human_paladin', orc: 'hammer_human_paladin' }, icon: '🔨',
+    anim: 'AxeAttack', model: { human: 'hammer_common', orc: 'hammer_common' }, icon: '🔨',
   },
   // board «Система оружий»: damage a bit under the sword, slow, long reach; thrust → thrust (target only) → spin 360°
+  // the hunter's melee weapon: its blows are the hunter's damage (pierce, DAMAGE_CLASS)
   polearm: {
-    id: 'polearm', name: 'Древковое', type: 'slash', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 3.1,
-    anim: 'SwordAttack', model: { human: 'nagamaki', orc: 'nagamaki' }, icon: '⚔️', single: true, cycle: true,
+    id: 'polearm', name: 'Древковое', type: 'pierce', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 3.1,
+    anim: 'SwordAttack', model: { human: 'polearm_common', orc: 'polearm_common' }, icon: '⚔️', single: true, cycle: true,
     swing: ['thrust', 'thrust', 'sweep'],
   },
   // shields: the warrior's class slot (src/party.ts); they never swing, the swing numbers are unused
@@ -152,8 +163,16 @@ export const WEAPONS: Record<string, WeaponDef> = {
     id: 'bow', name: 'Лук', type: 'pierce', dmgMul: 0.9, aps: 1.0, shape: 'arc', arc: 60, range: 5.75,
     anim: 'SwordAttack', model: { human: 'bow_human_archer', orc: 'bow_orc_archer' }, icon: '🏹', single: true,
     leftHand: true,
-    shot: { speed: 24, arrow: { human: 'arrow_human_archer', orc: 'arrow_orc_archer' }, volley: 3 },
+    shot: { speed: 24, arrow: { human: 'arrow_human_archer', orc: 'arrow_orc_archer' } },
   },
+  // the hunter's gun (a dwarven blunderbuss, gun_<quality>.glb): slower than the bow, a fan of weaker pellets
+  gun: {
+    id: 'gun', name: 'Ружьё', type: 'pierce', dmgMul: 0.9, aps: 0.6, shape: 'arc', arc: 40, range: 4.8,
+    anim: 'SwordAttack', model: { human: 'gun_common', orc: 'gun_common' }, icon: '🔫', single: true,
+    leftHand: true,
+    shot: { speed: 40, arrow: { human: 'pellet_mock', orc: 'pellet_mock' }, pellets: { n: 5, spread: 40, mul: 0.4 } },
+  },
+  // (the hunter's pets are items too: WEAPONS[<PETS id>], generated after PETS below)
   staff_fire: {
     id: 'staff_fire', name: 'Посох огня', type: 'magic', dmgMul: 1.9, aps: 0.495, shape: 'arc', arc: 60, range: 3.2,
     anim: 'MagicAttack', model: { human: 'mage_staff', orc: 'mage_staff' }, icon: '🔥', staff: 'fire',
@@ -226,8 +245,11 @@ export interface PetDef {
   /** GLB creature (src/creature.ts). */
   model: string;
   scale: number;
+  /** Damage type of the bite (mob resists): its item's `type`. */
   type: DamageType;
+  /** Its item's dmgMul: the bite deals the item's own damage (WeaponDef.pet), never the hero's power. */
   dmg: number;
+  /** Bites per second: its item's `aps`. */
   aps: number;
   /** Bite reach from its centre to the foe's edge, m. */
   range: number;
@@ -240,20 +262,19 @@ export interface PetDef {
 }
 // Each pet differs by damage type (mob resists) and manner (docs/features/gacha-gear/concept.md). Placeholder numbers.
 export const PETS: Record<string, PetDef> = {
-  boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, type: 'crush', dmg: 0.6, aps: 0.9, range: 1.3, speed: 6.5 },
-  wolf: { id: 'wolf', name: 'Лютоволк', icon: 'boar', model: 'wild_direwolf', scale: 0.45, type: 'slash', dmg: 0.3, aps: 1.8, range: 1.2, speed: 7.5 },
-  bear: { id: 'bear', name: 'Медведь', icon: 'boar', model: 'wild_bear', scale: 0.55, type: 'chop', dmg: 1.0, aps: 0.55, range: 1.5, speed: 6.0, cleave: 2 },
-  lion: { id: 'lion', name: 'Лев', icon: 'boar', model: 'wild_lion', scale: 0.55, type: 'pierce', dmg: 0.55, aps: 0.85, range: 1.3, speed: 6.8, pounce: { range: 6, mult: 2.5, cd: 6 } },
-  bone_boar: { id: 'bone_boar', name: 'Костяной вепрь', icon: 'boar', model: 'undead_boar', scale: 1.0, type: 'magic', dmg: 0.55, aps: 0.9, range: 1.3, speed: 6.5 },
+  boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, type: 'crush', dmg: 0.8, aps: 0.9, range: 1.3, speed: 6.5 },
+  wolf: { id: 'wolf', name: 'Лютоволк', icon: 'boar', model: 'wild_direwolf', scale: 0.45, type: 'slash', dmg: 0.4, aps: 1.8, range: 1.2, speed: 7.5 },
+  bear: { id: 'bear', name: 'Медведь', icon: 'boar', model: 'wild_bear', scale: 0.55, type: 'chop', dmg: 1.35, aps: 0.55, range: 1.5, speed: 6.0, cleave: 2 },
+  lion: { id: 'lion', name: 'Лев', icon: 'boar', model: 'wild_lion', scale: 0.55, type: 'pierce', dmg: 0.75, aps: 0.85, range: 1.3, speed: 6.8, pounce: { range: 6, mult: 2.5, cd: 6 } },
+  bone_boar: { id: 'bone_boar', name: 'Костяной вепрь', icon: 'boar', model: 'undead_boar', scale: 1.0, type: 'magic', dmg: 0.75, aps: 0.9, range: 1.3, speed: 6.5 },
 };
-/** Pet the hunter starts with (its item: `pet_<id>` in WEAPONS). */
-export const START_PET = 'boar';
-/** Pet bite damage and size by item quality (RARITY index). */
-export const PET_RARITY = { dmg: [1, 1.15, 1.35, 1.6, 1.9, 2.3], scale: [1, 1.04, 1.08, 1.12, 1.17, 1.22] };
-// every pet is also a weapon-slot item: the hunter's class item (src/party.ts), in the bag, the gacha and copies
+/** Pet size by item quality (RARITY index); the bite grows with the item's own damage (quality, level, sharpening). */
+export const PET_RARITY = { scale: [1, 1.04, 1.08, 1.12, 1.17, 1.22] };
+// every pet is also a class-slot item under its own id (WeaponDef.pet, the hunter's `off`): in the bag, the gacha
+// and copies; it never swings, its damage is its own (weaponDamage of the item: `dmg` × quality, no hero power)
 for (const p of Object.values(PETS)) {
-  WEAPONS[`pet_${p.id}`] = {
-    id: `pet_${p.id}`, name: p.name, type: p.type, dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
+  WEAPONS[p.id] = {
+    id: p.id, name: p.name, type: p.type, dmgMul: p.dmg, aps: p.aps, shape: 'arc', arc: 0, range: 0,
     anim: 'SwordAttack', model: { human: p.model, orc: p.model }, icon: '🐾', pet: p.id,
   };
 }
@@ -332,6 +353,13 @@ export interface MobDef {
   dodge?: number;
   /** GLB animal (Creature): `model` names a .glb with its own rig and clips, weapon is always null. */
   creature?: boolean;
+  /** Creature only: names of the model's meshes that stay hidden (a murloc without its armour, tabard and shield). */
+  hide?: string[];
+  /**
+   * Fraction (0..1) of the damage the hero deals to this unit that comes straight back to the hero (no armour, dodge or
+   * shield applies). Used by the swamp thorn trees.
+   */
+  thorns?: number;
   /**
    * Static unit (src/staticbody.ts): `model` names a level model (a tree, a crate…); it stands on its spawn
    * point, never moves or attacks, and is hit, resists, drops and respawns like any mob.
@@ -339,6 +367,20 @@ export interface MobDef {
   static?: boolean;
   /** Static unit recolour: multiplies its materials. */
   tint?: number;
+  /** Static unit: its leaves repainted this colour (atmos `recolor`), the trunk keeps its own. */
+  crown?: number;
+  /**
+   * Static unit only: while it is being hit, a `mob` rises 2-4 m around it every `every` s and attacks the hero
+   * (no cap; they pay nothing and crumble when the unit breaks or the hero leaves).
+   */
+  summon?: { mob: string; every: number };
+  /**
+   * While the unit chases the hero, everyone inside `radius` m takes a tick of damage over time every second
+   * (`dmg` x the unit's damage, no dodge or crit; no slowdown). `color` tints the pulse ring.
+   */
+  aura?: { radius: number; dmg: number; color: number };
+  /** On its death every living unit of the same spawn with this MobDef id is healed to full. */
+  healsOnDeath?: string;
   /** Recolour: body textures are swapped by the table SKINS[skin] (src/assets.ts). */
   skin?: string;
   /** Speed (m/s) the hit shoves the hero back with. */
@@ -351,7 +393,7 @@ export interface MobDef {
   /** Permanent stats added straight to the hero on every kill (micro-bosses), in stat units: hp 500 = +500 HP. */
   bonus?: OrbReward;
   /** Fixed power orbs dropped on death (shown above the HP bar) — one stat only. */
-  reward: OrbReward;
+  reward: OrbReward | Record<never, never>;
   respawn: number; // seconds
   /** Below this HP fraction it throws a smoke bomb once per fight and a second one of it steps out (Game.callTwin). */
   twin?: number;
@@ -775,7 +817,7 @@ export const MOBS: Record<string, MobDef> = {
   // Rotten Swamp and Sand Dunes: only their bosses for now
   murloc_king: {
     id: 'murloc_king', name: 'Король мурлоков', creature: true,
-    model: { human: ['human_murloc', null], orc: ['human_murloc', null] },
+    model: { human: ['murloc_treefrog', null], orc: ['murloc_treefrog', null] },
     anim: 'SwordAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 2.4,
     ...foes('swamp'), reward: { hp: 20 }, respawn: 1200,
     // an epic weapon for every class
@@ -786,16 +828,17 @@ export const MOBS: Record<string, MobDef> = {
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
     },
   },
+  // the dunes boss is a big dragon now; the id stays 'sand_boar' (saved boss records are keyed by it)
   sand_boar: {
-    id: 'sand_boar', name: 'Песчаный вепрь', creature: true, push: 5,
-    model: { human: ['orc_boar', null], orc: ['orc_boar', null] },
-    anim: 'AxeAttack', hp: 16000, dmg: 37, aps: 0.6, range: 2.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 3,
+    id: 'sand_boar', name: 'Песчаный дракон', creature: true, push: 6,
+    model: { human: ['wild_dragon', null], orc: ['wild_dragon', null] },
+    anim: 'AxeAttack', hp: 16000, dmg: 37, aps: 0.6, range: 3.6, speed: 3.4, aggro: 6.5, regen: 0.03, scale: 0.6,
     ...foes('dunes'), reward: { speed: 20 }, respawn: 1200,
     // an epic helmet for every class
     drop: { kind: 'armor', def: 'plate_head', rarity: 3 },
     moreDrops: [{ kind: 'armor', def: 'hunter_head', rarity: 3 }, { kind: 'armor', def: 'mage_head', rarity: 3 }],
     boss: {
-      ...BOSS_BASE, titles: { human: 'Песчаный вепрь', orc: 'Песчаный вепрь' }, zone: 'dunes', unlocks: [],
+      ...BOSS_BASE, titles: { human: 'Песчаный дракон', orc: 'Песчаный дракон' }, zone: 'dunes', unlocks: [],
       slamRadius: 5, slamMul: 4.7, chaseMul: 2.6, phase2Dmg: 1.3,
     },
   },
@@ -808,25 +851,55 @@ export const MOBS: Record<string, MobDef> = {
     ...foes('dunes'), reward: { power: 1 }, respawn: 60,
   },
 };
-// Snow Pass look variants: the stats of the mob they copy on another elf body
+// Snow Pass look variants: the stats of the mob they copy on another elf body, with that body's own weapon
+const elfAnim = (weapon: string): WeaponAnim => (weapon === 'axe' ? 'AxeAttack' : 'SwordAttack');
 const elf = (base: string, id: string, name: string, body: string, weapon: string): MobDef =>
-  ({ ...MOBS[base], ...foes('peaks'), id, name, model: { human: [body, weapon], orc: [body, weapon] } });
-MOBS.elf_swordsman = elf('elf_sentinel', 'elf_swordsman', 'Эльф-мечник', 'elf_worker', 'sword_elf_warrior');
+  ({ ...MOBS[base], ...foes('peaks'), id, name, anim: elfAnim(weapon), model: { human: [body, weapon], orc: [body, weapon] } });
+MOBS.elf_swordsman = elf('elf_sentinel', 'elf_swordsman', 'Эльф-рубака', 'elf_worker', 'axe');
 MOBS.elf_cutthroat = elf('elf_assassin', 'elf_cutthroat', 'Эльф-головорез', 'elf_worker', 'dagger');
 MOBS.elf_gate_guard = elf('gate_guard', 'elf_gate_guard', 'Эльф-привратник', 'elf_warrior', 'sword_elf_warrior');
 // Snow Pass elites: each drops a rare (blue) piece of the warrior's armour
-const elfElite = (id: string, name: string, body: string, weapon: string, scale: number, reward: OrbReward, drop: ItemDrop): MobDef => ({
+const elfElite = (id: string, name: string, body: string, weapon: string, scale: number, reward: OrbReward, drop?: ItemDrop): MobDef => ({
   id, name, rank: 'elite', model: { human: [body, weapon], orc: [body, weapon] },
-  anim: 'SwordAttack', hp: 1600, dmg: 14, aps: 0.8, range: 1.8, speed: 3.3, aggro: 5.5, regen: 0.03, scale,
+  anim: elfAnim(weapon), hp: 1600, dmg: 14, aps: 0.8, range: 1.8, speed: 3.3, aggro: 5.5, regen: 0.03, scale,
   ...foes('peaks'), reward, respawn: 600, drop,
 });
-MOBS.elf_glovemaster = elfElite('elf_glovemaster', 'Эльф-дозорный', 'elf_assassin', 'sword_elf_warrior', 1.3, { power: 4 }, { kind: 'armor', def: 'plate_head', rarity: 2 });
+MOBS.elf_glovemaster = elfElite('elf_glovemaster', 'Эльф-дозорный', 'elf_assassin', 'dagger', 1.3, { power: 4 }, { kind: 'armor', def: 'plate_head', rarity: 2 });
 MOBS.elf_champion = elfElite('elf_champion', 'Эльф-латник', 'elf_warrior', 'sword_elf_warrior', 1.4, { hp: 6 }, { kind: 'armor', def: 'plate_chest', rarity: 2 });
-MOBS.elf_bladesmith = elfElite('elf_bladesmith', 'Эльф-следопыт', 'elf_worker', 'sword_elf_warrior', 1.35, { power: 4 }, { kind: 'armor', def: 'plate_legs', rarity: 2 });
-/** Faded grey-green crowns of the Snow Pass trees (multiply the elf tree texture: low green mutes it). */
-export const WITHERED = [0xd9c4cc, 0xccbcc4, 0xe0ccd2, 0xc4b4bc];
-MOBS.snow_tree_young = { ...MOBS.tree_young, id: 'snow_tree_young', name: 'Увядшее дерево', tint: WITHERED[0] };
-MOBS.snow_tree_birch = { ...MOBS.tree_birch, id: 'snow_tree_birch', name: 'Увядшая берёза', tint: WITHERED[1] };
+MOBS.elf_bladesmith = elfElite('elf_bladesmith', 'Эльф-следопыт', 'elf_worker', 'axe', 1.35, { power: 4 }, { kind: 'armor', def: 'plate_legs', rarity: 2 });
+// a normal mob on purpose, but keeps the elites' high HP: it must take long to kill
+MOBS.elf_archer = {
+  ...elfElite('elf_archer', 'Эльф-лучник', 'elf_assassin', 'bow_human_archer', 1.3, { speed: 3 }),
+  rank: undefined, range: MOBS.archer.range, aggro: MOBS.archer.aggro, shot: MOBS.archer.shot, behavior: { combat: 'kite' },
+};
+// Rocky Hills mummies: undead bodies in the tauren-coloured bandage skin (SKINS.mummy)
+MOBS.mummy_archer = {
+  ...MOBS.archer, ...foes('hills'), id: 'mummy_archer', name: 'Мумия-стрелок', skin: 'mummy',
+  model: { human: ['undead_archer', 'bow_undead_archer'], orc: ['undead_archer', 'bow_undead_archer'] },
+  hp: 500, dmg: 12, scale: 1.05, shot: { speed: 24, arrow: { human: 'arrow_undead_archer', orc: 'arrow_undead_archer' } },
+  behavior: { combat: 'kite' }, reward: { power: 2 }, respawn: 60,
+};
+// raised every 2 s by the summoning snag without a cap: weak on purpose, no reward
+MOBS.mummy_skeleton = {
+  ...MOBS.skeleton_warrior, ...foes('hills'), id: 'mummy_skeleton', name: 'Мумия-скелет', skin: 'mummy',
+  hp: 250, dmg: 8, reward: {}, respawn: 0,
+};
+// Rocky Hills banners (orc_banner, ids keep the old snag name): 1000/2000 HP like the forest trees
+const snag = (id: string, name: string, hp: number, reward: OrbReward, summon?: MobDef['summon']): MobDef => ({
+  ...MOBS.tree_birch, ...foes('hills'), id, name, hp, reward, summon,
+  model: { human: ['orc_banner', null], orc: ['orc_banner', null] }, scale: 0.5,
+});
+MOBS.snag = snag('snag', 'Знамя', 1000, { power: 2 });
+// must give a lot of stats: the mummies it raises only hinder killing it (stands among snag props, world.hillsSnags)
+MOBS.snag_mummy = snag('snag_mummy', 'Проклятое знамя', 2000, { power: 12 }, { mob: 'mummy_skeleton', every: 2 });
+/** Snowy grey-blue crowns of the Snow Pass trees, in the zone's snow greys (recolor: the leaves only, by their brightness). */
+export const SNOW_CROWNS = [0xd4dbe2, 0xc8d0d8, 0xdce1e6, 0xbfc8d0];
+MOBS.snow_tree_young = { ...MOBS.tree_young, id: 'snow_tree_young', name: 'Увядшее дерево', crown: SNOW_CROWNS[0] };
+MOBS.snow_tree_birch = { ...MOBS.tree_birch, id: 'snow_tree_birch', name: 'Увядшая берёза', crown: SNOW_CROWNS[1] };
+/** Orange autumn crowns of the grove trees (the grove's AUTUMN decor tints). */
+export const GROVE_CROWNS = [0xff8a30, 0xffb040, 0xe85a28, 0xd8402a, 0xffd050, 0xc86a20];
+MOBS.grove_tree_young = { ...MOBS.tree_young, id: 'grove_tree_young', name: 'Осеннее дерево', crown: GROVE_CROWNS[0] };
+MOBS.grove_tree_birch = { ...MOBS.tree_birch, id: 'grove_tree_birch', name: 'Осенняя берёза', crown: GROVE_CROWNS[2] };
 // Local mini-bosses of the outer lands: each carries a small version of its location boss's mechanic (src/bosses).
 MOBS.frost_warden = {
   ...MOBS.bandit_warlord, ...foes('peaks'), id: 'frost_warden', name: 'Ледяной страж', drop: undefined,
@@ -836,9 +909,65 @@ MOBS.grove_dryad = {
   ...MOBS.bandit_warlord, ...foes('grove'), id: 'grove_dryad', name: 'Дриада', drop: undefined, scale: 1.4,
   model: { human: ['elf_priestess', 'magic_ball'], orc: ['elf_priestess', 'magic_ball'] },
 };
+/** Murky crowns of the swamp trees (the swamp decor's MURK tints) and the thorn trees' dark plum. */
+export const SWAMP_CROWNS = [0x5e7030, 0x4e6229, 0x6a6e34, 0x445a26];
+export const THORN_CROWN = 0x6e3a52;
+MOBS.swamp_tree_young = { ...MOBS.tree_young, id: 'swamp_tree_young', name: 'Болотное дерево', crown: SWAMP_CROWNS[0] };
+MOBS.swamp_tree_birch = { ...MOBS.tree_birch, id: 'swamp_tree_birch', name: 'Болотная берёза', crown: SWAMP_CROWNS[2] };
+/**
+ * BALANCE NOTE: «Терновое дерево». All damage the player deals to it is returned to the player (`thorns: 1`): the tree
+ * must be beatable only when the hero has more HP than the tree (hp below is multiplied by ZONE_TIER.swamp like every swamp
+ * mob, and the hero's returned damage ignores armour, dodge and shields). Re-tune hp and reward together with the hero HP curve.
+ */
+MOBS.swamp_thorn_tree = {
+  ...MOBS.tree_birch, id: 'swamp_thorn_tree', name: 'Терновое дерево', crown: THORN_CROWN, thorns: 1,
+  hp: 600, reward: { hp: 6 },
+};
+// Swamp murlocs (src/world.ts swampMobs): human_murloc re-skinned as frogs, placeholder stats (no balance yet), ZONE_TIER.swamp multiplies them.
+const MURLOC_SWAMP = {
+  ...MOBS.murloc, ...foes('swamp'), hp: 800, dmg: 10, aps: 0.85, range: 1.5, speed: 3.4, aggro: 5, scale: 1.1, regen: 0.03, respawn: 60,
+};
+/** Green tree-frog murloc, only a sword (armour, tabard and shield hidden). */
+MOBS.murloc_green = {
+  ...MURLOC_SWAMP, id: 'murloc_green', name: 'Зелёный мурлок', hide: ['armour', 'tabard', 'shield'],
+  model: { human: ['murloc_treefrog', null], orc: ['murloc_treefrog', null] }, reward: { hp: 3 },
+};
+/** Blue dart-frog murloc, only a sword: STRONGER than the green one (leader of the shore packs). */
+MOBS.murloc_blue = {
+  ...MURLOC_SWAMP, id: 'murloc_blue', name: 'Синий мурлок', hide: ['armour', 'tabard', 'shield'],
+  model: { human: ['murloc_dartfrog', null], orc: ['murloc_dartfrog', null] }, hp: 1300, dmg: 15, speed: 3.6, scale: 1.2, reward: { power: 3 },
+};
+/** Blue murloc guard: sword, shield and armour (the whole model), the toughest of the three. */
+MOBS.murloc_blue_guard = {
+  ...MURLOC_SWAMP, id: 'murloc_blue_guard', name: 'Синий мурлок-страж',
+  model: { human: ['murloc_dartfrog', null], orc: ['murloc_dartfrog', null] }, hp: 1700, dmg: 14, speed: 3.3, scale: 1.25, reward: { power: 4 },
+};
+// Humans of the swamp: Alliance models for both player factions (stats of the forest bandits).
+MOBS.swamp_soldier = {
+  ...MOBS.bandit_fighter, ...foes('swamp'), id: 'swamp_soldier', name: 'Солдат', model: { human: ['soldier', 'sword_soldier'], orc: ['soldier', 'sword_soldier'] },
+};
+MOBS.swamp_bandit = {
+  ...MOBS.bandit_thug, ...foes('swamp'), id: 'swamp_bandit', name: 'Разбойник', model: { human: ['peasant', 'sword_soldier'], orc: ['peasant', 'sword_soldier'] },
+};
+// the elf assassin (calls a shadow twin, MobDef.twin) on a human body
+MOBS.swamp_assassin = {
+  ...MOBS.elf_assassin, ...foes('swamp'), id: 'swamp_assassin', name: 'Убийца', model: { human: ['human_archer', 'dagger'], orc: ['human_archer', 'dagger'] },
+};
+MOBS.swamp_archer = {
+  ...MOBS.archer, ...foes('swamp'), id: 'swamp_archer', name: 'Лучник', model: { human: ['human_archer', 'bow_human_archer'], orc: ['human_archer', 'bow_human_archer'] },
+  shot: { ...MOBS.archer.shot!, arrow: { human: 'arrow_human_archer', orc: 'arrow_human_archer' } }, behavior: { combat: 'kite' },
+};
+// Humans of the dunes: the faction opposite to the player's (MobDef.model is keyed by the PLAYER's faction)
+MOBS.dunes_warrior = { ...MOBS.bandit_fighter, ...foes('dunes'), id: 'dunes_warrior', name: 'Воин дюн' };
+MOBS.dunes_bandit = { ...MOBS.bandit_thug, ...foes('dunes'), id: 'dunes_bandit', name: 'Бандит дюн' };
+MOBS.dunes_archer = {
+  ...MOBS.archer, ...foes('dunes'), id: 'dunes_archer', name: 'Лучник дюн',
+  model: { human: ['orc_archer', 'bow_orc_archer'], orc: ['human_archer', 'bow_human_archer'] },
+  shot: { ...MOBS.archer.shot!, arrow: { human: 'arrow_orc_archer', orc: 'arrow_human_archer' } },
+};
 MOBS.murloc_tidehunter = {
   ...MOBS.bandit_warlord, ...foes('swamp'), id: 'murloc_tidehunter', name: 'Мурлок-приливник', drop: undefined, creature: true, scale: 1.6,
-  model: { human: ['human_murloc', null], orc: ['human_murloc', null] },
+  model: { human: ['murloc_treefrog', null], orc: ['murloc_treefrog', null] },
 };
 /** «Свирепый вожак» of the Rocky Hills: a tauren chieftain for both factions (a storm-shaman mini, src/bosses). */
 MOBS.tauren_warlord = {
@@ -860,7 +989,7 @@ MOBS.tauren_strider = landElite('hills', 'tauren_strider', 'Таурен-бег�
 MOBS.tauren_totem = landElite('hills', 'tauren_totem', 'Таурен-тотемщик', { ...TAUREN, model: both('orc_shaman', 'staff_orc_shaman') }, 1.4, { power: 4 }, { kind: 'weapon', def: 'staff_fire', rarity: 1 });
 // Autumn Grove: the hunter's rare set
 MOBS.elf_ranger = landElite('grove', 'elf_ranger', 'Эльф-егерь', { anim: 'SwordAttack', model: both('elf_assassin', 'dagger') }, 1.3, { speed: 3 }, { kind: 'armor', def: 'hunter_head', rarity: 2 });
-MOBS.elf_poacher = landElite('grove', 'elf_poacher', 'Эльф-браконьер', { anim: 'SwordAttack', model: both('elf_worker', 'sword_elf_warrior') }, 1.4, { hp: 6 }, { kind: 'armor', def: 'hunter_chest', rarity: 2 });
+MOBS.elf_poacher = landElite('grove', 'elf_poacher', 'Эльф-браконьер', { anim: 'AxeAttack', model: both('elf_worker', 'axe') }, 1.4, { hp: 6 }, { kind: 'armor', def: 'hunter_chest', rarity: 2 });
 MOBS.elf_tracker = landElite('grove', 'elf_tracker', 'Эльф-следопыт рощи', { anim: 'SwordAttack', model: both('elf_warrior', 'sword_elf_warrior') }, 1.35, { power: 4 }, { kind: 'armor', def: 'hunter_legs', rarity: 2 });
 // Rotten Swamp: the mage's rare set
 MOBS.murloc_oracle = landElite('swamp', 'murloc_oracle', 'Мурлок-оракул', { anim: 'SwordAttack', creature: true, model: both('human_murloc', null) }, 1.35, { regen: 2 }, { kind: 'armor', def: 'mage_head', rarity: 2 });
@@ -868,11 +997,22 @@ MOBS.murloc_brute = landElite('swamp', 'murloc_brute', 'Мурлок-громи�
 MOBS.murloc_runner = landElite('swamp', 'murloc_runner', 'Мурлок-бегун', { anim: 'SwordAttack', creature: true, model: both('human_murloc', null) }, 1.3, { speed: 3 }, { kind: 'armor', def: 'mage_legs', rarity: 2 });
 // Sand Dunes: epic chests and boots of every class
 MOBS.dune_raider = landElite('dunes', 'dune_raider', 'Пустынный налётчик', { anim: 'SwordAttack', model: { human: ['orc_warrior', 'sword_orc_warrior'], orc: ['soldier', 'sword_soldier'] } }, 1.4, { hp: 6 }, { kind: 'armor', def: 'plate_chest', rarity: 3 });
-MOBS.dune_hunter = landElite('dunes', 'dune_hunter', 'Пустынный охотник', { anim: 'SwordAttack', model: { human: ['human_archer', 'bow_human_archer'], orc: ['orc_archer', 'bow_orc_archer'] } }, 1.35, { power: 4 }, { kind: 'armor', def: 'hunter_chest', rarity: 3 });
-MOBS.dune_mystic = landElite('dunes', 'dune_mystic', 'Пустынный мистик', { anim: 'SwordAttack', model: both('orc_shaman', 'staff_orc_shaman') }, 1.35, { regen: 2 }, { kind: 'armor', def: 'mage_chest', rarity: 3 });
+MOBS.dune_hunter = landElite('dunes', 'dune_hunter', 'Пустынный охотник', { anim: 'SwordAttack', model: { human: ['orc_archer', 'bow_orc_archer'], orc: ['human_archer', 'bow_human_archer'] } }, 1.35, { power: 4 }, { kind: 'armor', def: 'hunter_chest', rarity: 3 });
+MOBS.dune_mystic = landElite('dunes', 'dune_mystic', 'Пустынный мистик', { anim: 'SwordAttack', model: { human: ['orc_shaman', 'staff_orc_shaman'], orc: ['mage', 'mage_staff'] } }, 1.35, { regen: 2 }, { kind: 'armor', def: 'mage_chest', rarity: 3 });
 MOBS.dune_nomad = landElite('dunes', 'dune_nomad', 'Кочевник', { anim: 'SwordAttack', model: { human: ['orc_grunt', 'sword_orc_warrior'], orc: ['human_knight', 'sword_human_knight'] } }, 1.4, { speed: 3 }, { kind: 'armor', def: 'plate_legs', rarity: 3 });
-MOBS.dune_scout = landElite('dunes', 'dune_scout', 'Пустынный разведчик', { anim: 'SwordAttack', model: { human: ['human_archer', 'bow_human_archer'], orc: ['orc_archer', 'bow_orc_archer'] } }, 1.3, { speed: 3 }, { kind: 'armor', def: 'hunter_legs', rarity: 3 });
-MOBS.dune_seer = landElite('dunes', 'dune_seer', 'Пустынный провидец', { anim: 'SwordAttack', model: both('orc_shaman', 'staff_orc_shaman') }, 1.3, { power: 4 }, { kind: 'armor', def: 'mage_legs', rarity: 3 });
+MOBS.dune_scout = landElite('dunes', 'dune_scout', 'Пустынный разведчик', { anim: 'SwordAttack', model: { human: ['orc_archer', 'bow_orc_archer'], orc: ['human_archer', 'bow_human_archer'] } }, 1.3, { speed: 3 }, { kind: 'armor', def: 'hunter_legs', rarity: 3 });
+MOBS.dune_seer = landElite('dunes', 'dune_seer', 'Пустынный провидец', { anim: 'SwordAttack', model: { human: ['orc_shaman', 'staff_orc_shaman'], orc: ['mage', 'mage_staff'] } }, 1.3, { power: 4 }, { kind: 'armor', def: 'mage_legs', rarity: 3 });
+// Dunes mini-boss pair (MINI_SPAWNER_OF / MINI_PAIR_OF): the dragon burns everyone near it, the mystic heals it to full when it dies
+// placeholders: ZONE_TIER dunes x32 applies on top of these stats, balance later
+MOBS.dune_mini_mystic = {
+  ...MOBS.dune_mystic, id: 'dune_mini_mystic', name: 'Мистик дюн', rank: 'elite', drop: undefined,
+  hp: 1600, dmg: 14, scale: 1.4, reward: { regen: 3 }, respawn: 900, healsOnDeath: 'dune_mini_dragon',
+};
+MOBS.dune_mini_dragon = {
+  ...MOBS.wild_dragon, id: 'dune_mini_dragon', name: 'Пламенный дракон', rank: 'mini',
+  ...foes('dunes'), hp: 3200, dmg: 20, range: 3, scale: 0.4, reward: { hp: 8 }, respawn: 900, bonus: { hp: 100 },
+  aura: { radius: 5.5, dmg: 0.25, color: 0xff7a2a },
+};
 
 export type OrbKind = 'power' | 'hp' | 'regen' | 'speed';
 /** Stats a mob / prop gives: exactly one stat ({ hp: 3 }), a second key is a type error. */
@@ -968,12 +1108,18 @@ export const ZONES: ZoneDef[] = [
   { id: 'forest', name: 'Лесная опушка', ground: 0x509a3a, ground2: 0x76b246, sky: 0x9ad8c8, fog: 0xb2dfcc, hemi: [0xc4d8ff, 0x6b8a4a], fogDensity: 0.008, mist: 0.08, mistColor: 0xf0fff4 },
   { id: 'cemetery', name: 'Старое кладбище', ground: 0x5a5698, ground2: 0x6c64aa, sky: 0x7c6ed0, fog: 0x9086d4, hemi: [0xbcb4ff, 0x4e4888], fogDensity: 0.012, mist: 0.3, mistColor: 0xddd4ff },
   // Placeholder locations around the forest (no content yet: ground, sky and fog only).
-  { id: 'peaks', name: 'Снежный перевал', ground: 0xdfe9f4, ground2: 0xf2f6fc, sky: 0xbfe2ff, fog: 0xe2f1ff, hemi: [0xd2e2ff, 0x8a9ab0], fogDensity: 0.009, mist: 0.12, mistColor: 0xffffff },
-  { id: 'swamp', name: 'Гнилое болото', ground: 0x587f3a, ground2: 0x6c9044, sky: 0x9cc8b0, fog: 0xa4ccb4, hemi: [0xc4dcec, 0x4a6a3a], fogDensity: 0.01, mist: 0.25, mistColor: 0xd8f0e0 },
+  // snow is kept a cool mid blue-grey with a dim cool sky: lit white snow and white fog burned the screen out
+  { id: 'peaks', name: 'Снежный перевал', ground: 0xb7c5d6, ground2: 0xcbd6e3, sky: 0x9cbbd8, fog: 0xabbfd2, hemi: [0xaabcd8, 0x627186], fogDensity: 0.007, mist: 0.06, mistColor: 0xd4dfeb },
+  { id: 'swamp', name: 'Гнилое болото', ground: 0x587f3a, ground2: 0x6c9044, sky: 0x9cc8b0, fog: 0xa4ccb4, hemi: [0xc4dcec, 0x4a6a3a], fogDensity: 0.01, mist: 0.45, mistColor: 0xd8f0e0 },
   { id: 'grove', name: 'Осенняя роща', ground: 0xcc8a30, ground2: 0xdea244, sky: 0xffd8a0, fog: 0xffe0bc, hemi: [0xe8d8e8, 0x8a6a3a], fogDensity: 0.007, mist: 0.06, mistColor: 0xfff0e0 },
-  { id: 'dunes', name: 'Песчаные дюны', ground: 0xe6c674, ground2: 0xf0d68e, sky: 0xa8dcff, fog: 0xfff0d0, hemi: [0xd4e4ff, 0xa08a5a], fogDensity: 0.006, mist: 0.03, mistColor: 0xffffff },
+  { id: 'dunes', name: 'Песчаные дюны', ground: 0xe6c674, ground2: 0xf0d68e, sky: 0xa8dcff, fog: 0xf0d8a8, hemi: [0xd4e4ff, 0xa08a5a], fogDensity: 0.011, mist: 0.03, mistColor: 0xffffff },
   { id: 'hills', name: 'Скалистые холмы', ground: 0x9a9286, ground2: 0xaca496, sky: 0xb0c8e0, fog: 0xc8d4e0, hemi: [0xccd8f0, 0x6a6458], fogDensity: 0.008, mist: 0.06, mistColor: 0xeef0f4 },
 ];
+
+/** How sunny each location is (0..1): soft shafts of sunlight (src/vfx.ts SunLight). */
+export const ZONE_SUN: Partial<Record<ZoneId, number>> = { forest: 1, grove: 1, dunes: 1, hills: 0.7, peaks: 0.5, swamp: 0.35 };
+/** Sun + sky light strength per location (1 if missing); also dims that location's ground mist. */
+export const ZONE_LIGHT: Partial<Record<ZoneId, number>> = { swamp: 0.55 };
 
 /**
  * Zone depth: packs further along the trail are bigger, tougher and pay more, so progress means
@@ -1089,24 +1235,114 @@ export const SPAWNERS: Partial<Record<ZoneId, SpawnerDef[]>> = {
   hills: ([
     'orc_laborer', 'orc_axeman', 'orc_laborer', 'orc_blademaster', 'orc_axeman', 'orc_laborer',
     'orc_blademaster', 'orc_axeman', 'orc_laborer', 'orc_blademaster', 'orc_axeman', 'orc_blademaster',
-  ]).map((id) => spawner(id)),
-  grove: ([
-    'elf_lumberjack', 'elf_assassin', 'elf_lumberjack', 'elf_sentinel', 'elf_assassin', 'elf_lumberjack',
-    'elf_sentinel', 'elf_assassin', 'elf_lumberjack', 'elf_sentinel', 'elf_assassin', 'elf_sentinel',
+    'mummy_archer', 'mummy_archer', 'mummy_archer',
   ]).map((id) => spawner(id)),
 };
-/** Snow Pass (world.snowMobs): sword packs on and beside its roads, lone assassins in the woods, guards past the hub gate. */
+/** Grove mobs (world.groveMobs): road camps, dragon + archer camps, lone bears with trees, attackable autumn trees. */
+export const GROVE_SPAWNERS = {
+  /** Camps along the grove road, alternating sides. */
+  warriors: [0, 1, 2, 3, 4, 5].map(() => pack(['elf_lumberjack', 'elf_sentinel'])),
+  /** Camps in the woods off the road (a campfire beside each). */
+  dragons: [0, 1, 2, 3, 4].map(() => pack(['wild_dragon', 'elf_archer'])),
+  /** Ambushes on the west coast: one hostile elf at a campfire, four hidden among trees that join in once it is pulled. */
+  ambushes: [0, 1, 2].map((): PackDef => ({
+    slots: [{ id: 'elf_assassin' }, ...[0, 1, 2, 3].map(() => ({ id: 'elf_assassin', behavior: { disposition: 'neutral', idle: 'stand' } as const }))],
+    link: 'social',
+  })),
+  /** Single bears, each with a clump of trees beside it. */
+  bears: [0, 1, 2, 3, 4, 5].map(() => spawner('wild_bear')),
+  /** Attackable trees, one at a time a road's width off the road. */
+  trees: ['grove_tree_young', 'grove_tree_birch', 'grove_tree_young', 'grove_tree_young', 'grove_tree_birch', 'grove_tree_young', 'grove_tree_birch', 'grove_tree_young']
+    .map((id) => spawner(id)),
+  /** More attackable trees at random spots in the woods. */
+  woodTrees: ['grove_tree_birch', 'grove_tree_young', 'grove_tree_birch', 'grove_tree_young'].map((id) => spawner(id)),
+};
+/** Swamp mobs (world.swampMobs): murloc packs, human pairs along the road, lone bandits, attackable trees. No other swamp mobs. */
+export const SWAMP_SPAWNERS = {
+  /** Shore packs: 4 green murlocs and a BLUE leader (the blue one is the stronger: balance it as the pack's leader). */
+  shore: [0, 1, 2].map(() => pack(['murloc_blue', 'murloc_green', 'murloc_green', 'murloc_green', 'murloc_green'])),
+  /** One trio of blue murlocs by each of the 3 most central murky pools. */
+  pools: [0, 1, 2].map(() => pack(['murloc_blue', 'murloc_blue', 'murloc_blue'])),
+  /** Pairs beside the swamp road, alternating sides: an armoured blue guard and a human soldier. */
+  roadPairs: [0, 1, 2, 3].map(() => pack(['murloc_blue_guard', 'swamp_soldier'])),
+  /** The guard of the helmet elite by the forest-swamp gate (joined into one pack with it). */
+  eliteGuard: spawner('murloc_blue_guard'),
+  /** Lone human bandits at empty spots of the swamp. */
+  bandits: [0, 1, 2].map(() => spawner('swamp_bandit')),
+  /** Lone human assassins at the emptiest spots left (placed after everything else). */
+  assassins: [0, 1, 2, 3].map(() => spawner('swamp_assassin')),
+  /** Green murloc pair inside the swamp by the swamp-dunes gate. */
+  duneGate: pack(['murloc_green', 'murloc_green']),
+  /** Attackable trees in the woods (5 plain). */
+  trees: ['swamp_tree_young', 'swamp_tree_birch', 'swamp_tree_young', 'swamp_tree_birch', 'swamp_tree_young'].map((id) => spawner(id)),
+  /** Thorn trees: they give all the damage dealt to them back to the hero (see MOBS.swamp_thorn_tree). */
+  thornTrees: [0, 1, 2].map(() => spawner('swamp_thorn_tree')),
+  /** At the user's map marks (slid onto walkable land, placed last): one more shore pack, a guard, lone archers, trees. */
+  marks: {
+    pack: { def: pack(['murloc_blue', 'murloc_green', 'murloc_green', 'murloc_green', 'murloc_green']), x: -70.8, z: 89.3 },
+    singles: ([
+      ['murloc_blue_guard', -28.8, 40.5],
+      ['swamp_archer', -67.4, 58.9], ['swamp_archer', -6.5, 35.7], ['swamp_archer', -51.5, 92.2],
+      ['swamp_tree_young', -24.4, 67.1], ['swamp_tree_birch', -30.7, 79.2],
+    ] as const).map(([id, x, z]) => ({ def: spawner(id), x, z })),
+  },
+};
+/** Dunes mobs (world.dunesMobs): animals off the roads, spar battle groups mid-location, road pairs, archers, an ambush by the entrance. */
+const SPAR = { disposition: 'neutral', idle: 'spar' } as const;
+const KITE = { combat: 'kite' } as const;
+export const DUNES_SPAWNERS = {
+  dragons: [0, 1, 2, 3].map(() => spawner('wild_dragon')),
+  lionPairs: [0, 1].map(() => pack(['wild_lion', 'wild_lion'])),
+  lions: [0, 1].map(() => spawner('wild_lion')),
+  /** Lone lions at the location's edges (coast side, far corners), placed last. */
+  edgeLions: [0, 1, 2].map(() => spawner('wild_lion')),
+  boars: [0, 1, 2].map(() => pack(['boar', 'boar', 'boar'])),
+  /** Staged fights: slot 0 (the dragon, the spar centre) against a ring of six warriors. */
+  battles: [0, 1].map((): PackDef => ({
+    slots: [{ id: 'wild_dragon', behavior: SPAR }, ...[0, 1, 2, 3, 4, 5].map(() => ({ id: 'dunes_warrior', behavior: SPAR }))],
+    link: 'social',
+  })),
+  roadPairs: [0, 1, 2, 3, 4].map(() => pack(['dunes_warrior', 'dunes_warrior'])),
+  archerPairs: [0, 1, 2].map((): PackDef => ({ slots: [{ id: 'dunes_archer', behavior: KITE }, { id: 'dunes_archer', behavior: KITE }], link: 'social' })),
+  escorts: [0, 1].map((): PackDef => ({ slots: [{ id: 'dunes_archer', behavior: KITE }, { id: 'dunes_warrior' }, { id: 'dunes_warrior' }], link: 'social' })),
+  /** Ambush between the two armour elites nearest the entrance: one hostile bandit at a campfire, four hidden among rocks. */
+  ambush: {
+    slots: [{ id: 'dunes_bandit' }, ...[0, 1, 2, 3].map(() => ({ id: 'dunes_bandit', behavior: { disposition: 'neutral', idle: 'stand' } as const }))],
+    link: 'social',
+  } as PackDef,
+};
+/** Trail spawners of the hills (indices in SPAWNERS.hills): neighbours along the road pulled into social pairs; the odd one stays single. */
+export const HILLS_PACKS: number[][] = [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12, 13]];
+/** Lions off the hills road (world.hillsBeasts): archer + lion packs and lone lions. */
+export const HILLS_LIONS = {
+  packs: [0, 1, 2, 3].map(() => pack(['mummy_archer', 'wild_lion'])),
+  lions: [0, 1, 2, 3, 4].map(() => spawner('wild_lion')),
+};
+/** More hills mobs at hand-picked spots (map drawing; slid onto walkable land): pairs and single ones. */
+export const HILLS_EXTRA = ([
+  [['orc_laborer'], -60.6, -92.7], [['orc_axeman', 'orc_axeman'], -74.9, -29.9],
+  [['orc_laborer'], -72.8, -98.6], [['orc_laborer'], -91.2, -76.6], [['orc_axeman'], -85.2, -79.5],
+  [['orc_axeman'], -71.8, -55.2],
+  [['orc_axeman'], -84.4, -89.2], [['orc_axeman', 'orc_laborer'], -71.3, -74.5], [['orc_laborer'], -99.3, -29.2],
+] as const).map(([ids, x, z]) => ({ def: pack([...ids]), x, z }));
+/** More plain banners at hand-picked spots (world.hillsBeasts, after HILLS_EXTRA). */
+export const HILLS_BANNERS = ([[-70.3, -106.2], [-79.9, -93.3], [-96.1, -24.4]] as const).map(([x, z]) => ({ def: spawner('snag'), x, z }));
+/** Hills road snags (world.hillsSnags): 3 plain, 2 summoning, spread along LAND_TRAILS[0]. */
+export const HILLS_SNAGS = ['snag', 'snag_mummy', 'snag', 'snag_mummy', 'snag'].map((id) => spawner(id));
+/** Snow Pass (world.snowMobs): packs at hand-picked spots, lone assassins in the woods, guards past the hub gate. */
 export const PEAKS_SPAWNERS = {
-  packs: [
-    ['elf_sentinel', 'elf_swordsman', 'elf_swordsman'], ['elf_swordsman', 'elf_lumberjack', 'elf_sentinel'], ['elf_sentinel', 'elf_swordsman', 'elf_swordsman'],
-    ['elf_lumberjack', 'elf_sentinel', 'elf_swordsman'], ['elf_swordsman', 'elf_sentinel', 'elf_lumberjack'], ['elf_sentinel', 'elf_swordsman', 'elf_lumberjack'],
-    ['elf_swordsman', 'elf_sentinel', 'elf_sentinel'],
-  ].map((ids) => pack(ids)),
+  /** Packs at hand-picked centres (map drawing; slid onto walkable land). */
+  packs: ([
+    [['elf_sentinel', 'elf_swordsman', 'elf_swordsman'], -4.9, -119.8], [['elf_swordsman', 'elf_lumberjack', 'elf_sentinel'], -0.4, -143.6],
+    [['elf_sentinel', 'elf_swordsman', 'elf_swordsman'], 14.5, -153.2], [['elf_swordsman', 'elf_sentinel', 'elf_lumberjack'], 40, -156.8],
+    [['elf_sentinel', 'elf_swordsman', 'elf_lumberjack'], 55.2, -159.5],
+    [['elf_cutthroat', 'wild_direwolf'], 23.4, -139.8], [['elf_cutthroat', 'wild_direwolf'], 20.1, -123.1],
+  ] as const).map(([ids, x, z]) => ({ def: pack([...ids]), x, z })),
   assassins: ['elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin', 'elf_cutthroat', 'elf_assassin']
     .map((id) => spawner(id)),
-  guards: pack(['elf_gate_guard', 'elf_gate_guard', 'elf_gate_guard']),
+  guards: pack(['elf_gate_guard', 'elf_gate_guard']),
   /** Elites at hand-picked spots (map drawing; slid onto walkable land). */
-  elites: ([['elf_glovemaster', -14, -135], ['elf_champion', 59.5, -148], ['elf_bladesmith', 13, -115.5]] as const)
+  elites: ([['elf_glovemaster', -14, -135], ['elf_champion', 59.5, -148], ['elf_bladesmith', 39.5, -113.5], ['elf_archer', 47, -144.5]] as const)
     .map(([id, x, z]) => ({ def: spawner(id), x, z })),
   /** Wolves and bears wandering alone through the empty woods. */
   beasts: ['wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_bear', 'wild_direwolf', 'wild_bear', 'wild_direwolf']
@@ -1116,6 +1352,11 @@ export const PEAKS_SPAWNERS = {
   /** Attackable trees, one at a time a road's width off the roads. */
   trees: ['snow_tree_young', 'snow_tree_birch', 'snow_tree_young', 'snow_tree_young', 'snow_tree_birch', 'snow_tree_young', 'snow_tree_birch', 'snow_tree_young']
     .map((id) => spawner(id)),
+  /** More attackable trees at hand-picked spots in the woods. */
+  woodTrees: ([['snow_tree_young', -15.9, -123.9], ['snow_tree_birch', 8, -127.7], ['snow_tree_young', 52.1, -101]] as const)
+    .map(([id, x, z]) => ({ def: spawner(id), x, z })),
+  /** Joins the east mini-boss (LAND_BOSSES peaks minis[0]) as its squad. */
+  wardenGuard: spawner('elf_assassin'),
 };
 /** «Свирепый вожак» mini-bosses of the cemetery and the outer lands. */
 export const MINI_SPAWNER = spawner('bandit_warlord');
@@ -1133,11 +1374,15 @@ export const LAND_ELITES: Partial<Record<ZoneId, { def: SpawnerDef; x: number; z
 /** Zones whose mini-bosses are a local variant instead of «Свирепый вожак». */
 export const MINI_SPAWNER_OF: Partial<Record<ZoneId, SpawnerDef>> = {
   hills: spawner('tauren_warlord'), peaks: spawner('frost_warden'), grove: spawner('grove_dryad'), swamp: spawner('murloc_tidehunter'),
+  dunes: spawner('dune_mini_dragon'),
 };
+/** A mini-boss's partner standing next to it in one social pack (shares the mini's saved id `mini:<zone>:<i>`). */
+export const MINI_PAIR_OF: Partial<Record<ZoneId, SpawnerDef>> = { dunes: spawner('dune_mini_mystic') };
 /**
  * Spawn presets: the words for placing mobs on a location (World.addPack places a preset's pack).
  * Unit kinds outside packs, by MobDef:
  * - tree / object: `static` — stands, never attacks, gives stats (reward) when broken;
+ * - summoning tree: `static` + `summon` — while it is hit, a mob rises beside it every few seconds (it must give a lot of stats);
  * - mob: plain MobDef — fights, gives stats;
  * - loot mob (elite): `rank: 'elite'` + `drop` — its item on every kill;
  * - mini-boss: `rank: 'mini'` — permanent `bonus` stats per kill;
@@ -1190,9 +1435,24 @@ export const SPAWN_PRESETS = {
       link: 'social',
     },
   },
+  /** Three melee and an archer stand in a row (lineSpots) until the hero comes near, then fight as usual. */
+  gate_line: {
+    name: 'Строй у ворот',
+    line: true,
+    pack: {
+      slots: [
+        { id: 'orc_blademaster', behavior: { idle: 'stand' } }, { id: 'orc_blademaster', behavior: { idle: 'stand' } },
+        { id: 'mummy_archer', behavior: { idle: 'stand', combat: 'kite' } },
+      ],
+      link: 'social',
+    },
+  },
 } satisfies Record<string, SpawnPreset>;
-/** `horde`: a big pack the debug teleport drops the hero into the middle of — standing in a ring or scattered at random. */
-export interface SpawnPreset { name: string; pack: PackDef; horde?: 'ring' | 'scatter' }
+/**
+ * `horde`: a big pack the debug teleport drops the hero into the middle of — standing in a ring or scattered at random.
+ * `line`: the slots stand in a row, in slot order, facing one way.
+ */
+export interface SpawnPreset { name: string; pack: PackDef; horde?: 'ring' | 'scatter'; line?: boolean }
 export type SpawnPresetId = keyof typeof SPAWN_PRESETS;
 
 /** Round the gloves elite (world.glovesGuards): two bandit trios in the trees. */
@@ -1235,6 +1495,10 @@ export const CEMETERY_AREAS: { id: 'village' | 'chapel' | 'field'; name: string;
   { id: 'chapel', name: 'Руины часовни', deg: 70, d: 99, r: 10, pin: 'cursed_archer' },
   { id: 'field', name: 'Старое поле могил', deg: 113, d: 72, r: 11, pin: 'gravedigger' },
 ];
+/** Trail spawners of the cemetery (indices in SPAWNERS.cemetery) pulled together into one pack each, at their mean spot. */
+export const CEMETERY_PACKS: number[][] = [[6, 8], [10, 12], [16, 17, 18]];
+/** Boar pair by the old grave field, at a hand point (x, z). */
+export const CEMETERY_BOARS = { pack: pack(['undead_boar', 'undead_boar']), at: [72, -73] as [number, number] };
 export const LEASH = 15;
 
 /**

@@ -24,13 +24,11 @@ export interface ClassDef {
   off: string[];
   /** Name of slot 2. */
   offName: string;
-  /** Slot 2 holds a pet item (WeaponDef.pet → config PETS): it runs beside the hero instead of being held. */
-  pet?: boolean;
   /** Slot 2 always holds the kit's `left` item: it never drops and is never swapped or taken off. */
   fixedOff?: boolean;
   /**
-   * What the class holds when it first takes the field, and extra items put into the bag then (src/save.ts classKit);
-   * missing = the faction's start weapon.
+   * The class's start gear (src/save.ts classKit), given when the class opens: `hand` in the weapon slot, `left` in the
+   * class slot and `bag` into the bag — all three of its weapons, common. Missing = the faction's start weapon.
    */
   kit?: { hand: string; left?: string; bag?: string[] };
   /**
@@ -43,19 +41,21 @@ export interface ClassDef {
 /** Order = order of the buttons, bottom-right of the HUD. */
 export const CLASSES: Record<HeroClass, ClassDef> = {
   warrior: {
-    name: 'Воин', icon: 'shield', color: ['#ff7a6a', '#c0352c'], key: 'Digit1',
-    weapons: ['sword', 'axe', 'hammer', 'polearm'], off: ['shield_tower', 'shield_buckler', 'shield_spiked'], offName: 'Щит',
+    name: 'Воин', icon: 'cls_warrior', color: ['#ff7a6a', '#c0352c'], key: 'Digit1',
+    // all three shields: each has its role (docs/features/gacha-gear/concept.md), the gacha gives any of them
+    weapons: ['sword', 'axe', 'hammer'], off: ['shield_tower', 'shield_buckler', 'shield_spiked'], offName: 'Щит',
+    kit: { hand: 'sword', left: 'shield_spiked', bag: ['axe', 'hammer'] },
   },
   hunter: {
-    name: 'Охотник', icon: 'bow', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
+    name: 'Охотник', icon: 'cls_hunter', color: ['#8fe05a', '#3f9a2c'], key: 'Digit2',
     model: { human: 'human_archer', orc: 'orc_archer' },
-    weapons: ['bow'], off: Object.keys(PETS).map((p) => `pet_${p}`), offName: 'Питомец', pet: true, kit: { hand: 'bow', left: 'pet_boar' }, locked: true,
+    weapons: ['bow', 'polearm', 'gun'], off: Object.keys(PETS), offName: 'Питомец', kit: { hand: 'bow', left: 'boar', bag: ['polearm', 'gun'] }, locked: true,
   },
   mage: {
-    name: 'Маг', icon: 'staff', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
+    name: 'Маг', icon: 'cls_mage', color: ['#8fb2ff', '#4b5fd6'], key: 'Digit3',
     model: { human: 'mage', orc: 'orc_shaman' },
     weapons: ['staff_fire', 'staff_ice', 'staff_wind'], off: ['orb_fury', 'orb_vigor', 'orb_swift', 'orb_ward', 'orb_fortune', 'orb_demon'], offName: 'Сфера',
-    kit: { hand: 'staff_fire', left: 'orb_fury' }, locked: true,
+    kit: { hand: 'staff_fire', left: 'orb_fury', bag: ['staff_ice', 'staff_wind'] }, locked: true,
   },
 };
 

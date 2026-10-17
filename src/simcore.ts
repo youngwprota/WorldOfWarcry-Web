@@ -3,8 +3,8 @@
 // in a worker) both run it.
 import * as CONFIG from './config';
 import {
-  ATTACK_HIT, BREAKABLES, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
-  PETS, PET_RARITY, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, START_PET, STAVES, WEAPONS, depthMul, mobImpact, packUnits, mobRank, tokenChance as zoneTokenChance,
+  ATTACK_HIT, BREAKABLES, CEMETERY_BOARS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
+  PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, depthMul, mobImpact, packUnits, mobRank, tokenChance as zoneTokenChance,
   type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
 import { addStat, heroDps, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, heroStats, type HeroBuild } from './balance';
@@ -12,7 +12,7 @@ import { ARMOR, armorStats, dropItem, itemClass, makeItem, sameItem, weaponDamag
 import { CLASSES, CLASS_IDS, classSlot, kitOf, weaponClass, type HeroClass } from './party';
 import { pull } from './gacha';
 import {
-  ARENA, BOSS_GUARDS, FORT, FOREST_PINS, GATE, GATE_GUARDS, GLOVES_PACKS, LAND_BOSSES, MID_UV, SPAWN, campToFortAt, ringSpots, inCamp, pathAt, pathDist,
+  ARENA, BOSS_GUARDS, FORT, FOREST_PINS, GATE, GATE_GUARDS, GLOVES_PACKS, GLOVES_SPREAD, LAND_BOSSES, MID_UV, SPAWN, campToFortAt, ringSpots, inCamp, pathAt, pathDist,
   progressAt, walkable, zoneIdAt,
 } from './island';
 
@@ -151,7 +151,7 @@ function buildUnits(): Unit[] {
   const gloveSpots: Spot[] = [];
   for (let i = 0; i < GLOVES_BANDITS.length; i++) {
     gloves.push(...packUnits(GLOVES_BANDITS[i]));
-    for (const q of ringSpots(GLOVES_PACKS[i][0], GLOVES_PACKS[i][1], GLOVES_BANDITS[i].slots.length, 1.6, Math.PI / 2)) gloveSpots.push(spotAt(q.x, q.z));
+    for (const q of ringSpots(GLOVES_PACKS[i][0], GLOVES_PACKS[i][1], GLOVES_BANDITS[i].slots.length, GLOVES_SPREAD, Math.PI / 2)) gloveSpots.push(spotAt(q.x, q.z));
   }
   add('mob', gloves, gloveSpots, 'forest', 'gloves', 0.3);
   // static trees: World picks trees 4–12 m off the trail, well apart — spread along it here
@@ -159,6 +159,7 @@ function buildUnits(): Unit[] {
   add('mob', packUnits(GUARD_PACKS.boss_guard), BOSS_GUARDS.map((p) => spotAt(p.x, p.z)), 'forest', 'bguard', false);
   add('mob', packUnits(GUARD_PACKS.gate_guard), GATE_GUARDS.map((p) => spotAt(p.x, p.z)), 'forest', 'gguard', false);
   add('mob', SPAWNERS.cemetery ?? [], placeAlong(cemRange, SPAWNERS.cemetery ?? [], 'cemetery', packs), 'cemetery', 'cemetery');
+  add('mob', packUnits(CEMETERY_BOARS.pack), ringSpots(...CEMETERY_BOARS.at, 2, 1.8).map((p) => spotAt(p.x, p.z)), 'cemetery', 'cboars', 0.5);
   // the fort's real tower (world.buildFort): a breakable turret south of the boss (its arrows at the hero are left out)
   const tower = OPT.faction === 'human' ? 'fort_tower_orc' : 'fort_tower_human';
   add('prop', [{ unit: 'prop', id: tower }], [spotAt(FORT.x - 1, FORT.z + 6)], 'forest', 'fort_tower', false);
@@ -229,9 +230,8 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   const hands = h.weapons.map((it, i) => ({ i, it, cd: 0.25 + i * 0.1 }));
   // class extras (game.ts staffHit / iceHit / throwGust / updatePet), single target: the hunter's pet bites what he
   // shoots; the fire staff burns (+vulnerability), the ice staff freezes every Nth hit, the wind staff throws an orb
-  const petIt = h.weapons[1] && WEAPONS[h.weapons[1].def].pet ? h.weapons[1] : null;
-  const pet = petIt ? PETS[WEAPONS[petIt.def].pet!] : CLASSES[h.cls].pet ? PETS[START_PET] : null;
-  const petMul = PET_RARITY.dmg[petIt?.rarity ?? 0];
+  const petItem = h.weapons[1] && WEAPONS[h.weapons[1].def].pet ? h.weapons[1] : null;
+  const pet = petItem ? PETS[WEAPONS[petItem.def].pet!] : null;
   let petCd = 0.6;
   let pounceCd = 0; // the lion opens with a leap (PetDef.pounce), then every pounce.cd s
   const B = STAVES.fire.burn;
@@ -274,7 +274,7 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
   /** One swing of a hand (counters too). */
   const strike = (it: Item) => {
     const w = WEAPONS[it.def];
-    const dmg = hit(it, 1);
+    const dmg = hit(it, CONFIG.attackMul(w)); // a gun's volley: its pellets that hit (PELLET_HIT)
     if (w.staff === 'fire' && dmg > 0) { if (burn <= 0) burnTick = B.tick; burn = B.time; burnDps = dmg * B.dps; }
     if (w.staff === 'ice' && dmg > 0) {
       const f = STAVES.ice.freeze;
@@ -304,16 +304,16 @@ function fight(h: Hero, foe: Foe, mean = false, limit = 400): FightOut {
       swings++;
       strike(hd.it);
     }
-    // the pet: always on the target (slams do not stop it), × the plain blow of the weapon, no crits or dodges
+    // the pet: always on the target (slams do not stop it), its item's own damage (no hero power), no crits or dodges
     // (the bear's cleave is not modelled: the fights here are one on one)
-    if (pet && h.weapons[0]) {
+    if (pet && petItem) {
       petCd -= DT;
       pounceCd -= DT;
       if (petCd <= 0) {
         petCd += 1 / (pet.aps * st.haste);
         const leap = pet.pounce && pounceCd <= 0 ? pet.pounce.mult : 1;
         if (leap > 1) pounceCd = pet.pounce!.cd;
-        const dmg = weaponDamage(h.weapons[0], st.power, st.powerMul) * pet.dmg * petMul * leap * RESIST_MULT[d.resist[pet.type] ?? 'normal'] * roll() * vuln();
+        const dmg = weaponDamage(petItem) * leap * RESIST_MULT[d.resist[WEAPONS[petItem.def].type] ?? 'normal'] * roll() * vuln();
         mhp -= dmg;
         hp = Math.min(st.maxHp, hp + dmg * st.leech);
       }
@@ -369,7 +369,7 @@ const VALUE: Record<StatId, number> = { power: 1, hp: 0.35, regen: 1.5, speed: 0
 const rewardOf = (u: Unit): OrbReward => {
   if (u.kind === 'prop') return BREAKABLES[u.def].reward as OrbReward;
   const d = MOBS[u.def];
-  if (d.boss || d.rank) return d.reward;
+  if (d.boss || d.rank) return d.reward as OrbReward;
   const k = depthMul(u.zone, u.depth).reward;
   const [s, n] = Object.entries(d.reward)[0] as [OrbKind, number];
   return { [s]: Math.round(n * k) } as unknown as OrbReward;
@@ -796,7 +796,7 @@ export function bench(): BenchRow[] {
     let sum = 0;
     for (let i = 0; i < n; i++) {
       rs = i + 1;
-      const cls = weaponClass(a) ?? 'warrior'; // the hunter's bow comes with his pet
+      const cls = weaponClass(a) ?? 'warrior'; // (the hunter's pet is his class item: `b`, none for a lone bow)
       const h: Hero = {
         faction: 'human', src: { debug: { hp: 1e6, regen: -HERO.regen } }, pct: {}, equip: {}, hp: 1e6, bag: [], pulls: 0, pity: 0, spot: { s: 0, off: 0 },
         weapons: [makeItem('weapon', a, 2, 1), b ? makeItem('weapon', b, 2, 1) : null], cls, classes: [cls], kits: {} as Hero['kits'], gear: {} as Hero['gear'],
@@ -806,7 +806,7 @@ export function bench(): BenchRow[] {
     return sum / n;
   };
   const rows: BenchRow[] = [];
-  for (const w of Object.keys(WEAPONS)) if (!WEAPONS[w].guard && !WEAPONS[w].orb) rows.push({ label: w, ttk: ttk(w, null) });
+  for (const w of Object.keys(WEAPONS)) if (!WEAPONS[w].guard && !WEAPONS[w].orb && !WEAPONS[w].pet) rows.push({ label: w, ttk: ttk(w, null) });
   for (const s of Object.keys(WEAPONS)) if (WEAPONS[s].guard) rows.push({ label: `sword+${s}`, ttk: ttk('sword', s) });
   if (WEAPONS.staff_fire) for (const o of Object.keys(WEAPONS)) if (WEAPONS[o].orb) rows.push({ label: `staff_fire+${o}`, ttk: ttk('staff_fire', o) });
   return rows;

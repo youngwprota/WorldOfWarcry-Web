@@ -11,10 +11,13 @@ import { ATTACK_HIT, type AttackAnim } from './config';
  */
 interface CreatureRig { stride: number; upperRoot: string; shadow: number; ram: boolean }
 const BOAR: CreatureRig = { stride: 0.72, upperRoot: 'spine_5', shadow: 1.9, ram: true };
+const MURLOC: CreatureRig = { stride: 0.39 * 1.3, upperRoot: 'Spine_1', shadow: 1.1, ram: false };
 const RIGS: Record<string, CreatureRig> = {
   orc_boar: BOAR,
   undead_boar: BOAR,
-  human_murloc: { stride: 0.39 * 1.3, upperRoot: 'Spine_1', shadow: 1.1, ram: false },
+  human_murloc: MURLOC,
+  murloc_dartfrog: MURLOC,
+  murloc_treefrog: MURLOC,
   // WoW creatures retextured to the game palette (wow.export glTF → _warcry pipeline). The attack moves the whole
   // body, so it plays on the full skeleton; strides measured from the planted feet of the walk clip.
   wild_bear: { stride: 2.5, upperRoot: 'bearskindrkbrown_skeleton', shadow: 1.6, ram: false },
@@ -84,7 +87,8 @@ export class Creature {
   private rig: CreatureRig;
   private hitAt: number;
 
-  constructor(modelName: string, scale = 1) {
+  /** `hide`: names of the model's meshes to leave out (gear of a murloc). */
+  constructor(modelName: string, scale = 1, hide: string[] = []) {
     this.scale = scale;
     this.hitAt = ATTACK_HIT[modelName + ':attack'];
     this.rig = RIGS[modelName];
@@ -92,6 +96,7 @@ export class Creature {
     const { model, clips } = assets.cloneCreature(modelName);
     this.model = model;
     this.model.scale.setScalar(scale);
+    for (const n of hide) this.model.getObjectByName(n)!.visible = false;
     this.root.add(this.model);
     this.root.add(blobShadow(this.rig.shadow * scale));
     const cache = new Map<THREE.Material, THREE.MeshStandardMaterial>();

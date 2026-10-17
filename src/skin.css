@@ -34,14 +34,22 @@ html, body { background: radial-gradient(circle at 50% 30%, #6e4527, #1e1008); }
 .xbtn::after { content: ''; position: absolute; left: 50%; top: 44%; width: 30px; height: 32px; transform: translate(-50%, -50%); background: url('/assets/ui/i-close.png') center / contain no-repeat; }
 .card-head .xbtn::after { width: 26px; height: 28px; }
 
-/* round HUD buttons: dark circle for settings */
-.round-btn, .round-btn.bag { border: 0; box-shadow: none; border-radius: 0; background: url('/assets/ui/t-round.png') center / contain no-repeat; }
+/* round HUD buttons: the settings plate (brown, darker shade along the bottom, ink rim) */
+.round-btn, .round-btn.bag { border: 2.7px solid #000; border-radius: 50%; background: #5c3a21; box-shadow: inset 0 -5px 0 #422917, 0 5px 0 #0004; }
 .round-btn .svgi { width: 60%; height: 60%; margin-top: -6%; }
 /* the bag and the forge: just their icons, no plate, both the same size */
-#btn-bag, #btn-gacha { width: 63px; height: 63px; background: none; }
+#btn-bag, #btn-gacha { width: 63px; height: 63px; background: none; border: 0; box-shadow: none; }
 /* the forge right above the bag (centred at 50%), a gap for the label between them */
 #btn-gacha { top: calc(50% - 31.5px - 63px - 14px); }
 #btn-bag .svgi, #btn-gacha .svgi { width: 54px; height: 54px; margin-top: -8px; filter: drop-shadow(0 3px 0 var(--ink)); }
+/* the bag art has a thin outline: thicken it to match the forge */
+#btn-bag .svgi { width: 52px; height: 52px; filter: drop-shadow(1px 0 0 var(--ink)) drop-shadow(-1px 0 0 var(--ink)) drop-shadow(0 1px 0 var(--ink)) drop-shadow(0 -1px 0 var(--ink)) drop-shadow(0 3px 0 var(--ink)); }
+/* class switch: the settings plate, the class icon on it; the active one glows instead of a ring */
+/* the settings plate redrawn in the class colours: ink rim, light fill, its dark shade along the bottom, a soft drop */
+#party .cls, :is(.eq-cls, .squad) .cls { --shade: inset 0 -5px 0 color-mix(in srgb, var(--c2), #000 25%), 0 5px 0 #0004; border: 2.7px solid #000; border-radius: 50%; background: color-mix(in srgb, var(--c1), var(--c2)); box-shadow: var(--shade); }
+#party .cls .svgi, :is(.eq-cls, .squad) .cls .svgi { margin-top: -6%; }
+/* the chosen one keeps its shade and drop, a gold ring added round it */
+#party .cls.on, :is(.eq-cls, .squad) .cls.on { filter: none; box-shadow: var(--shade), 0 0 0 3px #ffe04a, 0 0 14px #ffe04acc; }
 .round-btn.nav span { bottom: 2px; left: 50%; right: auto; transform: translateX(-50%); font-size: 14px; }
 .round-btn:active { transform: translateY(2px); }
 #btn-bag:active { transform: translateY(calc(-50% + 2px)); }
@@ -175,6 +183,10 @@ html, body { background: radial-gradient(circle at 50% 30%, #6e4527, #1e1008); }
   font-size: 28px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s);
 }
 .eq-rot button:active { transform: translateY(2px); }
+.eq-cls { position: absolute; right: 4px; top: 4px; display: flex; flex-direction: column; gap: 8px; }
+:is(.eq-cls, .squad) .cls { width: 46px; height: 46px; padding: 0; filter: saturate(0.45) brightness(0.8); }
+:is(.eq-cls, .squad) .cls.locked { filter: grayscale(1) brightness(0.6); opacity: 0.7; }
+:is(.eq-cls, .squad) .cls:active { transform: translateY(2px); }
 .eq-w { grid-column: 2; grid-row: 2; display: flex; justify-content: center; gap: 18px; }
 .eq-doll .cell { width: 88px; height: 88px; }
 .eq-doll .cell .wtag { font-size: 17px; bottom: -17px; padding: 1px 7px; }
@@ -216,7 +228,10 @@ html, body { background: radial-gradient(circle at 50% 30%, #6e4527, #1e1008); }
 /* ---------- HUD ---------- */
 #equipbar { background: none; }
 .pill, #buffs div, .bw-time, #pro-quest { background: #3b2414e6; border: 3px solid var(--ink); box-shadow: inset 0 0 0 2px #ffffff14; }
-#minimap, #bigmap { border: 4px solid var(--ink); box-shadow: 0 0 0 5px #c48a52, 0 0 0 6px #e6b57e, 0 0 0 10px var(--ink), 0 6px 0 10px #0005; }
+#minimap, #bigmap { border: 3px solid var(--ink); box-shadow: 0 0 0 6px #5c3a21, 0 0 0 9px var(--ink), 0 3px 0 9px var(--ink); }
+/* map zoom: the settings plate (.round-btn) with a white sign */
+.bm-tools button { border: 2.7px solid #000; border-radius: 50%; background: #5c3a21; box-shadow: inset 0 -5px 0 #422917, 0 5px 0 #0004; color: #fff; font-size: 26px; line-height: 1; padding: 0 0 4px; text-shadow: var(--stroke-s); }
+.bm-tools button:active { transform: translateY(2px); }
 #zone-foes .foe { border-color: var(--ink); }
 #combo i { border-color: var(--ink); background: #3b2414cc; }
 #combo i.on { background: radial-gradient(circle at 35% 35%, #fff, #ffd23f); }
@@ -238,3 +253,22 @@ html, body { background: radial-gradient(circle at 50% 30%, #6e4527, #1e1008); }
 
 /* pack PNG icons sit inside the same boxes as the vector ones */
 img.svgi.png { object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
+
+/*
+ * Loading screen: the key art (logo included) full-bleed, a gold progress bar at the bottom. "Live photo": the art
+ * slowly pushes in (.art), the shield clash and the logo glow in pulses (.glow), sparks fly up (canvas, src/loadfx.ts).
+ */
+#loading { justify-content: flex-end; padding-bottom: 8%; box-sizing: border-box; overflow: hidden; background: #2a2d38; }
+#loading .art { position: absolute; inset: 0; background: url('/assets/ui/loading.jpg') center / cover no-repeat; transform-origin: 53% 42%; animation: load-push 24s ease-out forwards; }
+@keyframes load-push { from { transform: scale(1) translate(0, 0); } to { transform: scale(1.08) translate(-1.2%, 0.8%); } }
+/* light spots over the art (they push in with it): additive, breathing */
+#loading .glow { position: absolute; border-radius: 50%; mix-blend-mode: screen; pointer-events: none; }
+#loading .glow.clash { left: 53%; top: 42%; width: 46%; aspect-ratio: 1; translate: -50% -50%; background: radial-gradient(#fff6c8 0%, #ffcf4acc 18%, #c76bff55 45%, transparent 70%); animation: load-clash 2.6s ease-in-out infinite; }
+#loading .glow.logo { left: 50%; top: 12%; width: 92%; height: 15%; translate: -50% -50%; border-radius: 40%; background: radial-gradient(closest-side, #ffd46a66, transparent); animation: load-logo 4.2s ease-in-out infinite; }
+@keyframes load-clash { 0%, 100% { opacity: 0.35; scale: 0.85; } 12% { opacity: 0.95; scale: 1.08; } 40% { opacity: 0.55; scale: 0.95; } }
+@keyframes load-logo { 0%, 100% { opacity: 0.15; } 50% { opacity: 0.6; } }
+#loading .sparks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; }
+#loading .bar, #loading .pct { position: relative; }
+#loading .bar { width: 72%; height: 22px; margin: 0; border: 3px solid var(--ink); border-radius: 12px; background: #1d120bd9; box-shadow: 0 0 0 2px #e8b84a, 0 6px 14px #000b; overflow: hidden; }
+#loading .fill { height: 100%; border-radius: 8px; background: linear-gradient(#fff4b8, #ffd23f 45%, #e0962a); box-shadow: inset 0 3px 0 #ffffff99, 0 0 12px #ffd23faa; transition: width 0.2s; }
+#loading .pct { color: #fff; text-shadow: var(--stroke-s), 0 2px 6px #000; }

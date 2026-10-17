@@ -53,16 +53,21 @@ export interface MapMark {
   icon: string;
   /** The class the elite's drop is for: its badge at the tile's corner. */
   cls?: HeroClass;
+  /** The elite drops a random weapon of the class (items.ts dropAny): a «?» on its tile. */
+  any?: boolean;
   name: string;
   respawnIn: number;
   /** Dead: how far its respawn has come, 0..1 (the ring loader around the faded mark). */
   respawnP: number;
   /** A main boss's drop: a small framed item badge at the skull's corner. */
-  drop?: { icon: string; color: string; cls?: HeroClass };
+  drop?: { icon: string; color: string; cls?: HeroClass; any?: boolean };
 }
 
+/** Map-only stand-ins: every hunter mark on the maps shows the hunter's bow silhouette (icons.ts cls_hunter). */
+const MAP_ICON: Record<string, string> = { bow: 'cls_hunter' };
+
 /** An item icon on a tile of its quality colour (elites and bosses' drops on the maps); `cls`: whose item, a badge at the corner. */
-function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number, id: string, color: string, s: number, cls?: HeroClass) {
+function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number, id: string, color: string, s: number, cls?: HeroClass, any = false) {
   // the tile is filled with the quality colour (thin dark edge), the item's own icon on it in white
   g.fillStyle = color;
   g.strokeStyle = '#000';
@@ -71,12 +76,22 @@ function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number
   g.roundRect(x - r, y - r, r * 2, r * 2, 5 * s);
   g.fill();
   g.stroke();
+  id = MAP_ICON[id] ?? id;
   // the bow has no plain icon: its common-quality one
   const png = hasPng(id) ? id : !hasIcon(id) && hasPng(`${id}_common`) ? `${id}_common` : null;
   const img = png ? whiteArt(png) : iconImage(id, '#fff', Math.max(8, Math.ceil(r * 1.6 * g.getTransform().a)));
   const h = r * 0.8;
   if (img && (!(img instanceof HTMLImageElement) || img.complete)) g.drawImage(img, x - h, y - h, h * 2, h * 2);
-  if (cls) classBadge(g, x + r * 0.85, y - r * 0.85, r * 0.55, cls, s);
+  if (cls) classBadge(g, x + r * 0.85, y - r * 0.85, r * 0.75, cls, s);
+  if (any) {
+    // a random weapon of the class: «?» at the bottom-right corner
+    g.font = `900 ${Math.round(r * 1.1)}px Rubik, sans-serif`;
+    g.lineWidth = 3 * s;
+    g.strokeStyle = '#000';
+    g.fillStyle = '#fff';
+    g.strokeText('?', x + r * 0.7, y + r * 0.6);
+    g.fillText('?', x + r * 0.7, y + r * 0.6);
+  }
 }
 
 /** Respawn loader on the map: a dark ring, filled clockwise from the top by `p` (0..1); no numbers. */
@@ -104,8 +119,8 @@ function classBadge(g: CanvasRenderingContext2D, x: number, y: number, r: number
   g.fill();
   g.stroke();
   if (!hasIcon(d.icon)) return;
-  const img = iconImage(d.icon, '#fff', Math.max(8, Math.ceil(r * 1.6 * g.getTransform().a)));
-  if (img.complete) g.drawImage(img, x - r * 0.8, y - r * 0.8, r * 1.6, r * 1.6);
+  const img = iconImage(d.icon, '#fff', Math.max(8, Math.ceil(r * 1.8 * g.getTransform().a)));
+  if (img.complete) g.drawImage(img, x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8);
 }
 
 /**
@@ -124,12 +139,12 @@ export function drawMarks(g: CanvasRenderingContext2D, marks: MapMark[], X: (x: 
     const r = (m.kind === 'boss' ? 19 : 13) * s;
     // dead: the mark stays at the spawn point, faded, inside a ring that fills up until the respawn
     g.globalAlpha = m.alive ? 1 : 0.45;
-    if (m.kind === 'elite') framedItem(g, x, y, r, m.icon, m.color, s, m.cls);
+    if (m.kind === 'elite') framedItem(g, x, y, r, m.icon, m.color, s, m.cls, m.any);
     else {
       // the main boss: the horned skull in red; a micro-boss: the round skull in orange
       const img = tintedArt(m.kind === 'boss' ? 'boss' : 'skull', m.color);
       if (img) g.drawImage(img, x - r, y - r, r * 2, r * 2);
-      if (m.drop) framedItem(g, x + r * 0.8, y + r * 0.7, 8 * s, m.drop.icon, m.drop.color, s * 0.7, m.drop.cls);
+      if (m.drop) framedItem(g, x + r * 0.8, y + r * 0.7, 8 * s, m.drop.icon, m.drop.color, s * 0.7, m.drop.cls, m.drop.any);
     }
     g.globalAlpha = 1;
     if (!m.alive) respawnRing(g, x, y, r * 1.35, m.respawnP, s);
@@ -542,21 +557,34 @@ export class UI {
     this.modal.querySelector(sel)?.addEventListener('click', () => { sfx.click(); fn(); });
   }
 
-  settings(muted: boolean, lowGfx: boolean, toggleMute: () => void, toggleGfx: () => void, reset: () => void, close: () => void, showLog: () => void) {
+  /** `reset(skipPrologue)`: wipe the progress; with true the new game skips the tutorial. */
+  settings(muted: boolean, lowGfx: boolean, toggleMute: () => void, toggleGfx: () => void, reset: (skipPrologue: boolean) => void, close: () => void, showLog: () => void) {
     this.open(`<div class="panel"><h2>Настройки</h2>
       <p>Управление: тяни палец в любом месте экрана (или WASD). Атака — автоматически. Смена класса — кнопки справа внизу или 1 / 2 / 3.</p>
       <div class="row"><button class="btn" id="m-mute">${muted ? '🔇 Звук выкл' : '🔊 Звук вкл'}</button>
       <button class="btn" id="m-gfx">${lowGfx ? '🖥 Графика: низкая' : '🖥 Графика: высокая'}</button></div>
       <div class="row"><button class="btn purple" id="m-debug">🛠 Дебаг-меню</button></div>
-      <div class="row"><button class="btn" id="m-log">📊 Лог баланса</button><button class="btn danger" id="m-reset">Сбросить прогресс</button></div>
+      <div class="row"><button class="btn" id="m-log">📊 Лог баланса</button><button class="btn danger stack" id="m-reset">Сбросить<br>прогресс</button><button class="btn danger stack" id="m-reset-skip">Сброс<br>no tutr</button></div>
       <div class="row"><button class="btn primary" id="m-close">Продолжить</button></div></div>`);
     this.on('#m-debug', () => { this.close(); close(); this.onDebug(); });
     this.on('#m-mute', () => { toggleMute(); this.close(); this.settings(!muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog); });
     this.on('#m-gfx', () => { toggleGfx(); this.close(); this.settings(muted, !lowGfx, toggleMute, toggleGfx, reset, close, showLog); });
     this.on('#m-reset', () => {
-      this.confirm('Сбросить весь прогресс?', 'Герой, фракция и снаряжение будут удалены.', reset, () => this.settings(muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog));
+      this.confirm('Сбросить весь прогресс?', 'Герой, фракция и снаряжение будут удалены.', () => reset(false), () => this.settings(muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog));
+    });
+    this.on('#m-reset-skip', () => {
+      this.confirm('Сбросить прогресс без обучения?', 'Герой, фракция и снаряжение будут удалены, игра начнётся с выбора фракции.', () => reset(true), () => this.settings(muted, lowGfx, toggleMute, toggleGfx, reset, close, showLog));
     });
     this.on('#m-log', () => { this.close(); showLog(); });
+    this.on('#m-close', () => { this.close(); close(); });
+  }
+
+  /** Settings in the tutorial: only its debug skip. */
+  prologueSettings(skip: () => void, close: () => void) {
+    this.open(`<div class="panel"><h2>Настройки</h2>
+      <div class="row"><button class="btn purple" id="m-skip">🛠 Пропустить обучение</button></div>
+      <div class="row"><button class="btn primary" id="m-close">Продолжить</button></div></div>`);
+    this.on('#m-skip', () => { this.close(); close(); skip(); });
     this.on('#m-close', () => { this.close(); close(); });
   }
 
@@ -656,7 +684,7 @@ export class UI {
     next();
   }
 
-  factionSelect(onPick: (f: FactionId) => void, onConfirm: (f: FactionId) => void, lead = '') {
+  factionSelect(onPick: (f: FactionId) => void, onConfirm: (f: FactionId) => void, lead = '', cls: () => HeroClass = () => CLASS_IDS[0], onClass: (c: HeroClass) => void = () => {}) {
     let sel: FactionId | null = null;
     const card = (f: FactionId) => {
       const d = FACTIONS[f];
@@ -665,9 +693,18 @@ export class UI {
         <h3>${d.name}</h3><div class="fan">${d.fantasy}</div>
         <div class="pas">Старт: ${art(w.id, 22)} ${w.name}</div></div>`;
     };
-    this.open(`<div class="factions ui-block">${lead ? `<p class="lead">${lead}</p>` : ''}<h1>Выбери, чьим воином вернёшься</h1>
+    this.open(`<div class="squad"><p class="lead">Все персонажи из отряда будут доступны всегда и открываются постепенно во время геймплея</p><h1>Просмотр отряда</h1><div class="squad-btns">${CLASS_IDS.map((c) => {
+        const d = CLASSES[c];
+        return `<button class="cls${c === cls() ? ' on' : ''}" data-cls="${c}" style="--c1:${d.color[0]};--c2:${d.color[1]}" title="${d.name}">${art(d.icon, 30)}</button>`;
+      }).join('')}</div></div><div class="factions ui-block">${lead ? `<p class="lead">${lead}</p>` : ''}<h1>Выбери, чьим воином вернёшься</h1>
       <div class="fcards">${card('human')}${card('orc')}</div>
       <button class="btn primary" id="m-go" disabled>Воскреснуть</button></div>`, true);
+    this.modal.querySelector('.squad-btns')!.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-cls]');
+      if (!b) return;
+      this.modal.querySelectorAll('.squad .cls').forEach((x) => x.classList.toggle('on', x === b));
+      onClass(b.dataset.cls as HeroClass);
+    });
     const go = this.modal.querySelector<HTMLButtonElement>('#m-go')!;
     this.modal.querySelectorAll<HTMLElement>('.fcard').forEach((c) => c.addEventListener('click', () => {
       sfx.click();
@@ -679,7 +716,7 @@ export class UI {
     go.addEventListener('click', () => {
       if (!sel) return;
       const f = sel;
-      this.confirm(`${FACTIONS[f].name}?`, 'Выбор делается один раз и навсегда.', () => onConfirm(f), () => this.factionSelect(onPick, onConfirm, lead));
+      this.confirm(`${FACTIONS[f].name}?`, 'Выбор делается один раз и навсегда.', () => onConfirm(f), () => this.factionSelect(onPick, onConfirm, lead, cls, onClass));
     });
   }
 

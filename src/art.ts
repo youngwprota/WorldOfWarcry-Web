@@ -27,6 +27,11 @@ const staffArt = (orb: string, shade: string, glint: string) => `${P(rect(28.5, 
     ${P(circ(31, 14, 9), orb)}${N('M31 5A9 9 0 0 1 31 23Z', shade)}${N(circ(28, 11, 2.8), glint)}
     ${H('M14 8L17 11M48 12L51 9M46 26L50 27', 2.5)}`;
 
+// class button icons: a black silhouette outline, the lines between parts inside it in dark brown;
+// `gaps` > 0 also fills narrow gaps between the parts in brown instead of black
+const CLS = (body: string, gaps = 0) => `<g stroke="#000" stroke-width="9">${body}</g>` +
+  (gaps ? `<g stroke="#3a2414" stroke-width="${gaps}">${body}</g>` : '') + `<g stroke="#3a2414" stroke-width="3.5">${body}</g>`;
+
 const ART: Record<string, string> = {
   fist: `${P(rect(21, 44, 24, 18, 3), '#e3a97d')}
     ${[14, 24, 34, 44].map((x) => P(rect(x, 9, 10, 24, 5), SKIN)).join('')}
@@ -151,7 +156,26 @@ const ART: Record<string, string> = {
     ${P(rect(45, 27, 10, 10, 3), LEATHER_D)}${P(rect(29, 2, 6, 6, 2), GOLD)}${P(rect(29, 56, 6, 6, 2), GOLD)}</g>
     ${P(rect(10, 30, 40, 4, 2), WOOD, ' transform="rotate(-45 32 32)"')}
     ${P('M50 7L58 6L57 14L52 12Z', STEEL, ' transform="translate(-1 1)"')}${P('M8 50L15 49L15 56L9 56Z', RED)}`,
+  // the hunter's gun (a stand-in until the art exists): a double-barrelled shotgun, barrels up-right
+  gun: `<g transform="rotate(-40 32 32)">
+    ${P('M4 30L22 27L24 37L8 44C5 45 3 43 3 40Z', WOOD)}${N('M5 40L23 34L24 37L8 44C5 45 3 43 4 40Z', WOOD_D)}
+    ${P(rect(21, 26, 12, 9, 2), STEEL_DD)}${P(rect(31, 24, 30, 5, 2), STEEL)}${P(rect(31, 29, 30, 4, 2), STEEL_D)}
+    ${P(rect(33, 33, 18, 4, 2), WOOD)}${P('M24 35C24 41 30 41 30 35', 'none', ' stroke-width="2.5"')}</g>`,
   staff: staffArt('#8f6cff', '#6747d6', '#e6dcff'),
+  // class buttons (party.ts CLASSES.icon): muted, like the forge's anvil and the bag — iron, rust, worn wood, dull gold
+  cls_warrior: CLS(`${P('M32 4L56 11V30C56 46 45 56 32 61C19 56 8 46 8 30V11Z', '#6b717a')}${N('M32 4L56 11V30C56 46 45 56 32 61Z', '#4a4f57')}
+    ${P('M32 13L48 18V30C48 41 41 48 32 52C23 48 16 41 16 30V18Z', '#a8432c')}${N('M32 13L48 18V30C48 41 41 48 32 52Z', '#7e2f20')}
+    ${P(circ(32, 31, 6), '#e0a532')}${N('M32 25A6 6 0 0 1 32 37Z', '#b37a22')}${H('M13 16V28', 2.5)}`),
+  cls_hunter: CLS(`<g transform="rotate(45 32 32)">
+    <path d="M32 6L32 58" fill="none" stroke="#d9cfb8" stroke-width="2.2"/>
+    ${P('M32 4C46 4 54 18 54 32C54 46 46 60 32 60L32 54C42 54 47 43 47 32C47 21 42 10 32 10Z', '#8a5530')}
+    ${N('M32 4C46 4 54 18 54 32C54 46 46 60 32 60L32 57C44 56 51 45 51 32C51 19 44 8 32 7Z', '#5e3820')}
+    ${P(rect(45, 27, 10, 10, 3), '#a8432c')}${P(rect(29, 2, 6, 6, 2), '#e0a532')}${P(rect(29, 56, 6, 6, 2), '#e0a532')}</g>`),
+  cls_mage: CLS(`${P('M27 25L35 23L56 53C58 56 55 59 52 56Z', '#b0682c')}${N('M33 24L56 53C58 56 55 59 52 56L36 33Z', '#7e451c')}
+    ${P('M21 32C25 27 31 26 33 20C34 15 39 14 40 18C39 25 35 31 29 35C25 37 19 36 21 32Z', '#b0682c')}
+    ${P('M33 32C37 31 41 32 42 35C41 37 38 37 36 36Z', '#b0682c')}${P('M41 44C44 44 46 46 45 48C43 48 41 47 40 46Z', '#b0682c')}
+    ${P(circ(19, 18, 12), '#5cb87a')}${N('M7.2 19C12 25 23 26 30.6 20A12 12 0 0 1 7.2 19Z', '#2f9a7a')}${N('M12 10C16 7 22 7 26 10C22 9 16 9 12 12Z', '#a6dcae')}
+    <path d="M15 13C13 16 13 20 15 23" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`, 5.5),
   // mage staves (config STAVES): the same staff, the orb in the element's colours
   staff_fire: staffArt('#ff7a2a', '#d8401c', '#ffe08a'),
   staff_ice: staffArt('#8fd8ff', '#4f9de0', '#f0fbff'),
@@ -221,7 +245,7 @@ const PNG: Record<string, string> = {
   hit: 'i-hit', dps: 'i-dps', dodge: 'i-dodge',
   // weapon item icons per rarity (`<def>_<rarity>`), rendered from their models
   ...Object.fromEntries(['staff_fire', 'staff_ice', 'staff_wind', 'sword', 'axe', 'hammer', 'polearm', 'shield_tower',
-    'shield_buckler', 'shield_spiked', 'bow'].flatMap((def) =>
+    'shield_buckler', 'shield_spiked', 'bow', 'gun'].flatMap((def) =>
     ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${def}_${r}`, `${def}_${r}`]))),
   // armour item icons per rarity and faction (src/looks.ts CLASS_LOOK.icon): plate sets, hunter / caster skins
   ...Object.fromEntries([
@@ -234,10 +258,10 @@ const PNG: Record<string, string> = {
   // gacha gloves per kind and rarity, rendered from their showcase models (tools/blender/gloves.py)
   ...Object.fromEntries(['gloves_power', 'gloves_crit', 'gloves_haste'].flatMap((g) =>
     ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].map((r) => [`${g}_${r}`, `armor/${g}_${r}`]))),
-  // pet items (WEAPONS `pet_<id>`), rendered from their creatures (tools/blender/icon_fit.py)
-  pet_boar: 'pet_boar', pet_wolf: 'pet_wolf', pet_bear: 'pet_bear', pet_lion: 'pet_lion', pet_bone_boar: 'pet_bone_boar',
   orb_vigor: 'orb_vigor', orb_fury: 'orb_glass',
   orb_swift: 'orb_swift', orb_ward: 'orb_ward', orb_fortune: 'orb_fortune', orb_demon: 'orb_demon',
+  // pet items (WEAPONS[<PETS id>]), rendered from their models: pet_portrait.py <glb> <png> 35 1 10, then icon_shrink.py
+  boar: 'pet_boar', wolf: 'pet_wolf', bear: 'pet_bear', lion: 'pet_lion', bone_boar: 'pet_bone_boar',
 };
 /** The id has a pack PNG (art() draws it instead of the vector). */
 export const hasPng = (id: string) => !!PNG[id];

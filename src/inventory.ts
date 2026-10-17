@@ -6,7 +6,7 @@ import {
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, orbLine, slotOf, weaponBase,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, orbLine, slotOf, weaponBase, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -14,7 +14,8 @@ import { DAMAGE_TYPE_ICON, fmtK, icon } from './icons';
 import { art } from './art';
 import type { Game } from './game';
 import type { UI } from './ui';
-import { CLASSES, classSlot, weaponClass } from './party';
+import { CLASSES, CLASS_IDS, classSlot, weaponClass, type HeroClass } from './party';
+import { CLASS_LOOK } from './looks';
 
 /** 0.237 → "24%". */
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -38,6 +39,8 @@ const STAT_UI: Record<StatId, { name: string; icon: string; note: string }> = {
 /** Where the pet stands beside the hero on the preview stage (hero-local, m); the hero steps aside for it. */
 const PET_AT = new THREE.Vector3(0.75, 0, -0.35);
 const HERO_AT_WITH_PET = new THREE.Vector3(-0.4, 0, 0.2);
+/** The pet (and its quality) the hero has on: HeroPreview.petKey. */
+const petKey = (g: Game) => (g.petDef ? `${g.petDef.id}:${g.petItem?.rarity ?? 0}` : '');
 
 /**
  * Rotatable 3D hero for the character sheet (own small renderer, disposed on close): the class on the field and,
@@ -50,14 +53,17 @@ class HeroPreview {
   private stage = new THREE.Group();
   private ch: Character;
   private pet: Creature | null = null;
-  private petKey = '';
+  /** Which pet the stage was laid out for (petKey). */
+  readonly petKey: string;
   private clock = new THREE.Clock();
   private raf = 0;
   yaw = 0.4;
   private vel = 0;
   private dragX: number | null = null;
 
-  constructor(private canvas: HTMLCanvasElement, model: string, pet: PetDef | null = null) {
+  /** `petRarity`: the pet item's quality (its size, PET_RARITY). */
+  constructor(private canvas: HTMLCanvasElement, model: string, pet: PetDef | null = null, petRarity = 0) {
+    this.petKey = pet ? `${pet.id}:${petRarity}` : '';
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -74,16 +80,17 @@ class HeroPreview {
     this.stage.add(floor);
     this.ch = new Character(model, null, 1);
     this.stage.add(this.ch.root);
-    if (pet) this.ch.position.copy(HERO_AT_WITH_PET);
-    this.scene.add(this.stage);
-    // with a pet: further back and a bit lower, so both fit
     if (pet) {
-      this.camera.position.set(0, 1.25, 5.6);
-      this.camera.lookAt(0, 0.65, 0);
-    } else {
-      this.camera.position.set(0, 1.05, 4.4);
-      this.camera.lookAt(0, 0.85, 0);
+      this.pet = new Creature(pet.model, pet.scale * PET_RARITY.scale[petRarity]);
+      this.pet.position.copy(PET_AT);
+      this.stage.add(this.pet.root);
+      this.ch.position.copy(HERO_AT_WITH_PET);
+      // the pair still turns around the stage origin, but at the starting yaw the hero stands in the middle like the other classes
+      this.stage.position.x = -HERO_AT_WITH_PET.clone().applyAxisAngle(THREE.Object3D.DEFAULT_UP, this.yaw).x;
     }
+    this.scene.add(this.stage);
+    this.camera.position.set(0, 1.05, 4.4);
+    this.camera.lookAt(0, 0.85, 0);
 
     canvas.addEventListener('pointerdown', (e) => { this.dragX = e.clientX; this.vel = 0; canvas.setPointerCapture(e.pointerId); });
     canvas.addEventListener('pointermove', (e) => {
@@ -103,23 +110,11 @@ class HeroPreview {
    * `mainLeft`: the main weapon in the left hand (the mage's staff); `orb`: the mage's orb model over the shoulder;
    * `trims`: armour quality pieces (Game.trims).
    */
-  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>, mainLeft = false, orb: string | null = null, trims: string[] = []) {
+  setGear(weapon: string | null, left: string | null, outfit: Partial<Record<VisualPart, string>>, mainLeft = false, orb: string | null = null, trims: string[] = [], keep: string[] = []) {
     this.ch.setWeapon(weapon, left, mainLeft);
     this.ch.setOrb(orb);
-    this.ch.setOutfit(outfit);
+    this.ch.setOutfit(outfit, keep);
     this.ch.setTrims(trims);
-  }
-
-  /** The hunter's pet beside him (sized by its item quality), or none. */
-  setPet(pet: PetDef | null, rarity = 0) {
-    const key = pet ? `${pet.id}:${rarity}` : '';
-    if (key === this.petKey) return;
-    this.petKey = key;
-    this.pet?.root.removeFromParent();
-    this.pet = pet ? new Creature(pet.model, pet.scale * PET_RARITY.scale[rarity]) : null;
-    if (!this.pet) return;
-    this.pet.position.copy(PET_AT);
-    this.stage.add(this.pet.root);
   }
 
   nudge(dir: number) { this.vel = dir * 5; }
@@ -300,7 +295,7 @@ export class Inventory {
     <div class="inv-equipped"><div class="eq-title">Экипировано</div>
       <div class="eq-doll">
         <div class="eq-side" id="i-eq-l"></div>
-        <div class="eq-stage"><canvas id="i-canvas"></canvas><div class="eq-rot"><button id="i-rl">↶</button><button id="i-rr">↷</button></div></div>
+        <div class="eq-stage"><canvas id="i-canvas"></canvas><div class="eq-rot"><button id="i-rl">↶</button><button id="i-rr">↷</button></div><div class="eq-cls" id="i-cls"></div></div>
         <div class="eq-w" id="i-eq-w"></div>
         <div class="eq-side" id="i-eq-r"></div>
       </div>
@@ -311,11 +306,15 @@ export class Inventory {
       <div class="sheet-body"><div id="b-grid"></div></div>
       <p class="hint-line">Нажми на предмет: надеть, сравнить или выбросить</p>
     </div>`);
-    this.preview = new HeroPreview(this.ui.modal.querySelector('#i-canvas')!, this.game.heroModel(), this.game.petDef);
+    this.newPreview();
     this.ui.on('#i-close', () => this.close());
     this.ui.on('#i-info', () => this.showInfo());
     this.ui.modal.querySelector('#i-rl')!.addEventListener('click', () => this.preview?.nudge(-1));
     this.ui.modal.querySelector('#i-rr')!.addEventListener('click', () => this.preview?.nudge(1));
+    this.ui.modal.querySelector('#i-cls')!.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-cls]');
+      if (b) this.switchClass(b.dataset.cls as HeroClass);
+    });
     this.ui.modal.querySelectorAll<HTMLElement>('[data-filter]').forEach((b) => b.addEventListener('click', () => {
       sfx.click();
       this.bagFilter = b.dataset.filter as BagFilter;
@@ -326,6 +325,29 @@ export class Inventory {
     const sw = this.ui.modal.querySelector<HTMLElement>('#i-sw')!;
     sw.addEventListener('click', (e) => { if (e.target === sw) sw.classList.add('hidden'); });
     this.ui.modal.addEventListener('click', this.onClick);
+    this.rerender();
+  }
+
+  private newPreview() {
+    let canvas = this.ui.modal.querySelector<HTMLCanvasElement>('#i-canvas')!;
+    if (this.preview) {
+      this.preview.dispose();
+      // the old context was force-lost and a canvas keeps its context for life: a new renderer needs a new canvas
+      const fresh = canvas.cloneNode() as HTMLCanvasElement;
+      canvas.replaceWith(fresh);
+      canvas = fresh;
+    }
+    this.preview = new HeroPreview(canvas, this.game.heroModel(), this.game.petDef, this.game.petItem?.rarity ?? 0);
+  }
+
+  private switchClass(c: HeroClass) {
+    const g = this.game;
+    const model = g.heroModel();
+    const pet = g.petDef;
+    if (!g.switchClass(c)) return;
+    sfx.click();
+    this.hideTip();
+    if (g.heroModel() !== model || g.petDef !== pet) this.newPreview();
     this.rerender();
   }
 
@@ -345,9 +367,21 @@ export class Inventory {
     q('#i-eq-l').innerHTML = armor(EQUIP_BAR.left);
     q('#i-eq-w').innerHTML = weapons;
     q('#i-eq-r').innerHTML = armor(EQUIP_BAR.right);
-    this.preview?.setGear(...g.heldModels(), g.outfit(), g.staffInHand(), g.orbModel(), g.trims());
-    this.preview?.setPet(g.petDef, g.petItem?.rarity ?? 0);
+    q('#i-cls').innerHTML = CLASS_IDS.map((c) => {
+      const d = CLASSES[c];
+      const st = `${c === g.heroClass ? ' on' : ''}${g.classOpen(c) ? '' : ' locked'}`;
+      return `<button class="cls${st}" data-cls="${c}" style="--c1:${d.color[0]};--c2:${d.color[1]}" title="${d.name}">${art(d.icon, 30)}</button>`;
+    }).join('');
+    // another pet (or its quality: the size) put on from the bag: the stage is laid out for it, so a new preview
+    if (this.preview && this.preview.petKey !== petKey(g)) this.newPreview();
+    this.dressPreview();
+    void g.outfitReady.then(() => this.dressPreview()); // parts loaded on demand (the hunter sets)
     g.newItems = 0;
+  }
+
+  private dressPreview() {
+    const g = this.game;
+    this.preview?.setGear(...g.heldModels(), g.outfit(), g.staffInHand(), g.orbModel(), g.trims(), CLASS_LOOK[g.heroClass].keep);
   }
 
   private renderBag() {
@@ -356,7 +390,7 @@ export class Inventory {
     const q = (id: string) => this.ui.modal.querySelector<HTMLElement>(id)!;
     // only what the class on the field can use; the rest stays in the bag (and takes room) for the others
     const hidden = s.bag.filter((it) => !g.canUse(it)).length;
-    q('#b-sub').innerHTML = `<span>${s.bag.length}/${BAG_SIZE}</span>${hidden ? `<small class="b-other">ещё ${hidden} для других классов</small>` : ''}`;
+    q('#b-sub').innerHTML = `<span>${s.bag.length}/${s.bagUnlimited ? '∞' : BAG_SIZE}</span>${hidden ? `<small class="b-other">ещё ${hidden} для других классов</small>` : ''}`;
     const section = (kind: 'weapon' | 'armor', title: string) => {
       const cells = s.bag.map((it, i) => (it.kind === kind && g.canUse(it) ? this.cell(it, `data-bag="${i}"`) : '')).join('');
       return cells ? `<div class="divider"><span>${title}</span></div><div class="grid">${cells}</div>` : '';
@@ -453,6 +487,9 @@ export class Inventory {
       const c = COMBOS[it.def];
       ability = !c ? '' : `<div class="ab-title">Добивание: ${c.name}</div><p>Третий удар комбо подряд бьёт ${c.shape === 'circle' ? '<b>по кругу</b>' : `<b>дугой ${c.arc}°</b>`} с уроном <b>×${c.mult}</b>${c.stun ? ` и оглушает на <b>${c.stun} с</b>` : ''}.</p>`;
       const w = WEAPONS[it.def];
+      if (w.pet) ability = `<div class="ab-title">Питомец</div><p>Второй слот охотника: бежит рядом и кусает его цель — <b>${Math.round(weaponDamage(it))}</b> урона ${w.aps} раз/с. Урон свой — от качества и уровня питомца, сила героя и лук на него не влияют.</p>`;
+      const pl = w.shot?.pellets;
+      if (pl) ability = `<div class="ab-title">Дробь</div><p>Стреляет реже лука: <b>${pl.n}</b> дробинок веером <b>${pl.spread}°</b> на <b>${w.range} м</b>, каждая — <b>×${pl.mul}</b> урона.</p>` + ability;
       if (w.staff === 'fire') {
         const f = STAVES.fire;
         ability = `<div class="ab-title">Поджог</div><p>Бьёт на <b>${w.range} м</b>. Враги в <b>${f.splash.radius} м</b> от цели получают <b>×${f.splash.mul}</b> урона. Задетые горят <b>${f.burn.time} с</b> и получают <b>+${Math.round(f.burn.vuln * 100)}%</b> урона от всего.</p>` + ability;
@@ -477,11 +514,9 @@ export class Inventory {
       else actions += `<span class="none">Не для класса «${CLASSES[g.heroClass].name}»</span>`;
     } else if (src.at === 'armor') {
       actions = btn('unequip', 'Снять', 'red');
-    } else {
-      if (src.slot === 1) actions += btn('unequip', 'Снять', 'red');
     }
     // a class item (shield, orb) shows its slot's name instead of a damage type
-    const offOf = it.kind === 'weapon' && (WEAPONS[it.def].guard || WEAPONS[it.def].orb) ? weaponClass(it.def) : null;
+    const offOf = it.kind === 'weapon' && (WEAPONS[it.def].guard || WEAPONS[it.def].orb || WEAPONS[it.def].pet) ? weaponClass(it.def) : null;
     const type = offOf ? CLASSES[offOf].offName : slot === 'weapon' ? `${icon(DAMAGE_TYPE_ICON[WEAPONS[it.def].type], '#fff', 14)} ${DAMAGE_TYPE_NAME[WEAPONS[it.def].type]}` : SLOT_NAME[ARMOR[it.def].slot];
     tip.innerHTML = `<div class="card-head">${cellHtml(it, 'disabled', '', '', 'big', this.game.wearer)}
         <div class="card-title"><h3>${itemName(it, g.faction)}${it.sharpen ? ` +${it.sharpen}` : ''}</h3>
@@ -504,16 +539,12 @@ export class Inventory {
 
   private act(action: string, src: Source) {
     const g = this.game;
-    let ok = true;
     if (src.at === 'bag') {
       if (action === 'equip') g.equipFromBag(src.index);
       else if (action === 'discard') g.discardFromBag(src.index);
     } else if (src.at === 'armor') {
-      ok = g.unequipArmor(src.slot);
-    } else if (action === 'unequip') {
-      ok = g.unequipWeapon(src.slot);
+      g.unequipArmor(src.slot);
     }
-    if (!ok) this.ui.toast('Сумка полна');
     this.hideTip();
     this.rerender();
   }

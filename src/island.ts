@@ -120,10 +120,13 @@ const POLYS: { id: ZoneId; pts: [number, number][] }[] = [
     [90, -60], [60, -55], [30, -75], [-25, -90], [-50, -125]] },
   { id: 'hills', pts: [[-147.5, -55], [-130, -77.5], [-110, -90], [-90, -105], [-72.5, -122.5], [-62, -131], [-50, -125], [-25, -90], [-40, -20],
     [-55, -5], [-70, -3], [-95, -12], [-125, -20], [-135, -40]] },
-  { id: 'grove', pts: [[-140, -2], [-125, -20], [-95, -12], [-70, -3], [-55, -5], [-40, -20], [-25, -15], [-25, 25], [-40, 45], [-60, 52.5],
-    [-90, 42.5], [-122.5, 45], [-135, 20]] },
-  { id: 'swamp', pts: [[-25, -15], [-3, -10], [5, 20], [2.5, 65], [-10, 107.5], [-40, 110], [-70, 107.5], [-100, 85], [-122.5, 60], [-122.5, 45],
-    [-90, 42.5], [-60, 52.5], [-40, 45], [-25, 25]] },
+  // grove and swamp reach out into the sea (map drawing): points are pre-shifted against the domain warp, the grove
+  // closes inside the hills (hills win) so the old hills coast is the new border
+  { id: 'grove', pts: [[-125, -20], [-95, -12], [-70, -3], [-55, -5], [-40, -20], [-25, -15], [-25, 25], [-40, 45], [-60, 52.5],
+    [-90, 42.5], [-122.5, 45], [-137.6, 42.4], [-156, 37.2], [-160.3, 29.5], [-162.1, -2.1], [-166.3, -16.4], [-160, -36.7], [-152, -49.4],
+    [-147.7, -54.2], [-140, -52], [-130, -40]] },
+  { id: 'swamp', pts: [[-25, -15], [-3, -10], [5, 20], [2.5, 65], [-10, 107.5], [-20.7, 112], [-37.4, 115.9], [-55.4, 107.4], [-82.2, 96.4],
+    [-103.2, 86.2], [-119.4, 78.9], [-132.4, 58.8], [-146, 42.8], [-148, 36], [-122.5, 45], [-90, 42.5], [-60, 52.5], [-40, 45], [-25, 25]] },
   { id: 'dunes', pts: [[-3, -10], [20, -15], [40, -25], [50, -34], [64, -24], [70, -10], [100, -5], [118, 15], [125, 30], [110, 50], [90, 70], [60, 85], [30, 100],
     [-10, 107.5], [2.5, 65], [5, 20]] },
 ];
@@ -414,8 +417,9 @@ export const FOREST_PINS: Record<string, [number, number]> = {
   // the elites spread over the whole forest (west, east, south), the gloves one by the pond
   bandit_warlord: FOREST_MINI, bandit_lumberjack: [19, -13], bandit_veteran: GLOVES_AT, bandit_brute: [-27, -61], bandit_runner_elite: [41, -62],
 };
-/** Two bandit trios in the trees by the gloves elite (GLOVES_BANDITS, one pack each). */
+/** Two bandit trios in the trees by the gloves elite (GLOVES_BANDITS): single spawners, GLOVES_SPREAD m round each point. */
 export const GLOVES_PACKS: [number, number][] = [[14, -74], [27, -76]];
+export const GLOVES_SPREAD = 5;
 /** Bandits in the wood between the settlement and the fort (MID_SPAWNERS): [along, side] m on the camp → fort line. */
 export const MID_UV: [number, number][] = [[18, 1], [24, 1.5], [27.5, 0], [20.7, 6.9], [17.5, 4.5]];
 /** A point [along, side] on the straight line from the settlement to the fort. */
@@ -536,6 +540,16 @@ export function ringSpots(x: number, z: number, n: number, r: number, a0 = 0) {
   for (let i = 0; i < n; i++) {
     const a = a0 + (i / n) * Math.PI * 2;
     out.push({ x: x + Math.sin(a) * r, z: z + Math.cos(a) * r });
+  }
+  return out;
+}
+/** n spots in a row `gap` m apart, centred on (x, z) and across the direction (fx, fz) the row faces. */
+export function lineSpots(x: number, z: number, n: number, gap: number, fx: number, fz: number) {
+  const l = Math.hypot(fx, fz) || 1;
+  const out: { x: number; z: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const o = (i - (n - 1) / 2) * gap;
+    out.push({ x: x + (fz / l) * o, z: z - (fx / l) * o });
   }
   return out;
 }

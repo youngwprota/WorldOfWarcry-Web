@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { HIT_FLASH, applyHitFlash } from './hitflash';
 import { assets } from './assets';
+import { patchScenery } from './atmos';
 import type { AttackAnim } from './config';
 
 /** Seconds a dead static unit takes to tip over. */
@@ -27,7 +28,7 @@ export class StaticBody {
   walkRate = 1;
   readonly stride = 1;
 
-  constructor(modelName: string, scale = 1, tint?: THREE.Color) {
+  constructor(modelName: string, scale = 1, tint?: THREE.Color, crown?: THREE.Color) {
     this.model = assets.clone(modelName);
     this.model.scale.multiplyScalar(scale);
     this.root.add(this.model);
@@ -42,10 +43,19 @@ export class StaticBody {
       if (!c) {
         c = src.clone();
         if (tint) c.color.multiply(tint);
+        // the recolor shader reads the crown colour from vertex colours (scenery instances use instance colours)
+        if (crown) { c.vertexColors = true; patchScenery(c, { recolor: true }); }
         cache.set(src, c);
         this.materials.push(c);
       }
       m.material = c;
+      if (crown) {
+        m.geometry = m.geometry.clone();
+        const n = m.geometry.getAttribute('position').count;
+        const rgb = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) crown.toArray(rgb, i * 3);
+        m.geometry.setAttribute('color', new THREE.BufferAttribute(rgb, 3));
+      }
     });
     this.height = new THREE.Box3().setFromObject(this.model).getSize(new THREE.Vector3()).y;
   }

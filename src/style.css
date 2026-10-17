@@ -110,11 +110,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .bar span { position: absolute; inset: 0; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; text-shadow: 0 1px 0 #000; }
 
 /* minimap expanded in place */
-#bigmap { position: absolute; right: 10px; top: calc(10px + env(safe-area-inset-top)); width: 108px; height: 108px; border-radius: 50%; border: 3px solid var(--ink); overflow: hidden; background: transparent; display: none; z-index: 6; box-shadow: 0 0 0 4px var(--wood-hi), 0 0 0 7px var(--ink), 0 8px 30px #000a; transition: width 0.25s ease, height 0.25s ease; }
+#bigmap { position: absolute; right: 10px; top: calc(10px + env(safe-area-inset-top)); width: 108px; height: 108px; border-radius: 50%; border: 3px solid var(--ink); background: transparent; display: none; z-index: 6; box-shadow: 0 0 0 4px var(--wood-hi), 0 0 0 7px var(--ink), 0 8px 30px #000a; transition: width 0.38s cubic-bezier(0.5, -0.45, 0.7, 1), height 0.38s cubic-bezier(0.5, -0.45, 0.7, 1), right 0.38s, top 0.38s; }
+/* opens with an overshoot, closes with a small swell before shrinking */
+#bigmap.open { transition-timing-function: cubic-bezier(0.3, 1.45, 0.55, 1); }
 #bigmap.show { display: block; }
-#bigmap canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#bigmap canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; touch-action: none; cursor: grab; }
 #bigmap canvas:active { cursor: grabbing; }
-.bm-tools { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 6px; opacity: 0; transition: opacity 0.2s 0.1s; }
+.bm-tools { position: absolute; right: -6px; top: -6px; display: flex; flex-direction: column; gap: 6px; opacity: 0; pointer-events: none; transform: scale(0.6); transition: opacity 0.15s, transform 0.15s; }
+#bigmap.open .bm-tools { pointer-events: auto; transform: none; transition: opacity 0.2s 0.25s, transform 0.3s cubic-bezier(0.3, 1.8, 0.5, 1) 0.25s; }
 #bigmap.open .bm-tools, #bigmap.open .wm-legend { opacity: 1; }
 .bm-tools button { width: 44px; height: 44px; border-radius: 12px; border: 2px solid #000; background: var(--panel); font-size: 20px; font-weight: 900; box-shadow: 0 3px 0 #0008; }
 .wm-legend { position: absolute; left: 8px; right: 60px; bottom: 8px; opacity: 0; transition: opacity 0.2s 0.1s; display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; font-weight: 700; background: #0009; padding: 8px 10px; border-radius: 10px; }
@@ -162,7 +165,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* faction select */
 .factions { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px; padding-bottom: calc(14px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, #000c 25%); }
-.factions h1 { text-align: center; margin: 0 0 12px; font-size: 22px; font-weight: 900; color: #fff; text-shadow: var(--stroke); }
+.factions h1, .squad h1 { text-align: center; margin: 0 0 12px; font-size: 22px; font-weight: 900; color: #fff; text-shadow: var(--stroke); }
 .fcards { display: flex; gap: 10px; }
 .fcard { flex: 1; background: linear-gradient(var(--wood-hi), var(--wood) 40%); border: 3px solid var(--ink); border-radius: 18px; padding: 10px; text-align: left; font-size: 12px; font-weight: 600; color: #f0dcc0; box-shadow: inset 0 3px 0 #ffffff26, 0 4px 0 #0007; transition: transform 0.12s; }
 .fcard.sel { transform: translateY(-4px); box-shadow: 0 0 0 3px #ffd23f, 0 0 24px #ffd23f88, 0 4px 0 #0007; }
@@ -170,6 +173,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .fcard .fan { font-style: italic; margin-bottom: 6px; }
 .fcard .pas { color: #ffd23f; font-weight: 900; margin-top: 6px; text-shadow: var(--stroke-s); }
 .factions .btn { width: 100%; margin-top: 12px; }
+.squad { position: absolute; left: 14px; right: 14px; top: 52%; }
+.squad-btns { display: flex; justify-content: center; gap: 36px; }
 
 #flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 20; transition: opacity 1.2s ease-out; }
 #flash.on { opacity: 0.8; transition: none; }
@@ -402,7 +407,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .btn { min-height: 60px; font-size: 20px; border-radius: 16px; }
 .btn small { font-size: 13px; }
 .xbtn { width: 80px; height: 56px; font-size: 30px; border-radius: 16px; }
-.factions h1 { font-size: 26px; }
+.factions h1, .squad h1 { font-size: 26px; }
 .fcard { font-size: 14px; padding: 12px; }
 .fcard h3 { font-size: 24px; }
 #loading .logo { font-size: 64px; }
@@ -652,7 +657,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* Balance log (⚙ → Лог баланса): raw report, scrolls inside the panel */
 .ballog { max-height: 55vh; max-width: min(92vw, 720px); overflow: auto; margin: 8px 0; padding: 8px; background: rgba(0, 0, 0, 0.35); border-radius: 8px; font: 11px/1.4 ui-monospace, Consolas, monospace; color: #f3ead8; text-shadow: none; white-space: pre; user-select: text; -webkit-user-select: text; text-align: left; }
 /* ---------- prologue & dialogue (same cartoon skin: wood, thick ink, stroked type) ---------- */
-.factions .lead { text-align: center; margin: 0 0 8px; font-size: 17px; font-weight: 900; color: #d9c4ff; text-shadow: var(--stroke-s); }
+.factions .lead, .squad .lead { text-align: center; margin: 0 0 8px; font-size: 17px; font-weight: 900; color: #d9c4ff; text-shadow: var(--stroke-s); }
 /* dialogue box (GDD 6.3): wooden plank at the bottom, round portrait, name, typed text, answers, skip */
 #dialogue { position: absolute; left: 10px; right: 10px; bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 9; padding: 14px 16px 16px; border: 5px solid var(--ink); border-radius: 24px; background: var(--grain), var(--wood-mid); background-size: 360px 180px, auto; box-shadow: 0 7px 0 var(--ink), 0 14px 30px #0009; animation: dlg-in 0.22s ease-out; cursor: pointer; }
 @keyframes dlg-in { from { transform: translateX(-50%) translateY(40px) scale(var(--hs, 1)); opacity: 0; } }
@@ -674,11 +679,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #cine.on::before, #cine.on::after { height: 8%; }
 /* prologue HUD: stats like #stats, quest tracker, hints like #hint */
 #pro-hud { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
-#pro-stats { position: absolute; left: 10px; top: calc(10px + env(safe-area-inset-top)); display: grid; grid-template-columns: repeat(2, auto); gap: 6px 12px; font-size: 24px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); white-space: nowrap; opacity: 0; transition: opacity 0.4s; }
-#pro-stats.show { opacity: 1; }
-#pro-stats .st { display: flex; gap: 5px; align-items: center; transition: transform 0.15s; transform-origin: left center; }
-#pro-stats .st.pop { transform: scale(1.3); }
-#pro-stats .svgi { width: 38px; height: 38px; }
+.pro-settings { position: absolute; left: 10px; top: calc(10px + env(safe-area-inset-top)); pointer-events: auto; }
+.btn.stack { line-height: 1.05; }
 #pro-quest { position: absolute; right: 8px; top: calc(10px + env(safe-area-inset-top)); max-width: 136px; padding: 6px 10px; border: 4px solid var(--ink); border-radius: 14px; background: #2e1c10e6; box-shadow: 0 4px 0 #0007; font-size: 18px; font-weight: 900; color: #fff; text-align: right; text-shadow: var(--stroke-s); opacity: 0; transition: opacity 0.4s; line-height: 1.15; }
 #pro-quest.show { opacity: 1; }
 #pro-quest small { display: block; margin-bottom: 2px; font-size: 12px; color: #f0dcc0; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -700,6 +702,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .dbg-head button[data-close] { background: #e8335a; }
 .dbg-info { margin: 4px 0; padding: 4px 5px; border-radius: 7px; background: #ffffff12; font: 600 9px/1.3 ui-monospace, Consolas, monospace; white-space: pre-wrap; color: #d8ffd0; }
 .dbg-sec { margin-top: 4px; }
+.dbg-cols { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; column-gap: 10px; }
 .dbg-sec > span { display: block; font-size: 10px; color: #f0dcc0; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
 .dbg-btns { display: flex; flex-wrap: wrap; gap: 3px; }
 .dbg-btns button { flex: none; min-height: 26px; padding: 1px 8px; white-space: nowrap; border: 2px solid var(--ink); border-radius: 7px; background: #4e3f70; color: #fff; font: 700 10px system-ui, sans-serif; }
@@ -734,6 +737,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .mloot .lt { display: inline-flex; align-items: center; gap: 3px; font-size: 22px; font-weight: 900; line-height: 1; color: #fff; text-shadow: var(--stroke); white-space: nowrap; }
 .mloot .lt .svgi { width: 26px; height: 26px; filter: drop-shadow(0 2px 0 var(--ink)); }
 .mloot .lt.item .svgi { filter: drop-shadow(0 0 4px var(--rc)) drop-shadow(0 2px 0 var(--ink)); }
+/* a random weapon of the class (items.ts dropAny) */
+.mloot .lt.item { position: relative; }
+.mloot .lt.item .any { position: absolute; right: -4px; bottom: -4px; font-size: 16px; font-weight: 900; color: #fff; text-shadow: var(--stroke-s); }
 .mobui.boss .mloot .lt { font-size: 26px; }
 /* the bar stays centred under the loot; weakness / resistance icons hang to the right of it */
 .mrow { position: relative; }

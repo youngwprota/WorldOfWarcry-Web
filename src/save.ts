@@ -1,4 +1,4 @@
-import { FACTIONS, HERO, PETS, START_PET, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
+import { FACTIONS, HERO, WEAPONS, type FactionId, type SavedSource, type StatId } from './config';
 import { BASE_STATS, type PctPoints, type StatPoints } from './balance';
 import { ARMOR, BAG_SIZE, makeItem, normalizeItem, type ArmorSlot, type Item } from './items';
 import { CLASSES, classSlot, kitOf, type HeroClass } from './party';
@@ -23,6 +23,8 @@ export interface SaveData {
   active: 0 | 1;
   equip: Partial<Record<ArmorSlot, Item>>;
   bag: Item[];
+  /** Debug ("Выдать все"): the bag has no BAG_SIZE limit. */
+  bagUnlimited?: boolean;
   /** Legacy: the forest → cemetery barrier (now in `gates`). */
   barrierOpen?: boolean;
   /** Passages opened by main bosses (gate ids, src/island.ts GATES). */
@@ -61,19 +63,17 @@ export interface SaveData {
   gear?: Partial<Record<HeroClass, Partial<Record<ArmorSlot, Item>>>>;
   /** Whose armour is in `equip`; missing = the warrior's (saves from before the party wore one set for all). */
   gearOf?: HeroClass;
-  /** Old saves: the hunter's pet (config PETS id); now the pet item `pet_<id>` sits in his class slot (givePet). */
-  pet?: string;
 }
 
 const KEY = 'warcry-save-v1';
 
 export function newSave(faction: FactionId): SaveData {
-  return {
+  const d: SaveData = {
     v: 1,
     faction,
     src: {},
     pct: {},
-    weapons: [makeItem('weapon', FACTIONS[faction].startWeapon, 0, 1), null],
+    weapons: [null, null],
     kits: {},
     active: 0,
     equip: {},
@@ -87,6 +87,9 @@ export function newSave(faction: FactionId): SaveData {
     muted: false,
     cls: 'warrior',
   };
+  // the warrior is open from the start: his three weapons (sword in hand, axe and hammer in the bag)
+  d.weapons = classKit(d, 'warrior');
+  return d;
 }
 
 export function loadSave(): SaveData | null {
@@ -119,6 +122,8 @@ export function loadSave(): SaveData | null {
     if (d.kit && !CLASSES[d.kit]) delete d.kit;
     // saves of the mage branch kept `kits` without `kit`: the hands in play were the class on the field's
     if (!d.kit && d.kits) d.kit = kitOf(d.cls);
+    // the hunter's pet was a bare id before it became an item (WeaponDef.pet, givePet)
+    delete (d as unknown as Record<string, unknown>).pet;
     if (d.gearOf && !CLASSES[d.gearOf]) delete d.gearOf;
     for (const set of Object.values(d.gear ?? {})) {
       for (const k of Object.keys(set) as ArmorSlot[]) {
@@ -131,6 +136,8 @@ export function loadSave(): SaveData | null {
     for (const k of Object.keys(d.kits ?? {}) as HeroClass[]) d.kits![k] = fitHands(d, k, d.kits![k]!);
     giveOrbs(d);
     givePet(d);
+    giveShield(d);
+    giveStartWeapons(d);
     return d;
   } catch {
     return null;
@@ -160,20 +167,44 @@ function giveOrbs(d: SaveData) {
   if (hands && !hands[1] && !d.bag.some((it) => it.kind === 'weapon' && WEAPONS[it.def]?.orb)) hands[1] = makeItem('weapon', CLASSES.mage.kit!.left!, 0, 1);
 }
 
-/** Saves from before pet items: the hunter's pet (`pet`, else the start one) becomes the item in his empty class slot. */
+/** The hunter's pet item into his empty class slot for saves from before pets were items (none in the hands or the bag). */
 function givePet(d: SaveData) {
   const hands = (d.kit ?? 'warrior') === 'hunter' ? d.weapons : d.kits?.hunter;
-  const id = d.pet && PETS[d.pet] ? d.pet : START_PET;
-  delete d.pet;
-  if (hands && !hands[1] && !d.bag.some((it) => it.kind === 'weapon' && WEAPONS[it.def]?.pet)) hands[1] = makeItem('weapon', `pet_${id}`, 0, 1);
+  if (hands && !hands[1] && !d.bag.some((it) => it.kind === 'weapon' && WEAPONS[it.def]?.pet)) hands[1] = makeItem('weapon', CLASSES.hunter.kit!.left!, 0, 1);
 }
 
-/** Gear of a class taking the field for the first time (ClassDef.kit); its extra start items go into the bag. */
+/** The warrior's empty shield slot (saves from before the start shield): a shield from the bag, else a common one. */
+function giveShield(d: SaveData) {
+  const hands = (d.kit ?? 'warrior') === 'warrior' ? d.weapons : d.kits?.warrior;
+  if (!hands || hands[1]) return;
+  const i = d.bag.findIndex((it) => it.kind === 'weapon' && WEAPONS[it.def]?.guard);
+  hands[1] = i >= 0 ? d.bag.splice(i, 1)[0] : makeItem('weapon', CLASSES.warrior.kit!.left!, 0, 1);
+}
+
+/**
+ * Start gear of a class that opens (ClassDef.kit): its hands; the rest of its weapons go into the bag unless the
+ * hero has that weapon already (any quality).
+ */
 export function classKit(d: SaveData, c: HeroClass): SaveData['weapons'] {
   const kit = CLASSES[c].kit;
   if (!kit) return [makeItem('weapon', FACTIONS[d.faction].startWeapon, 0, 1), null];
-  for (const def of kit.bag ?? []) if (d.bag.length < BAG_SIZE) d.bag.push(makeItem('weapon', def, 0, 1));
+  for (const def of kit.bag ?? []) if (!owns(d, def) && d.bag.length < BAG_SIZE) d.bag.push(makeItem('weapon', def, 0, 1));
   return [makeItem('weapon', kit.hand, 0, 1), kit.left ? makeItem('weapon', kit.left, 0, 1) : null];
+}
+
+/** The hero has a weapon of def `def` anywhere: in hand, in another class's hands or in the bag. */
+function owns(d: SaveData, def: string) {
+  const all = [...d.weapons, ...Object.values(d.kits ?? {}).flat(), ...d.bag];
+  return all.some((it) => it?.kind === 'weapon' && it.def === def);
+}
+
+/** Saves from before the weapon sets: every open class gets the common weapons of its set it does not have. */
+function giveStartWeapons(d: SaveData) {
+  const open = (c: HeroClass) => !CLASSES[c].locked || !!d.classes?.includes(c);
+  for (const c of Object.keys(CLASSES) as HeroClass[]) {
+    if (!open(c)) continue;
+    for (const def of CLASSES[c].weapons) if (!owns(d, def) && d.bag.length < BAG_SIZE) d.bag.push(makeItem('weapon', def, 0, 1));
+  }
 }
 
 /** The item if its def still exists, else null. */

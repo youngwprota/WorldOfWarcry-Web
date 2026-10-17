@@ -8,7 +8,7 @@ import { Character } from './character';
 import { HERO, MOBS, ORBS, fmtOrb, mobImpact, type OrbKind } from './config';
 import { FloatingText, Particles, Pickups } from './fx';
 import type { Input } from './input';
-import { STAT_ICON, art } from './art';
+import { art } from './art';
 import type { DialogueLine, UI } from './ui';
 import { Ambient } from './ambient';
 import { buildRitual } from './terrain';
@@ -20,6 +20,10 @@ const KEY = 'warcry-prologue';
 /** Gains of a prologue that was finished but whose faction was not picked yet (reload-safe). */
 export function prologueDone(): Gains | null {
   try { return JSON.parse(localStorage.getItem(KEY) ?? 'null') as Gains | null; } catch { return null; }
+}
+/** Marks the prologue finished with `gains`: the next load opens the faction choice. */
+export function savePrologue(gains: Gains) {
+  try { localStorage.setItem(KEY, JSON.stringify(gains)); } catch { /* private mode */ }
 }
 export function clearPrologue() {
   try { localStorage.removeItem(KEY); } catch { /* ignore */ }
@@ -60,6 +64,9 @@ type Stage = 'intro' | 'hunt' | 'return' | 'talk' | 'end';
 export class Prologue {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(46, 9 / 16, 0.3, 90);
+  /** The gear button (main.ts opens the tutorial settings); `paused` stops the scene while they are open. */
+  onSettings: () => void = () => {};
+  paused = false;
   private hero: Character;
   private lich: Character;
   private skeletons: Skeleton[] = [];
@@ -138,7 +145,7 @@ export class Prologue {
     labels.appendChild(this.layer);
     this.fx = new FloatingText(this.layer, this.camera);
     this.particles = new Particles(this.scene);
-    this.pickups = new Pickups(this.scene);
+    this.pickups = new Pickups(this.scene, this.camera);
     this.pickups.onCollect = (k) => this.collect(k as OrbKind);
     this.mark.className = 'qmark';
     this.heroBar.className = 'herohp';
@@ -146,10 +153,14 @@ export class Prologue {
     this.layer.append(this.mark, this.heroBar);
 
     this.hud.id = 'pro-hud';
-    this.hud.innerHTML = `<div id="pro-stats"></div><div id="pro-quest"></div><div id="pro-hint"></div><div class="pro-arrow">➤</div>`;
+    this.hud.innerHTML = `<button class="ui-block round-btn pro-settings" aria-label="Настройки">${art('gear', 40)}</button><div id="pro-quest"></div><div id="pro-hint"></div><div class="pro-arrow">➤</div>`;
+    this.hud.querySelector('.pro-settings')!.addEventListener('click', () => {
+      sfx.click();
+      this.input.reset();
+      this.onSettings();
+    });
     this.cine.id = 'cine';
     ui.app.append(this.cine, this.hud);
-    this.renderStats();
 
     // Opening shot: high above the Lich, then the camera dollies in to the waking spirit.
     this.camPos.set(0, 22, 18);
@@ -157,7 +168,7 @@ export class Prologue {
     this.input.enabled = false;
     this.cine.classList.add('on');
     sfx.telegraph();
-    setTimeout(() => this.introTalk(), 2000);
+    setTimeout(() => this.stage !== 'end' && this.introTalk(), 2000);
   }
 
   // ---------- level ----------
@@ -307,7 +318,6 @@ export class Prologue {
     this.input.enabled = true;
     this.input.reset();
     sfx.levelUp();
-    document.getElementById('pro-stats')!.classList.add('show');
     this.renderQuest();
     this.hint('Тяни палец по экрану (или WASD), чтобы идти', 4000);
     setTimeout(() => this.stage === 'hunt' && this.kills === 0 && this.hint('Подойди к скелету — ты атакуешь сам', 4000), 4500);
@@ -326,7 +336,7 @@ export class Prologue {
     this.input.reset();
     this.cine.classList.add('on');
     this.mark.classList.remove('show');
-    try { localStorage.setItem(KEY, JSON.stringify(this.gains)); } catch { /* private mode */ }
+    savePrologue(this.gains);
     const lines: DialogueLine[] = [
       { who: LICH_NAME, portrait: LICH_FACE, text: 'Я слышал, как они уходят. Три души обрели покой, и это сделал ты.' },
       { who: LICH_NAME, portrait: LICH_FACE, text: 'За заслуги перед нежитью я дам тебе то, чего не получал никто из мёртвых: вторую жизнь.' },
@@ -345,6 +355,13 @@ export class Prologue {
       },
     ];
     this.ui.dialogue(lines, () => this.finish());
+  }
+
+  /** Debug (the tutorial's settings): straight to the faction choice with what was gathered so far. */
+  skip() {
+    if (this.stage === 'end') return;
+    document.getElementById('dialogue')?.remove();
+    this.finish();
   }
 
   private finish() {
@@ -386,33 +403,16 @@ export class Prologue {
   private get maxHp() { return this.stat('hp'); }
   private get power() { return this.stat('power'); }
 
-  private renderStats(pop?: OrbKind) {
-    // Same look as the main HUD stats (#stats): coloured icon + number.
-    const fmt = (k: OrbKind) => {
-      const v = this.stat(k);
-      return String(Math.round(v));
-    };
-    const el = document.getElementById('pro-stats')!;
-    el.innerHTML = (['power', 'hp', 'regen', 'speed'] as OrbKind[])
-      .map((k) => `<div class="st" data-k="${k}">${art(STAT_ICON[k], 38)}<span>${fmt(k)}</span></div>`)
-      .join('');
-    if (pop) {
-      const d = el.querySelector<HTMLElement>(`[data-k="${pop}"]`)!;
-      d.classList.add('pop');
-      setTimeout(() => d.classList.remove('pop'), 150);
-    }
-  }
-
   private collect(k: OrbKind) {
     this.gains[k]++;
     if (k === 'hp') this.hp = Math.min(this.maxHp, this.hp + ORBS.hp.value);
     sfx.orb();
     this.fx.spawn(v1.copy(this.hero.position).setY(2.1), `${fmtOrb(k)} ${ORBS[k].label}`, 'orb', 0.7, { color: ORBS[k].css });
-    this.renderStats(k);
   }
 
   // ---------- loop ----------
   update(dt: number) {
+    if (this.paused) return;
     dt = Math.min(dt, 1 / 20);
     this.time += dt;
     this.updateHero(dt);

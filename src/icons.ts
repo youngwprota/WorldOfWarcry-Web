@@ -14,6 +14,7 @@ const SVG: Record<string, string> = {
   axe: '<g transform="rotate(30 12 12)"><path d="M10.9 2.5h2.3v19.5h-2.3z"/><path d="M13 3.5c6-1 9.5 3.2 8.6 9.2-2.6-1.8-5.6-2.2-8.6-1.2z"/></g>',
   hammer: '<g transform="rotate(30 12 12)"><path d="M10.8 8h2.5v14h-2.5z"/><rect x="4" y="2.5" width="16" height="7" rx="1.5"/></g>',
   bow: '<g transform="rotate(45 12 12)"><path d="M9 1.5c7 2.5 7 18.5 0 21l-1.2-1.6c5.4-2.6 5.4-15.2 0-17.8z"/><path d="M8.4 2.6h1.4v18.8H8.4z"/><path d="M3 11h13v2H3z"/><path d="M15.5 9l5 3-5 3z"/></g>',
+  gun: '<g transform="rotate(-40 12 12)"><path d="M1 11.5l7-1 .8 4L2.6 17c-1 .3-1.6-.4-1.6-1.4z"/><rect x="8" y="9.6" width="4.6" height="3.6" rx=".8"/><rect x="12" y="9" width="11" height="3.4" rx="1"/><path d="M9.5 13.2c0 2.4 2.4 2.4 2.4 0" fill="none" stroke-width="1.2"/></g>',
   staff: '<g transform="rotate(30 12 12)"><path d="M10.9 9h2.2v13h-2.2z"/><circle cx="12" cy="5.5" r="4"/></g>',
   head: '<path d="M11 2h2v4h-2z"/><path d="M4 15c0-5.5 3.6-9.5 8-9.5s8 4 8 9.5v2H4z"/><path d="M2.5 16h19v3.5h-19z"/><path d="M11 9h2v7h-2z" fill="' + INK + '"/>',
   chest: '<path d="M7 3l5 2.2L17 3l4.5 3.2-2.3 5.3H17V21H7v-9.5H4.8L2.5 6.2z"/><path d="M11.2 6.5h1.6V20h-1.6z" fill="' + INK + '" opacity=".35"/>',
@@ -34,6 +35,11 @@ const SVG: Record<string, string> = {
   shield: '<path d="M12 2l9 3.5v6c0 5.5-4 9-9 10.5C7 20.5 3 17 3 11.5v-6z"/>',
   anvil: '<path d="M2 5h16c0 3 2 4 4 4v2h-6.5L13 14v3h3v4.5H7V17h3v-3l-3-3H4.5C3 9.4 2 7.4 2 5z"/>',
 };
+// class button icons (art.ts cls_*) keep their weapon's silhouette on the map's drop badge
+SVG.cls_warrior = SVG.shield;
+// the class icon's bow alone (no arrow), shifted so the bow itself sits in the middle
+SVG.cls_hunter = '<g transform="rotate(45 12 12) translate(-4.3 0) scale(0.375)"><path d="M32 4C46 4 54 18 54 32C54 46 46 60 32 60L32 53.7C41.7 53.7 46.65 43 46.65 32C46.65 21 41.7 10.3 32 10.3Z"/><path d="M30 6h4v52h-4z"/></g>';
+SVG.cls_mage = SVG.staff;
 
 /** Any UI icon: silhouette in `color` with an ink outline. */
 const imgCache = new Map<string, HTMLImageElement>();
@@ -118,9 +124,11 @@ export function rewardChips(def: Pick<Target, 'reward'>, raw = false) {
  * otherwise the stats it gives, each a big number with the stat's icon ("20 ❤").
  * `raw`: the numbers are stat units already (a micro-boss's bonus: hp 500 → 500), not orb counts.
  */
-export function lootHtml(reward: Partial<Record<OrbKind, number>>, item?: { icon: string; color: string } | { icon: string; color: string }[] | null, raw = false) {
+/** A drop badge over a mob: its icon in its quality colour; `any`: a random weapon of the class (a «?» on it). */
+type LootBadge = { icon: string; color: string; any?: boolean };
+export function lootHtml(reward: Partial<Record<OrbKind, number>>, item?: LootBadge | LootBadge[] | null, raw = false) {
   const items = !item ? [] : Array.isArray(item) ? item : [item];
-  if (items.length) return items.map((it) => `<span class="lt item" style="--rc:${it.color}">${art(it.icon, 40)}</span>`).join('');
+  if (items.length) return items.map((it) => `<span class="lt item" style="--rc:${it.color}">${art(it.icon, 40)}${it.any ? '<b class="any">?</b>' : ''}</span>`).join('');
   return (Object.entries(reward) as [OrbKind, number][])
     .map(([k, n]) => `<span class="lt" title="${ORBS[k].label}"><b>${fmtK(raw ? n : Math.round(ORBS[k].value * n))}</b>${art(STAT_ICON[k], 28)}</span>`)
     .join('');

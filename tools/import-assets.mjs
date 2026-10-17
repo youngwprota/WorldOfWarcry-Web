@@ -49,6 +49,9 @@ const models = [
   `${C}/Undead/Assassin/Models/undead_assassin.fbx`,
   `${C}/Undead/King/Models/undead_king.fbx`,
   `${C}/Undead/King/Models/sword_undead_king.fbx`,
+  `${C}/Undead/Archer/Models/undead_archer.fbx`,
+  `${C}/Undead/Archer/Models/bow_undead_archer.fbx`,
+  `${C}/Undead/Archer/Models/arrow_undead_archer.fbx`,
   // props: humans
   ...['barrel', 'box_small_1', 'box_large_1', 'campfire', 'flag', 'lantern_street', 'anvil_big'].map(
     (n) => `${B}/Humans/Models/Parts/${n}.fbx`,
