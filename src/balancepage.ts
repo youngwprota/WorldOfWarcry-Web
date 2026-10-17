@@ -7,6 +7,7 @@ import { renderMap } from './balancemap';
 import { load as loadGameLog, type Log } from './balancelog';
 import { CLASSES, CLASS_IDS, type HeroClass } from './party';
 import type { Job, JobMsg } from './balanceworker';
+import { renderTune } from './tunetab';
 
 // ---------- small helpers ----------
 const $ = <T extends HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
@@ -46,12 +47,13 @@ const setList = () => Object.entries(sets) as [string, unknown][];
 const editCount = () => Object.keys(sets).length;
 
 // ---------- worker ----------
-function runJob(job: Job, onProgress?: (done: number, total: number) => void): Promise<Exclude<JobMsg, { kind: 'progress' | 'error' }>> {
+function runJob(job: Job, onProgress?: (done: number, total: number) => void, onLog?: (line: string) => void): Promise<Exclude<JobMsg, { kind: 'progress' | 'error' | 'log' }>> {
   return new Promise((resolve, reject) => {
     const w = new Worker(new URL('./balanceworker.ts', import.meta.url), { type: 'module' });
     w.onmessage = (e: MessageEvent<JobMsg>) => {
       const m = e.data;
       if (m.kind === 'progress') { onProgress?.(m.done, m.total); return; }
+      if (m.kind === 'log') { onLog?.(m.line); return; }
       w.terminate();
       if (m.kind === 'error') reject(new Error(m.message));
       else resolve(m);
@@ -80,7 +82,7 @@ async function runSim(o: SimOpts, withSets: boolean, onProgress: (done: number) 
 }
 
 // ---------- tabs ----------
-const TABS: [string, string][] = [['sim', 'Сим'], ['map', 'Карта'], ['bench', 'Стенд оружий'], ['config', 'Конфиг'], ['log', 'Лог из игры']];
+const TABS: [string, string][] = [['sim', 'Сим'], ['map', 'Карта'], ['bench', 'Стенд оружий'], ['config', 'Конфиг'], ['tune', 'Цели'], ['log', 'Лог из игры']];
 function renderTabs() {
   const n = editCount();
   $('#tabs').innerHTML = TABS.map(([id, name]) =>
@@ -100,6 +102,10 @@ function render() {
   else if (tab === 'bench') renderBench(root);
   else if (tab === 'config') renderConfig(root);
   else if (tab === 'log') renderLog(root);
+  else if (tab === 'tune') renderTune(root, {
+    esc, chart, runJob, sets: setList, opts: () => opts,
+    addSets: (s) => { Object.assign(sets, s); saveSets(); },
+  });
   else renderSim(root);
 }
 

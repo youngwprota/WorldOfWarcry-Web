@@ -2,9 +2,10 @@
 Дописывать после каждого шага. Это переживает автокомпакт.
 
 ## Сейчас
-Шаг: 5 готов · Дальше: шаг 6 — вкладка «Цели» в balance.html
+Шаг: 6 готов · Дальше: шаг 7 — полный подбор, --write отдельным коммитом, README, браузер. Пользователь просил выключить комп по окончании (shutdown /s /t 60).
 
 ## Решения по ходу
+- Шаг 6: весь tune() идёт в одном воркере (job 'tune'; пробы босса тяжёлые — не на странице), прогоны — во вложенных воркерах (job 'run'), лог строками (msg 'log'). src/tunetab.ts получает от страницы ctx (esc, chart, runJob, sets) — без импорта balancepage (это вход). Запись — POST /__tune-write, плагин в vite.config.ts (apply: serve). Подбор стартует с правок вкладки «Конфиг».
 - Шаг 5: writeTuned в src/tunedblock.ts (без импортов — его грузит vite.config.ts): блок <tuned> сливается — старые строки остаются, новые заменяют, сортировка по пути. CLI --write пишет src/config.ts из корня. HP босса считается от probeBoss().hp (поле с ZONE_TIER и напарником), а не от MobDef.hp.
 - Шаг 4: ручки — ZONE_SCALE[zone] (hp/dmg по рангам, reward, token) в config.ts, применяют game.ts addMob и sim foeOf/rewardOf; боссы — MOBS[id].hp/dmg. Круг локации: прогон до tProbe (stopTime → чекпойнт 'time') → HP мобов (демпф ^0.6) → HP босса = dps×бой (probeBoss) → урон бисекцией до 50% → проверка stopAt. Минута — regula falsi по tProbe; берётся лучший круг по сумме промахов. Все круги от фиксированных чекпойнтов прошлого босса.
 - Шаг 3: tools/pool.ts — runPool(job) по worker_threads (новый поток на часть прогонов, свой конфиг с sets); бандл сам себе воркер (poolWorker()). Типы node — tools/node-shim.d.ts (нет @types/node), tsconfig include расширен.
