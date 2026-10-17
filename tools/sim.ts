@@ -4,6 +4,7 @@
 //                     [--set MOBS.bandit_chief.hp=6000 --set GACHA.token.normal=0.05 ...] (what-if: config edits for this run)
 import { MOBS, ORBS, ZONES, type FactionId, type OrbKind } from '../src/config';
 import { CLASSES, type HeroClass } from '../src/party';
+import { DEFAULT_TARGETS, type FightRank } from '../src/tunetargets';
 import { BOSSES, DEFAULT_OPTS, TRAIL, applySet, bench, simMap, simulate, summarize, BENCH_HP, type SimOpts } from '../src/simcore';
 
 declare const process: { argv: string[]; exit(code?: number): never };
@@ -95,6 +96,22 @@ if (LOG) {
 say('\n== Боссы: первое убийство (медиана [p10–p90]), сколько прогонов успели, длительность того боя');
 const zoneName = (id: string) => ZONES.find((z) => z.id === id)?.name ?? id;
 for (const b of sum.bosses) say(`${b.name.padEnd(19)} ${zoneName(MOBS[b.id].boss!.zone).padEnd(16)} ${mmss(b.p50)} [${mmss(b.p10)}–${mmss(b.p90)}]  ${b.won}/${sum.runs}  бой ${b.dur?.toFixed(0) ?? '—'} с  цикл леса ${b.cycle === undefined ? '—' : Math.round(b.cycle * 100) + '%'}`);
+// against the tuner's default targets (src/tunetargets.ts): fact / target, out of tolerance marked «!»
+{
+  const T = DEFAULT_TARGETS;
+  const off = (v: number | undefined, goal: number) => (v === undefined || Math.abs(v - goal) > T.tol * goal ? '!' : ' ');
+  say('\n== Цели (src/tunetargets.ts): факт / цель, «!» — вне допуска ±' + Math.round(T.tol * 100) + '%');
+  for (const b of sum.bosses) {
+    const g = T.bosses[b.id];
+    if (!g) continue;
+    const gOff = b.gacha === undefined || Math.abs(b.gacha - g.gacha) > T.tol ? '!' : ' ';
+    say(`${b.name.padEnd(19)} минута ${mmss(b.p50)} / ${String(g.at).padStart(3)}${off(b.p50 === undefined ? undefined : b.p50 / 60, g.at)}  бой ${String(b.dur?.toFixed(0) ?? '—').padStart(4)} / ${g.fight}${off(b.dur, g.fight)}  гача ${b.gacha === undefined ? ' — ' : String(Math.round(b.gacha * 100)).padStart(2) + '%'} / ${Math.round(g.gacha * 100)}%${gOff}`);
+  }
+  for (const [z, goal] of Object.entries(T.fights)) {
+    const f = sum.fightDur[z as keyof typeof sum.fightDur] ?? {};
+    say(`${zoneName(z).padEnd(19)} ${(Object.entries(goal) as [FightRank, number][]).map(([rk, s]) => `${rk} ${f[rk]?.toFixed(0) ?? '—'} / ${s}${off(f[rk], s)}`).join('   ')}`);
+  }
+}
 say(`Локации открыты (медиана, прогонов): ${sum.zones.filter((z) => z.n).map((z) => `${zoneName(z.zone)} ${mmss(z.p50).trim()} (${z.n}/${sum.runs})`).join(', ')}`);
 say(`Цикл леса (${sum.cycle.total} зарядов до 12-часового кулдауна): закрыт в ${sum.cycle.closed}/${sum.runs}, медиана ${mmss(sum.cycle.doneAt)}`);
 say(`\nКрутки (медиана): 10 мин ${sum.pulls[10]}, 20 мин ${sum.pulls[20]}, 30 мин ${sum.pulls[30]}; смертей за прогон ${sum.deaths}`);

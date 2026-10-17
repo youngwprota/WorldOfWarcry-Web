@@ -7,7 +7,7 @@ import {
   CEMETERY_AREAS, CEMETERY_PACKS, DUNES_SPAWNERS, GROVE_SPAWNERS, HILLS_BANNERS, HILLS_EXTRA, HILLS_LIONS, HILLS_PACKS, HILLS_SNAGS, LAND_ELITES, MINI_PAIR_OF, PEAKS_SPAWNERS,
   SPAWN_PRESETS, SWAMP_SPAWNERS, PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, ZONE_FOES, ZONE_TIER, depthMul, mobImpact, packUnits, mobRank, zoneResist,
   tokenChance as zoneTokenChance,
-  type FactionId, type MobDef, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
+  type FactionId, type MobDef, type MobRank, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
 import { addStat, heroDps, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, heroStats, type HeroBuild } from './balance';
 import { ARMOR, armorStats, dropItem, itemClass, makeItem, sameItem, weaponDamage, type Item } from './items';
@@ -440,6 +440,8 @@ type Kit = HeroBuild['weapons'];
  */
 interface Hero extends HeroBuild {
   cls: HeroClass; hp: number; bag: Item[]; pulls: number; pity: number; spot: Spot;
+  /** Items from the gacha (a copy merged into an owned item marks it too). */
+  gacha: Set<Item>;
   classes: HeroClass[]; kits: Record<HeroClass, Record<ZoneId, Kit>>; gear: Record<HeroClass, HeroBuild['equip']>;
 }
 const stats = (h: Hero) => heroStats(h);
@@ -674,12 +676,20 @@ function giveStats(h: Hero, r: Partial<Record<OrbKind, number>>, orbs: boolean) 
     if (k === 'hp') h.hp += v;
   }
 }
+/** Adds the item (a copy raises the one owned); returns the item kept. */
 function lootItem(h: Hero, it: Item) {
   const own = [...h.weapons, ...Object.values(h.equip), ...h.bag].find((x) => x && sameItem(x, it));
   if (own) own.lvl += it.lvl;
   else h.bag.push(it);
   if (!OPT.keep) regear(h);
+  return own ?? it;
 }
+const RANKS: MobRank[] = ['normal', 'elite', 'mini', 'boss'];
+/** The top rank of a fight's units; all static (trees, snags): 'static'. */
+const topRank = (g: Unit[]): MobRank | 'static' => {
+  const live = g.filter((u) => !MOBS[u.def].static);
+  return live.length ? RANKS[Math.max(...live.map((u) => RANKS.indexOf(mobRank(MOBS[u.def]))))] : 'static';
+};
 const dpsCache = new Map<string, number>();
 /**
  * Each class: the best weapon + class item it may use (party.ts classSlot) for each location, by DPS against the
@@ -745,7 +755,11 @@ export interface Snap {
   /** Chance to beat each boss now (best class), share of the forest cycle spent. */
   win: Record<string, number>; cycle: number;
 }
-export interface FightRec { def: string; depth: number; t: number; first: boolean; dur: number; swings: number; taken: number; maxHp: number; win: boolean; cls: HeroClass }
+export interface FightRec {
+  def: string; depth: number; t: number; first: boolean; dur: number; swings: number; taken: number; maxHp: number; win: boolean; cls: HeroClass;
+  /** Where, and the top rank in the fight ('static': a tree or a snag, never strikes back). */
+  zone: ZoneId; rank: MobRank | 'static';
+}
 /** What the bot did, for the map replay: a fight, a break, or a rest in the camp. */
 export interface BotEvent {
   t: number; dur: number; unit: string; def: string; x: number; z: number; res: 'kill' | 'death' | 'break' | 'rest'; cls: HeroClass;
@@ -758,6 +772,8 @@ export interface BotEvent {
 }
 export interface RunOut {
   snaps: Snap[]; bossAt: Record<string, number>; bossDur: Record<string, number>; fights: FightRec[]; pulls: number[]; deaths: number;
+  /** At each boss's first kill: share of the hero's might from gacha items (0…1). */
+  gachaShare: Record<string, number>;
   /** When each location opened (its passage unlocked by a boss), s; the forest is open from the start. */
   openAt: Partial<Record<ZoneId, number>>;
   /** Seconds of fighting by class on the field. */
@@ -793,14 +809,14 @@ function run(seed: number): RunOut {
   for (const c of classes) { const k = startKit(c); kits[c] = Object.fromEntries(ZONE_IDS.map((z) => [z, k])) as Record<ZoneId, Kit>; gear[c] = {}; }
   const h: Hero = {
     faction: OPT.faction, src: {}, pct: {}, equip: gear[classes[0]], weapons: kits[classes[0]].forest, cls: classes[0], classes, kits, gear,
-    hp: 0, bag, pulls: 0, pity: 0, spot: { s: sCamp, off: 0 },
+    hp: 0, bag, pulls: 0, pity: 0, gacha: new Set(), spot: { s: sCamp, off: 0 },
   };
   h.hp = stats(h).maxHp;
   const units = buildUnits();
   const capped = (u: Unit) => u.zone === 'forest' && !u.temp && u.charges.length > 1 && Math.max(...u.charges) >= 3600;
   const spent = new Map<Unit, number>();
   const out: RunOut = {
-    snaps: [], bossAt: {}, bossDur: {}, openAt: { forest: 0 }, fights: [], pulls: [], deaths: 0, classTime: {}, path: [], events: [],
+    snaps: [], bossAt: {}, bossDur: {}, gachaShare: {}, openAt: { forest: 0 }, fights: [], pulls: [], deaths: 0, classTime: {}, path: [], events: [],
     cycle: { total: units.filter(capped).reduce((a, u) => a + u.charges.length, 0), done: 0, atBoss: {} },
   };
   dpsCache.clear();
@@ -925,6 +941,13 @@ function run(seed: number): RunOut {
     const ehp = st.maxHp / (armorMul(st.defense) * guardMul(x.weapons) * (1 - st.dodge)) + st.regen * 30;
     return dps * ehp * st.speed ** 0.3;
   };
+  /** Share of the hero's might (the class on the field) that the gacha items give: 1 − might without them / with them. */
+  const gachaShare = () => {
+    if (!h.gacha.size) return 0;
+    const no = (x: Item | null) => (x && h.gacha.has(x) ? null : x);
+    const bare: Hero = { ...h, weapons: [no(h.weapons[0]), no(h.weapons[1])], equip: Object.fromEntries(Object.entries(h.equip).filter(([, x]) => !h.gacha.has(x!))) };
+    return Math.max(0, 1 - might(bare) / might(h));
+  };
   const worthCache = new Map<string, number>();
   let worthVer = -1;
   /** A reward's worth: 100 × log of the hero's might after / before (≈ the % it makes him stronger), for the hero as he is. */
@@ -1022,7 +1045,7 @@ function run(seed: number): RunOut {
       const key = [...n].sort(([a], [b]) => (a < b ? -1 : 1)).map(([d, k]) => (k > 1 ? `${d}×${k}` : d)).join('+');
       const first = !out.fights.some((f) => f.def === key && f.depth === u.depth);
       const packInfo = group.length > 1 ? { def: key, pack: group.slice(1).map((m) => m.id) } : {};
-      out.fights.push({ def: key, depth: u.depth, t, first, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: st.maxHp, win: r.win, cls: h.cls });
+      out.fights.push({ def: key, depth: u.depth, t, first, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: st.maxHp, win: r.win, cls: h.cls, zone: u.zone, rank: topRank(group) });
       out.classTime[h.cls] = (out.classTime[h.cls] ?? 0) + r.dur;
       if (!r.win) {
         event(u, t0, 'death', { taken: r.taken / st.maxHp, ...packInfo });
@@ -1058,7 +1081,10 @@ function run(seed: number): RunOut {
       });
       const d = MOBS[group.find((m) => MOBS[m.def].boss)?.def ?? u.def];
       if (d.boss) {
-        if (!out.bossAt[d.id]) { out.bossAt[d.id] = t; out.bossDur[d.id] = r.dur; out.cycle.atBoss[d.id] = out.cycle.done / out.cycle.total; }
+        if (!out.bossAt[d.id]) {
+          out.bossAt[d.id] = t; out.bossDur[d.id] = r.dur; out.cycle.atBoss[d.id] = out.cycle.done / out.cycle.total;
+          out.gachaShare[d.id] = gachaShare();
+        }
         // the first kill opens the boss's passages (boss.unlocks → GATES)
         if (d.boss.unlocks.some((g) => !openGates.has(g))) {
           openGate(...d.boss.unlocks);
@@ -1073,7 +1099,7 @@ function run(seed: number): RunOut {
       h.pulls--;
       const p = pull(h.pity, 1);
       h.pity = p.pity;
-      lootItem(h, p.item);
+      h.gacha.add(lootItem(h, p.item));
     }
     // each spawner's next charge
     for (const m of group) {
@@ -1157,7 +1183,7 @@ export function bench(): BenchRow[] {
       rs = i + 1;
       const cls = weaponClass(a) ?? 'warrior'; // (the hunter's pet is his class item: `b`, none for a lone bow)
       const h: Hero = {
-        faction: 'human', src: { debug: { hp: 1e6, regen: -HERO.regen } }, pct: {}, equip: {}, hp: 1e6, bag: [], pulls: 0, pity: 0, spot: { s: 0, off: 0 },
+        faction: 'human', src: { debug: { hp: 1e6, regen: -HERO.regen } }, pct: {}, equip: {}, hp: 1e6, bag: [], pulls: 0, pity: 0, gacha: new Set(), spot: { s: 0, off: 0 },
         weapons: [makeItem('weapon', a, 2, 1), b ? makeItem('weapon', b, 2, 1) : null], cls, classes: [cls], kits: {} as Hero['kits'], gear: {} as Hero['gear'],
       };
       sum += fight(h, { def, hp: BENCH_HP, dmg: 0 }, false, 600).dur;
@@ -1177,6 +1203,8 @@ export const pct = (a: number[], q: number) => { if (!a.length) return undefined
 
 export interface BossSum {
   id: string; name: string; p10?: number; p50?: number; p90?: number; won: number; dur?: number;
+  /** Median share of might from gacha items at the first kill. */
+  gacha?: number;
   /** Median share of the forest cycle spent at the first kill (runs that killed it). */
   cycle?: number;
 }
@@ -1184,6 +1212,8 @@ export interface MobAvg { swings: number; dur: number; takenPct: number; t: numb
 export interface MobSum { key: string; n: number; first: MobAvg; all: MobAvg; losses: number }
 export interface SimSummary {
   runs: number; bosses: BossSum[]; pulls: Record<10 | 20 | 30, number | undefined>; deaths?: number; mobs: MobSum[];
+  /** Median fight length, s, by location and top rank (won fights; a pack is one fight). */
+  fightDur: Partial<Record<ZoneId, Partial<Record<MobRank | 'static', number>>>>;
   /** Each location: median time it opened (runs that opened it). */
   zones: { zone: ZoneId; p50?: number; n: number }[];
   /** Share of all fighting time by class on the field (0…1). */
@@ -1197,7 +1227,8 @@ export function summarize(runs: RunOut[]): SimSummary {
     const at = runs.map((r) => r.bossAt[b.id]).filter((x): x is number => x !== undefined);
     const dur = runs.map((r) => r.bossDur[b.id]).filter((x): x is number => x !== undefined);
     const cyc = runs.map((r) => r.cycle.atBoss[b.id]).filter((x): x is number => x !== undefined);
-    return { id: b.id, name: b.name, p10: pct(at, 0.1), p50: pct(at, 0.5), p90: pct(at, 0.9), won: at.length, dur: pct(dur, 0.5), cycle: pct(cyc, 0.5) };
+    const gacha = runs.map((r) => r.gachaShare[b.id]).filter((x): x is number => x !== undefined);
+    return { id: b.id, name: b.name, p10: pct(at, 0.1), p50: pct(at, 0.5), p90: pct(at, 0.9), won: at.length, dur: pct(dur, 0.5), cycle: pct(cyc, 0.5), gacha: pct(gacha, 0.5) };
   });
   const pullsBy = (m: number) => pct(runs.map((r) => r.pulls.filter((x) => x <= m * 60).length), 0.5);
   const by = new Map<string, FightRec[]>();
@@ -1216,5 +1247,9 @@ export function summarize(runs: RunOut[]): SimSummary {
   const closed = runs.map((r) => r.cycle.doneAt).filter((x): x is number => x !== undefined);
   const cycle = { total: runs[0]?.cycle.total ?? 0, doneAt: pct(closed, 0.5), closed: closed.length };
   const zones = ZONE_IDS.map((zone) => { const at = runs.map((r) => r.openAt[zone]).filter((x): x is number => x !== undefined); return { zone, p50: pct(at, 0.5), n: at.length }; });
-  return { runs: runs.length, bosses, zones, pulls: { 10: pullsBy(10), 20: pullsBy(20), 30: pullsBy(30) }, deaths: pct(runs.map((r) => r.deaths), 0.5), mobs, classShare, cycle };
+  const fightDur: SimSummary['fightDur'] = {};
+  const durs = new Map<string, number[]>();
+  for (const r of runs) for (const f of r.fights) if (f.win) { const k = `${f.zone}|${f.rank}`; durs.set(k, [...(durs.get(k) ?? []), f.dur]); }
+  for (const [k, a] of durs) { const [z, rk] = k.split('|') as [ZoneId, MobRank | 'static']; (fightDur[z] ??= {})[rk] = pct(a, 0.5); }
+  return { runs: runs.length, bosses, zones, fightDur, pulls: { 10: pullsBy(10), 20: pullsBy(20), 30: pullsBy(30) }, deaths: pct(runs.map((r) => r.deaths), 0.5), mobs, classShare, cycle };
 }
