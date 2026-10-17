@@ -19,6 +19,7 @@ import sys
 
 import bpy
 from mathutils import Vector
+from mathutils.bvhtree import BVHTree
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -67,6 +68,21 @@ def points(model, part, bones=None, minw=0.4):
                     continue
             out.append(m @ v.co)
     return out
+
+
+def surface(model, part):
+    """BVH of a body part of `model` in mesh space (ray casts onto the real faces, not the sparse vertices)."""
+    col, rig = unit(model)
+    inv = rig.matrix_world.inverted()
+    verts, polys = [], []
+    for o in col.objects:
+        if o.type != "MESH" or not o.name.startswith(PREFIXES[part]):
+            continue
+        m = inv @ o.matrix_world
+        base = len(verts)
+        verts += [m @ v.co for v in o.data.vertices]
+        polys += [[base + i for i in p.vertices] for p in o.data.polygons]
+    return BVHTree.FromPolygons(verts, polys) if polys else None
 
 
 def bone(model, name):
@@ -173,6 +189,18 @@ class Build:
         ring = self.ring(Vector(base), u, v, r, r, seg)
         self.fan(self.v(Vector(base) + d * length), ring, col)
         self.fan(self.v(Vector(base) - d * 0.5), list(reversed(ring)), col)
+
+    def tube(self, path, r, col, seg=6, closed=True):
+        """Round cord along the points of `path` (a loop when `closed`)."""
+        n = len(path)
+        rings = []
+        for i in range(n):
+            a, b = path[i - 1] if (closed or i) else path[i], path[(i + 1) % n] if (closed or i < n - 1) else path[i]
+            t = (b - a).normalized()
+            u = t.cross(Vector((0, 0, 1)) if abs(t.z) < 0.9 else Vector((1, 0, 0))).normalized()
+            rings.append(self.ring(path[i], u, t.cross(u), r, r, seg))
+        for i in range(n if closed else n - 1):
+            self.strip(rings[i], rings[(i + 1) % n], col)
 
     def crystal(self, c, axis, h, r, col):
         axis = Vector(axis).normalized()
@@ -364,9 +392,10 @@ def amulet_piece(faction, r):
     zf = max(max((p.z for p in pick(points(m, "chest"), y=(ya - 3, ya + 3), x=(-5, 5))), default=s3.z) for m in models)
     b = Build()
     ctr = Vector((0, ya - 3, zf + 1.0))
-    for s in (-1, 1):  # chain
-        top = Vector((s * 9, ya + 9, zf - 7))
-        b.slab((ctr + top) / 2, FWD, top - ctr, (top - ctr).length, 0.9, 0.9, c["steel"] if k < 3 else c["trim"])
+    pr = 3 + 0.45 * k  # pendant radius
+    b.tube(cord_path(models, ctr + UP * (pr - 0.6), 0.55 + 0.05 * k), 0.55 + 0.05 * k,
+           (0.32, 0.2, 0.11) if k == 0 else c["steel"] if k < 3 else c["trim"], seg=6)
+    b.band(ctr + UP * (pr + 0.2), FWD, UP, 0.9, 0.9, 0.9, 0.45, c["trim"] if k else (0.6, 0.42, 0.22), seg=8)
     b.dome(ctr, FWD, UP, 3 + 0.45 * k, 3 + 0.45 * k, 1.0, c["trim"] if k else (0.6, 0.42, 0.22), seg=8, rings=2)
     b.gem(ctr + FWD * 0.8, FWD, 1.6 + 0.35 * k, 1.5, c["gem"])
     if k >= 3:
@@ -380,6 +409,45 @@ def amulet_piece(faction, r):
         for i in range(3):
             b.crystal(ctr + Vector(((i - 1) * 5, 8, 3)), (0, 1, 0.2), 2.4, 0.8, c["gem"])
     return {"spine_03": b}
+
+
+def cord_path(models, bail, r, n=40):
+    """The amulet's cord: a loop around the neck laid on the bulkiest chest of `models` — over the chest front down to
+    the pendant's bail, on top of the shoulders and behind the neck (hidden under the head). Mesh space points."""
+    trees = [t for t in (surface(m, "chest") for m in models) if t]
+    nk = bone(models[0], "neck_01")[0]
+    zc, side, back = nk.z, 10.5, 9.0  # loop around the neck: centre z, half width, depth behind
+    lift = r + 0.25
+
+    def front(x, y):  # outermost chest surface hit along -z
+        hits = [t.ray_cast(Vector((x, y, 80)), Vector((0, 0, -1)))[0] for t in trees]
+        hits = [h for h in hits if h]
+        return max((h.z for h in hits), default=None)
+
+    def top(x, z):  # highest chest surface hit straight down (the shoulders, the back of the collar)
+        hits = [t.ray_cast(Vector((x, 160, z)), Vector((0, -1, 0)))[0] for t in trees]
+        hits = [h for h in hits if h and h.y < nk.y + 6]
+        return max((h.y for h in hits), default=None)
+
+    pts = []
+    for i in range(n):
+        th = 2 * math.pi * i / n  # 0 = the bail in front, π = behind the neck
+        sx = math.sin(th)
+        x = side * sx
+        if math.cos(th) > 0.25:
+            # front: from the bail up over the chest; height grows with the distance from the middle
+            f = 1 - math.cos(th)
+            y = bail.y + (nk.y - 1 - bail.y) * min(1, f / 0.75) ** 0.8
+            z = front(x, y)
+            z = (z if z is not None else bail.z) + lift
+            if i == 0:
+                y, z = bail.y, bail.z
+            pts.append(Vector((x, y, z)))
+        else:
+            z = zc + (back if math.cos(th) < 0 else 4.0) * math.cos(th) / (1 if math.cos(th) < 0 else 0.25)
+            y = top(x, z)
+            pts.append(Vector((x, (y if y is not None else nk.y - 1) + lift, z)))
+    return pts
 
 
 def ring_piece(faction, r):
