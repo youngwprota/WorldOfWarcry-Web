@@ -73,13 +73,16 @@ const ORB_AT = new THREE.Vector3(-0.45, 1.9, -0.1);
 /**
  * Fixed generous bounds for a skinned mesh (like Unity's fixed SkinnedMeshRenderer Bounds): three would otherwise
  * cache the sphere of whatever pose it meets first. Call with up-to-date world matrices.
+ * `skinned`: for a part moved in from another file (setOutfit), whose own transform no longer matches where its bones
+ * draw it (the hunter sets' FBX parts sit metres apart in their files).
  */
-export function fixSkinBounds(m: THREE.SkinnedMesh) {
+export function fixSkinBounds(m: THREE.SkinnedMesh, skinned = false) {
   // the bind-pose sphere of the shared geometry: SkinnedMesh.computeBoundingSphere skins every vertex on the CPU
   // (hundreds of mobs at load), and the 1.5x margin below covers the animated poses anyway
   const g = m.geometry;
   if (!g.boundingSphere) g.computeBoundingSphere();
-  const s = (m.boundingSphere = g.boundingSphere!.clone());
+  if (skinned) m.computeBoundingSphere();
+  const s = skinned ? m.boundingSphere! : (m.boundingSphere = g.boundingSphere!.clone());
   s.radius = s.radius * 1.5 + 0.6 / (m.matrixWorld.getMaxScaleOnAxis() || 1);
   m.frustumCulled = true;
 }
@@ -397,7 +400,7 @@ export class Character {
         parent.add(sm);
         sm.bind(skel, bind);
         this.model.updateMatrixWorld(true);
-        fixSkinBounds(sm);
+        fixSkinBounds(sm, true);
         sm.castShadow = true;
         sm.material = Array.isArray(sm.material) ? sm.material.map(copy) : copy(sm.material);
       }
