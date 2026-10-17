@@ -11,7 +11,9 @@ import { assets } from './assets';
 import { sfx } from './audio';
 import { FORGE3D as F, GACHA, RARITY, WEAPONS, type FactionId } from './config';
 import { gachaTier } from './gacha';
-import { itemModel, type Item } from './items';
+import { ARMOR, PART_PREFIXES, itemModel, trimModel, type Item } from './items';
+import { CLASS_LOOK } from './looks';
+import type { HeroClass } from './party';
 
 let propsPromise: Promise<THREE.Group> | null = null;
 function loadProps() {
@@ -333,25 +335,67 @@ export class Forge3D {
 
   get busy() { return this.playing && !this.revealed; }
 
+  /**
+   * Loads what the item's model needs before the reveal (rings / amulets: their quality GLB; gloves: the wearer's
+   * class set part, see armourModel). `cls`: who would wear it (gloves look like that class's).
+   */
+  prepare(item: Item, cls: HeroClass): Promise<unknown> {
+    this.cls = cls;
+    if (item.kind === 'weapon') return Promise.resolve();
+    const slot = ARMOR[item.def].slot;
+    if (slot === 'ring' || slot === 'amulet') return assets.gear(trimModel(slot, item.rarity, this.faction)).catch(() => undefined);
+    const part = CLASS_LOOK[cls].part(this.faction, item, 'arms');
+    return part ? assets.ensure([part]).catch(() => undefined) : Promise.resolve();
+  }
+  private cls: HeroClass = 'warrior';
+
+  /** The armour item as a model: a jewel's quality GLB, or one arm of the wearer's set gloves; null = not loaded. */
+  private armourModel(item: Item): THREE.Object3D | null {
+    const slot = ARMOR[item.def].slot;
+    if (slot === 'ring' || slot === 'amulet') {
+      const n = trimModel(slot, item.rarity, this.faction);
+      return assets.has(n) ? assets.clone(n) : null;
+    }
+    const part = CLASS_LOOK[this.cls].part(this.faction, item, 'arms');
+    if (!part || !assets.has(part)) return null;
+    const arm = oneArm(assets.clone(part), part.startsWith('archers/'), (g) => this.mine(g));
+    // the arm lies along x in the bind pose: stand it up, the hand on top
+    arm.rotation.z = -Math.PI / 2;
+    return arm;
+  }
+
   private buildItem(item: Item) {
-    let m: THREE.Object3D;
-    const pet = item.kind === 'weapon' && !!WEAPONS[item.def].pet;
-    if (item.kind === 'weapon' && (pet ? assets.hasCreature(itemModel(item, this.faction)) : assets.has(itemModel(item, this.faction)))) {
-      // a pet rises as its creature (skinned: cloned with its own skeleton), standing in its bind pose
-      m = pet ? assets.cloneCreature(itemModel(item, this.faction)).model : assets.clone(itemModel(item, this.faction));
-      const b = new THREE.Box3().setFromObject(m);
-      // a pet is long, not tall: fit its largest side, a bit bigger than a weapon
-      const h = (pet ? Math.max(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z) / F.petSize : b.max.y - b.min.y) || 1;
-      m.scale.multiplyScalar(F.itemSize / h);
-      m.position.y = -((b.min.y + b.max.y) / 2) * (F.itemSize / h);
+    let m: THREE.Object3D | null = null;
+    const w = item.kind === 'weapon' ? WEAPONS[item.def] : null;
+    // pets, mage orbs, jewels and gloves fit by their largest side; weapons by height
+    const bySide = !w || !!w.pet || !!w.orb;
+    if (w) {
+      const name = itemModel(item, this.faction);
+      // pets and mage orbs are GLB creatures (own skeleton): cloned as such
+      const creature = !!(w.pet || w.orb);
+      if (creature ? assets.hasCreature(name) : assets.has(name)) m = creature ? assets.cloneCreature(name).model : assets.clone(name);
+    } else m = this.armourModel(item);
+    if (m) {
+      const wrap = new THREE.Group();
+      wrap.add(m);
+      wrap.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(wrap);
+      const side = Math.max(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z);
+      const h = (bySide ? side / (w?.pet ? F.petSize : F.gearSize) : b.max.y - b.min.y) || 1;
+      const k = F.itemSize / h;
+      wrap.scale.setScalar(k);
+      const c = b.getCenter(new THREE.Vector3());
+      // weapons keep their own x / z (the grip on the axis), the rest is centred on every axis
+      wrap.position.set(bySide ? -c.x * k : 0, -c.y * k, bySide ? -c.z * k : 0);
+      m = wrap;
     } else {
-      // Armour has no standalone model: a loot crystal like the ones dropped in the world.
+      // a model that failed to load: a loot crystal like the ones dropped in the world
       const mat = this.mine(new THREE.MeshLambertMaterial({ color: RCOL[this.rarity], emissive: RCOL[this.rarity], emissiveIntensity: 0.3, flatShading: true }));
       m = new THREE.Mesh(this.mine(new THREE.OctahedronGeometry(0.32, 0)), mat);
       m.scale.set(1, 1.6, 1);
     }
     const tilt = new THREE.Group();
-    tilt.rotation.z = pet ? 0 : 0.35;
+    tilt.rotation.z = w?.pet ? 0 : 0.35;
     tilt.add(m);
     this.holder.add(tilt);
     this.holder.position.set(this.hitPos.x, this.top, this.hitPos.z);
@@ -550,4 +594,54 @@ export class Forge3D {
     this.renderer.dispose();
     this.renderer.forceContextLoss(); // free the context now, see HeroPreview.dispose()
   }
+}
+
+/**
+ * One arm (the right one, smaller x) of a set's gloves as a static mesh: the `arms_` meshes of a character model
+ * (`all`: every mesh of a hunter set part file) baked in their bind pose, the triangles of the other arm dropped.
+ * `own` registers each new geometry for disposal.
+ */
+function oneArm(src: THREE.Object3D, all: boolean, own: (g: THREE.BufferGeometry) => THREE.BufferGeometry): THREE.Group {
+  src.updateMatrixWorld(true);
+  const meshes: THREE.Mesh[] = [];
+  src.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh && (all || PART_PREFIXES.arms.some((p) => m.name.startsWith(p)))) meshes.push(m);
+  });
+  const box = new THREE.Box3();
+  const geos = meshes.map((m) => {
+    const g = m.geometry.clone().applyMatrix4(m.matrixWorld);
+    g.deleteAttribute('skinIndex');
+    g.deleteAttribute('skinWeight');
+    g.computeBoundingBox();
+    box.union(g.boundingBox!);
+    return g.index ? g.toNonIndexed() : g;
+  });
+  const cx = (box.min.x + box.max.x) / 2;
+  const out = new THREE.Group();
+  meshes.forEach((m, mi) => {
+    const g = geos[mi];
+    const pos = g.getAttribute('position');
+    const groups = g.groups.length ? g.groups : [{ start: 0, count: pos.count, materialIndex: 0 }];
+    const keep: number[] = [];
+    const parts: { start: number; count: number; materialIndex: number }[] = [];
+    for (const gr of groups) {
+      const start = keep.length;
+      for (let v = gr.start; v < gr.start + gr.count; v += 3) {
+        if (pos.getX(v) + pos.getX(v + 1) + pos.getX(v + 2) < cx * 3) keep.push(v, v + 1, v + 2);
+      }
+      if (keep.length > start) parts.push({ start, count: keep.length - start, materialIndex: gr.materialIndex ?? 0 });
+    }
+    if (!keep.length) return;
+    const ng = new THREE.BufferGeometry();
+    for (const name of Object.keys(g.attributes)) {
+      const a = g.getAttribute(name) as THREE.BufferAttribute;
+      const arr = new Float32Array(keep.length * a.itemSize);
+      keep.forEach((v, i) => { for (let c = 0; c < a.itemSize; c++) arr[i * a.itemSize + c] = a.array[v * a.itemSize + c]; });
+      ng.setAttribute(name, new THREE.BufferAttribute(arr, a.itemSize, a.normalized));
+    }
+    for (const p of parts) ng.addGroup(p.start, p.count, p.materialIndex);
+    out.add(new THREE.Mesh(own(ng), m.material));
+  });
+  return out;
 }

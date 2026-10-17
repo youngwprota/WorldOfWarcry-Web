@@ -96,7 +96,8 @@ export class GachaView {
     body.className = 'g-body g-over';
     body.innerHTML = '<div class="g-hint">Тап — пропустить</div>';
     const item = res.item;
-    void this.forge3d.ready.then(() => {
+    const forge = this.forge3d;
+    void Promise.all([forge.ready, forge.prepare(item, this.game.heroClass)]).then(() => {
       if (this.openNow && this.item === item) this.forge3d?.play(item, () => this.showResult());
     });
   }

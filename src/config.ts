@@ -1278,6 +1278,8 @@ export const FORGE3D = {
   anvilScale: 0.4,
   /** A pet's largest side, as a share of `itemSize`. */
   petSize: 1.3,
+  /** Largest side of a mage orb, a ring, an amulet or a glove, as a share of `itemSize`. */
+  gearSize: 0.7,
   anvilYaw: 0,
   ingot: [0, 0.04, 0] as [number, number, number],
   ingotYaw: 0,
