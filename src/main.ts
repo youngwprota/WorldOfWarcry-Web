@@ -7,7 +7,7 @@ import './grade';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { FACTIONS, FORGE3D, MOBS, ORBS, PETS, WEAPONS, type FactionId, type OrbKind } from './config';
+import { FACTIONS, FORGE3D, GFX, MOBS, ORBS, PETS, WEAPONS, type FactionId, type OrbKind } from './config';
 import { GEAR_MODELS } from './items';
 import { Game } from './game';
 import { Input } from './input';
@@ -34,11 +34,11 @@ const ui = new UI();
 startArtWave(document.getElementById('loading')!, `${import.meta.env.BASE_URL}assets/ui/loading.jpg`);
 startLoadingFx(document.getElementById('loading')!);
 const app = ui.app;
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ antialias: !GFX.mobile, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, GFX.dpr));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = GFX.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.domElement.className = 'game';
 app.prepend(renderer.domElement);
 // three.js stops the loop on context loss and restarts it on restore. If the browser never gives
@@ -130,7 +130,7 @@ let game: Game | null = null;
 
 function applyGfx(low: boolean) {
   renderer.shadowMap.enabled = !low;
-  renderer.setPixelRatio(low ? 1 : Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(low ? 1 : Math.min(devicePixelRatio, GFX.dpr));
   if (low) { post?.dispose(); post = null; } else post ??= new Post(renderer);
   resize();
   game?.setLowGfx(low);

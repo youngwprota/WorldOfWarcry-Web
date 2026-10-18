@@ -1052,6 +1052,10 @@ export const STAT_SOURCE_NAME: Record<StatSource, string> = {
  */
 export const VIEW = { heroScale: 1.4, mobScale: 1, fov: 59, env: 1.15 };
 
+// Phones are GPU fill bound on high graphics: fewer pixels, no MSAA, a smaller hard-edged shadow map.
+const MOBILE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+export const GFX = { mobile: MOBILE, dpr: MOBILE ? 1.5 : 2, msaa: MOBILE ? 0 : 4, shadowMap: MOBILE ? 1024 : 2048 };
+
 export const HERO = {
   /**
    * All stats are whole numbers. power: flat damage added to the weapon's base (before its type

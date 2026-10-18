@@ -4,6 +4,7 @@
 // quarter-resolution copy (two blur rounds), so it is six cheap passes in all. The picture itself is never blurred or hazed over.
 // Off on low graphics (main.ts renders straight to the screen then).
 import * as THREE from 'three';
+import { GFX } from './config';
 
 /** Tap spacing (quarter-res texels) of each blur round. */
 const BLUR_STEPS = [1.6, 2.6];
@@ -30,7 +31,7 @@ export class Post {
 
   constructor(private renderer: THREE.WebGLRenderer) {
     const opts = { type: THREE.HalfFloatType, depthBuffer: false };
-    this.main = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+    this.main = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: GFX.msaa });
     this.qa = new THREE.WebGLRenderTarget(1, 1, opts);
     this.qb = new THREE.WebGLRenderTarget(1, 1, opts);
     for (const t of [this.qa, this.qb]) t.texture.minFilter = t.texture.magFilter = THREE.LinearFilter;

@@ -7,6 +7,7 @@ import type { BossHost, BossKit } from './bosses/kit';
 import {
   ATTACK_HIT, FACTIONS, PETS, tokenChance, zoneScaleOf, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
   SPAWN_PRESETS, type SpawnPreset, type SpawnPresetId, mobRank, zoneResist, ZONE_FOES, ZONE_SUN, type DamageType, type ResistTier, type ItemDrop, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
+  GFX,
 } from './config';
 import { ArenaFog, DROP_TINT, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, StatAuras, Telegraphs, type Bolt } from './fx';
 import { Glows, SunLight, type GlowOpts } from './vfx';
@@ -266,7 +267,7 @@ export class Game {
     this.sun.position.set(-6, 12, 5);
     // Real-time shadows in a box that follows the camera.
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(GFX.shadowMap, GFX.shadowMap);
     const sc = this.sun.shadow.camera;
     sc.left = SHADOW_BOX.left; sc.right = SHADOW_BOX.right; sc.top = SHADOW_BOX.top; sc.bottom = SHADOW_BOX.bottom; sc.near = 1; sc.far = 90;
     this.sun.shadow.bias = -0.0006;
