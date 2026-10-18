@@ -12,5 +12,5 @@
     "useDefineForClassFields": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "tools/sim.ts"]
+  "include": ["src", "tools/sim.ts", "tools/tune.ts", "tools/pool.ts", "tools/node-shim.d.ts"]
 }

@@ -21,7 +21,11 @@ const RANK_R: Record<string, number> = { prop: 2.6, normal: 4, elite: 6, mini: 8
 const RANK_NAME: Record<string, string> = { prop: 'разрушаемый', normal: 'обычный', elite: 'элитный', mini: 'мини-босс', boss: 'босс' };
 const RES_NAME: Record<BotEvent['res'], string> = { kill: 'убит', death: 'смерть героя', break: 'разбит', rest: 'отдых' };
 const unitName = (u: MapUnit) => (u.kind === 'prop' ? PROP_NAME[u.def] ?? u.def : u.name);
-const defName = (def: string) => (def === 'camp' ? 'Лагерь' : MOBS[def]?.name ?? PROP_NAME[def] ?? def);
+const defName1 = (def: string) => (def === 'camp' ? 'Лагерь' : MOBS[def]?.name ?? PROP_NAME[def] ?? def);
+/** A def id, or a pack key: ids joined by '+', a repeat as ×n. */
+const defName = (key: string) => key.split('+').map((p) => { const [d, n] = p.split('×'); return defName1(d) + (n ? ` ×${n}` : ''); }).join(' + ');
+/** Event `e` involves unit `id` (itself or a member of its pack). */
+const hasUnit = (e: BotEvent, id: string) => e.unit === id || !!e.pack?.includes(id);
 const mainOrb = (r: Partial<Record<OrbKind, number>>) => (Object.keys(r)[0] as OrbKind | undefined) ?? 'hp';
 const fmtGain = (r?: Partial<Record<OrbKind, number>>, direct = false) =>
   Object.entries(r ?? {}).map(([k, n]) => `<span style="color:${ORBS[k as OrbKind].css}">+${Math.round((direct ? 1 : ORBS[k as OrbKind].value) * n!)} ${ORBS[k as OrbKind].label}</span>`).join(' ');
@@ -135,7 +139,7 @@ export function renderMap(root: HTMLElement, map: SimMap, runs: Run[] | null, un
   };
   const killsTo = (t: number) => {
     const n = new Map<string, number>();
-    for (const e of evs) if ((e.res === 'kill' || e.res === 'break') && e.t + e.dur <= t) n.set(e.unit, (n.get(e.unit) ?? 0) + 1);
+    for (const e of evs) if ((e.res === 'kill' || e.res === 'break') && e.t + e.dur <= t) for (const id of [e.unit, ...(e.pack ?? [])]) n.set(id, (n.get(id) ?? 0) + 1);
     return n;
   };
 
@@ -150,6 +154,14 @@ export function renderMap(root: HTMLElement, map: SimMap, runs: Run[] | null, un
     g.beginPath();
     map.trail.forEach(([x, z], i) => (i ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z))));
     g.stroke();
+    // roads of the outer locations, thinner
+    g.lineWidth = Math.max(1.5, PATH_W * k);
+    g.globalAlpha = 0.45;
+    for (const road of map.roads ?? []) {
+      g.beginPath();
+      road.forEach(([x, z], i) => (i ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z))));
+      g.stroke();
+    }
     g.globalAlpha = 1;
     const showRun = !!run && ui.path;
     const kills = showRun ? killsTo(ui.t) : null;
@@ -245,7 +257,7 @@ export function renderMap(root: HTMLElement, map: SimMap, runs: Run[] | null, un
     statEl.innerHTML = `<h3>Прогон ${ui.run + 1} к ${mmss(ui.t)}</h3>
       <div class="sub">убито: <b>${kills}</b> · смертей: <b>${deaths}</b> · отдых в лагере: <b>${mmss(rest)}</b></div>
       <div class="sub">собрано: ${fmtGain(got) || '—'}</div>`;
-    const list = ui.focus ? evs.filter((e) => e.unit === ui.focus) : evs;
+    const list = ui.focus ? evs.filter((e) => hasUnit(e, ui.focus!)) : evs;
     evEl.style.display = '';
     evEl.innerHTML = `${ui.focus ? `<div class="row" style="padding:6px 8px"><span class="muted">только: ${esc(byId.get(ui.focus) ? unitName(byId.get(ui.focus)!) : ui.focus)}</span><button class="btn" id="mfoc" style="padding:2px 8px">все</button></div>` : ''}
       <table><tr><th>время</th><th class="l">цель</th><th class="l">итог</th><th class="l">класс</th><th class="l">получил</th></tr>
@@ -254,7 +266,7 @@ export function renderMap(root: HTMLElement, map: SimMap, runs: Run[] | null, un
         const fut = e.t > ui.t;
         const u = byId.get(e.unit);
         return `<tr data-t="${e.t + e.dur}" data-u="${esc(e.unit)}" class="ev ${on ? 'cur' : ''}" style="cursor:pointer;${fut ? 'opacity:.4' : ''}">
-          <td>${mmss(e.t)}</td><td class="l">${esc(u ? unitName(u) : defName(e.def))}${e.res === 'rest' ? '' : ` <span class="muted">${Math.round(e.dur)} с</span>`}</td>
+          <td>${mmss(e.t)}</td><td class="l">${esc(u && !e.pack ? unitName(u) : defName(e.def))}${e.res === 'rest' ? '' : ` <span class="muted">${Math.round(e.dur)} с</span>`}</td>
           <td class="l ${e.res === 'death' ? 'no' : ''}">${e.res === 'rest' ? `отдых ${Math.round(e.dur)} с` : RES_NAME[e.res]}${e.taken !== undefined ? ` <span class="muted">−${Math.round(e.taken * 100)}% HP</span>` : ''}</td>
           <td class="l muted">${e.res === 'rest' ? '' : esc(CLASSES[e.cls].name)}</td>
           <td class="l">${fmtGain(e.gain)}${e.bonus ? ' ' + fmtGain(e.bonus, true) : ''}${e.item ? ` <span class="muted">${esc(e.item)}</span>` : ''}${e.pull ? ' <span class="meh">+крутка</span>' : ''}</td></tr>`;
@@ -324,9 +336,9 @@ export function renderMap(root: HTMLElement, map: SimMap, runs: Run[] | null, un
     const u = pick(e);
     canvas.style.cursor = u ? 'pointer' : '';
     if (!u) { tip.style.display = 'none'; return; }
-    const mine = evs.filter((x) => x.unit === u.id && (x.res === 'kill' || x.res === 'break'));
-    const lost = evs.filter((x) => x.unit === u.id && x.res === 'death').length;
-    tip.innerHTML = `<b>${esc(unitName(u))}</b> <span class="muted">${RANK_NAME[u.rank] ?? u.rank}${u.depth ? `, глубина ${u.depth.toFixed(2)}` : ''}${u.approx ? ', место примерное' : ''}</span><br>
+    const mine = evs.filter((x) => hasUnit(x, u.id) && (x.res === 'kill' || x.res === 'break'));
+    const lost = evs.filter((x) => hasUnit(x, u.id) && x.res === 'death').length;
+    tip.innerHTML = `<b>${esc(unitName(u))}</b> <span class="muted">${RANK_NAME[u.rank] ?? u.rank}${u.depth ? `, глубина ${u.depth.toFixed(2)}` : ''}${u.approx ? ', место примерное' : ''}${u.pack ? ', в пачке' : ''}</span><br>
       ${u.kind === 'prop' ? `прочность: ${u.hp} уд.` : `HP ${Math.round(u.hp)} · урон ${Math.round(u.dmg)}`}<br>
       за убийство: ${fmtGain(u.reward) || '—'}${u.bonus ? ` · сразу ${fmtGain(u.bonus, true)}` : ''}${u.drop ? `<br>предмет: ${esc(u.drop)}` : ''}${u.token ? `<br>крутка: ${Math.round(u.token * 100)}%` : ''}<br>
       <span class="muted">респаун: ${u.charges.map(fmtCd).join(' → ')}${u.charges.length > 1 ? ' (по кругу)' : ''}</span>
