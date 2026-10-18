@@ -10,7 +10,7 @@ import {
   type FactionId, type MobDef, type MobRank, type OrbKind, type OrbReward, type SpawnerDef, type StatId, type ZoneId,
 } from './config';
 import { addStat, heroDps, armorMul, critAvg, critChance, critMul, dodgeChance, guardMul, heroStats, type HeroBuild } from './balance';
-import { ARMOR, armorStats, dropItem, itemClass, makeItem, sameItem, weaponDamage, type Item } from './items';
+import { ARMOR, armorStats, dropItem, itemClass, itemGuard, makeItem, passiveOf, sameItem, weaponDamage, type Item } from './items';
 import { CLASSES, CLASS_IDS, classSlot, kitOf, weaponClass, type HeroClass } from './party';
 import { pull } from './gacha';
 import {
@@ -521,7 +521,7 @@ function fight(h: Hero, foes: Foe | Foe[], mean = false, limit = 400): FightOut 
   const next = () => { while (cur < list.length && mhp[cur] <= 0) { cur++; burn = 0; } };
   /** Shield in the class slot: a blow taken (slams too) from foe `k` may be answered by the weapon, at the target. */
   const answer = (k: number) => {
-    const g = h.weapons[1] && WEAPONS[h.weapons[1].def].guard;
+    const g = itemGuard(h.weapons[1]);
     const weapon = h.weapons[0];
     const rank = mobRank(list[k].def);
     if (cur < list.length && g && weapon && t - lastCounter >= g.cd && (mean ? true : chance(g.counter[rank]))) {
@@ -541,7 +541,7 @@ function fight(h: Hero, foes: Foe | Foe[], mean = false, limit = 400): FightOut 
     taken += dmg;
     hp -= dmg;
     // spiked shield: a share of the blow goes back
-    const reflect = h.weapons[1] && WEAPONS[h.weapons[1].def].guard?.reflect;
+    const reflect = passiveOf(h.weapons[1], 'shield_spiked');
     if (reflect) mhp[k] -= dmg * reflect;
   };
   const hit = (it: Item, mult: number) => {
@@ -594,17 +594,19 @@ function fight(h: Hero, foes: Foe | Foe[], mean = false, limit = 400): FightOut 
       next();
     }
     // the pet: always on the target (slams do not stop it), its item's own damage (no hero power), no crits or dodges
-    // (the bear's cleave is not modelled)
+    // (the bear's cleave and the boar's stun are not modelled; the wolf's second bite and the bone boar's heal are)
     if (pet && petItem && cur < list.length) {
       petCd -= DT;
       pounceCd -= DT;
       if (petCd <= 0) {
         petCd += 1 / (pet.aps * st.haste);
-        const leap = pet.pounce && pounceCd <= 0 ? pet.pounce.mult : 1;
+        const leap = pet.pounce && pounceCd <= 0 ? passiveOf(petItem, 'lion') || 1 : 1;
         if (leap > 1) pounceCd = pet.pounce!.cd;
-        const dmg = weaponDamage(petItem) * leap * RESIST_MULT[list[cur].def.resist[WEAPONS[petItem.def].type] ?? 'normal'] * roll() * vuln();
+        const twice = passiveOf(petItem, 'wolf');
+        const bites = mean ? 1 + twice : chance(twice) ? 2 : 1;
+        const dmg = weaponDamage(petItem) * leap * bites * RESIST_MULT[list[cur].def.resist[WEAPONS[petItem.def].type] ?? 'normal'] * roll() * vuln();
         mhp[cur] -= dmg;
-        hp = Math.min(st.maxHp, hp + dmg * st.leech);
+        hp = Math.min(st.maxHp, hp + dmg * (st.leech + passiveOf(petItem, 'bone_boar')));
       }
     }
     if (burn > 0 && cur < list.length) {

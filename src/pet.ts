@@ -2,7 +2,7 @@
 // picks the foe and deals the damage through `onBite`.
 import * as THREE from 'three';
 import { Creature } from './creature';
-import { PET_RARITY, type PetDef } from './config';
+import { CLASS_ITEM, CLASS_PASSIVE, PET_RARITY, type PetDef } from './config';
 
 export interface PetFoe { pos: THREE.Vector3; radius: number; hittable: boolean }
 
@@ -62,7 +62,7 @@ export class Pet {
     const stop = t ? t.radius + this.def.range * 0.8 : 0.3;
     // the lion leaps at a foe in pounce range instead of running up to it
     const pc = this.def.pounce;
-    if (t && pc && this.pounceCd <= 0 && d > stop + 1.5 && d < pc.range) {
+    if (t && pc && this.rarity >= CLASS_ITEM.passiveFrom && this.pounceCd <= 0 && d > stop + 1.5 && d < pc.range) {
       this.pounceCd = pc.cd;
       this.leapT = 0;
       this.target = t;
@@ -102,7 +102,7 @@ export class Pet {
     this.ch.update(dt, moving);
   }
 
-  /** In the air (PetDef.pounce): an arc onto the foe, the landing bite deals × pounce.mult. */
+  /** In the air (PetDef.pounce): an arc onto the foe, the landing bite deals × the lion passive (CLASS_PASSIVE.lion). */
   private updateLeap(dt: number, onBite: (foe: PetFoe, mul: number) => void) {
     this.leapT += dt;
     const k = Math.min(1, this.leapT / LEAP_TIME);
@@ -112,7 +112,7 @@ export class Pet {
       this.leapT = -1;
       this.ch.root.position.y = 0;
       const t = this.target;
-      if (t && t.hittable) onBite(t, this.def.pounce!.mult);
+      if (t && t.hittable) onBite(t, CLASS_PASSIVE.lion.v[this.rarity - CLASS_ITEM.passiveFrom] ?? 1);
       this.atkCd = 1 / (this.def.aps * this.haste);
     }
     this.ch.update(dt, false);

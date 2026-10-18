@@ -77,10 +77,10 @@ export interface WeaponDef {
   cycle?: boolean;
   /**
    * Shield (the warrior's class slot): never swings; incoming damage × (1 − `reduce`); a hit taken may trigger a
-   * counter-strike of the weapon at the attacker (`counter` chance by its rank), not more often than every `cd` s;
-   * `reflect`: that share of the damage taken goes back to the attacker.
+   * counter-strike of the weapon at the attacker (`counter` chance by its rank), not more often than every `cd` s.
+   * `reduce` and `counter` grow with copies (items.ts itemGuard); the spiked shield's thorns are its passive (CLASS_PASSIVE).
    */
-  guard?: { reduce: number; counter: Record<MobRank, number>; cd: number; reflect?: number };
+  guard?: { reduce: number; counter: Record<MobRank, number>; cd: number };
   /** Held in the left hand (the bow). */
   leftHand?: boolean;
   /**
@@ -156,7 +156,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   shield_spiked: {
     id: 'shield_spiked', name: 'Шипастый щит', type: 'crush', dmgMul: 0, aps: 1, shape: 'arc', arc: 0, range: 0,
     anim: 'AxeAttack', model: { human: 'shield', orc: 'shield' }, icon: '🛡️',
-    guard: { reduce: 0.15, counter: { normal: 0.15, elite: 0.2, mini: 0.25, boss: 0.3 }, cd: 0.4, reflect: 0.5 },
+    guard: { reduce: 0.15, counter: { normal: 0.15, elite: 0.2, mini: 0.25, boss: 0.3 }, cd: 0.4 },
   },
   // hunter (src/party.ts): ~2.5 sword ranges
   bow: {
@@ -255,17 +255,18 @@ export interface PetDef {
   range: number;
   /** Run speed, m/s: a bit above the hero's so it keeps up. */
   speed: number;
-  /** Every bite also hits all other foes within this many metres of the target (the bear's paw). */
-  cleave?: number;
-  /** Leaps at a target this far away (m) instead of running, the bite on landing deals × `mult` (the lion). */
-  pounce?: { range: number; mult: number; cd: number };
+  /**
+   * Leaps at a target this far away (m) instead of running (the lion), from «Эпическое» only: the landing bite's
+   * multiplier is its passive (CLASS_PASSIVE.lion). The bear's paw is its passive too (CLASS_PASSIVE.bear).
+   */
+  pounce?: { range: number; cd: number };
 }
 // Each pet differs by damage type (mob resists) and manner (docs/features/gacha-gear/concept.md). Placeholder numbers.
 export const PETS: Record<string, PetDef> = {
   boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, type: 'crush', dmg: 0.8, aps: 0.9, range: 1.3, speed: 6.5 },
   wolf: { id: 'wolf', name: 'Лютоволк', icon: 'boar', model: 'wild_direwolf', scale: 0.45, type: 'slash', dmg: 0.4, aps: 1.8, range: 1.2, speed: 7.5 },
-  bear: { id: 'bear', name: 'Медведь', icon: 'boar', model: 'wild_bear', scale: 0.55, type: 'chop', dmg: 1.35, aps: 0.55, range: 1.5, speed: 6.0, cleave: 2 },
-  lion: { id: 'lion', name: 'Лев', icon: 'boar', model: 'wild_lion', scale: 0.55, type: 'pierce', dmg: 0.75, aps: 0.85, range: 1.3, speed: 6.8, pounce: { range: 6, mult: 2.5, cd: 6 } },
+  bear: { id: 'bear', name: 'Медведь', icon: 'boar', model: 'wild_bear', scale: 0.55, type: 'chop', dmg: 1.35, aps: 0.55, range: 1.5, speed: 6.0 },
+  lion: { id: 'lion', name: 'Лев', icon: 'boar', model: 'wild_lion', scale: 0.55, type: 'pierce', dmg: 0.75, aps: 0.85, range: 1.3, speed: 6.8, pounce: { range: 6, cd: 6 } },
   bone_boar: { id: 'bone_boar', name: 'Костяной вепрь', icon: 'boar', model: 'undead_boar', scale: 1.0, type: 'magic', dmg: 0.75, aps: 0.9, range: 1.3, speed: 6.5 },
 };
 /** Pet size by item quality (RARITY index); the bite grows with the item's own damage (quality, level, sharpening). */
@@ -278,6 +279,40 @@ for (const p of Object.values(PETS)) {
     anim: 'SwordAttack', model: { human: p.model, orc: p.model }, icon: '🐾', pet: p.id,
   };
 }
+
+/**
+ * Class items (shields, mage orbs, pets; docs/features/fix-shield-additional-stats): their stats grow with copies
+ * like armour (items.ts lvlMult: a shield's block and counter chances, an orb's bonuses; a pet's bite is its damage),
+ * and from quality `passiveFrom` up each has a passive (CLASS_PASSIVE). Shield chances stop at the caps.
+ */
+export const CLASS_ITEM = { passiveFrom: 3, maxReduce: 0.6, maxCounter: 0.9 };
+/**
+ * Passive of a class item by its def: `v` = value at «Эпическое», «Легендарное», «Мифическое» (an orb has one quality,
+ * it takes its own column). `desc` shows it with `{v}` (a percent when `pct`). Numbers are placeholders until balance.
+ */
+export interface PassiveDef { name: string; desc: string; v: [number, number, number]; pct?: boolean }
+export const CLASS_PASSIVE: Record<string, PassiveDef> = {
+  // a share of every blow taken goes back to the attacker
+  shield_spiked: { name: 'Шипы', desc: 'возвращают {v} урона', v: [0.3, 0.5, 0.75], pct: true },
+  // every bite also hits all fighting foes within v m of the target
+  bear: { name: 'Удар лапой', desc: 'по всем в {v} м от цели', v: [2, 2.5, 3] },
+  // leaps at a foe up to PetDef.pounce.range away, the landing bite × v
+  lion: { name: 'Прыжок', desc: 'на цель до 6 м, укус ×{v}', v: [2, 2.5, 3] },
+  // a bite stuns a non-boss foe for PET_STUN s with chance v
+  boar: { name: 'Таран', desc: 'укус оглушает: {v}', v: [0.15, 0.22, 0.3], pct: true },
+  // chance of a second bite at once
+  wolf: { name: 'Рвать', desc: 'второй укус: {v}', v: [0.2, 0.3, 0.4], pct: true },
+  // share of the bite's damage that heals the hero
+  bone_boar: { name: 'Похищение жизни', desc: '{v} урона укуса в HP', v: [0.1, 0.15, 0.2], pct: true },
+  // fully absorbs one blow every v s
+  orb_ward: { name: 'Барьер', desc: 'гасит удар раз в {v} с', v: [8, 6, 4] },
+  // chance each stat orb of a kill comes twice
+  orb_fortune: { name: 'Щедрость', desc: 'двойные сферы с врагов: {v}', v: [0.2, 0.3, 0.4], pct: true },
+  // the hero's crits heal by a share of their damage
+  orb_demon: { name: 'Жажда', desc: 'крит лечит на {v} урона', v: [0.04, 0.06, 0.08], pct: true },
+};
+/** Stun of the boar's ram (CLASS_PASSIVE.boar), s. */
+export const PET_STUN = 0.9;
 
 export const SHARPEN = { max: 10, perLevel: 0.08, cost: (lvl: number) => 40 + lvl * lvl * 25 };
 

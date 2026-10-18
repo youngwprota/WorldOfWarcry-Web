@@ -1,5 +1,5 @@
 // Items: weapons + armour, rarity, item level (zone), stats and generation.
-import { DAMAGE_TYPE_NAME, PETS, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type StatId, type WeaponDef } from './config';
+import { CLASS_ITEM, CLASS_PASSIVE, DAMAGE_TYPE_NAME, PETS, RARITY, RARITY_IDS, SHARPEN, WEAPONS, type FactionId, type ItemDrop, type StatId, type WeaponDef } from './config';
 import { CLASS_DAMAGE_ICON, DAMAGE_TYPE_ICON, icon } from './icons';
 import { art, hasPng } from './art';
 import { CLASSES, weaponClass, type HeroClass } from './party';
@@ -188,6 +188,38 @@ export function weaponDamage(it: Item, power = 0, powerMul = 1) {
   return (weaponBase(it) + power) * powerMul * WEAPONS[it.def].dmgMul * (1 + SHARPEN.perLevel * it.sharpen);
 }
 
+/** A shield's guard grown with its copies (block and counter chances up to CLASS_ITEM caps), or undefined. */
+export function itemGuard(it: Item | null | undefined) {
+  const g = it && WEAPONS[it.def].guard;
+  if (!g) return undefined;
+  const k = lvlMult(it.lvl);
+  const counter = { ...g.counter };
+  for (const r in counter) counter[r as keyof typeof counter] = Math.min(CLASS_ITEM.maxCounter, counter[r as keyof typeof counter] * k);
+  return { reduce: Math.min(CLASS_ITEM.maxReduce, g.reduce * k), counter, cd: g.cd };
+}
+
+/** A mage orb's bonuses grown with its copies, or undefined. */
+export function itemOrb(it: Item | null | undefined): WeaponDef['orb'] {
+  const o = it && WEAPONS[it.def].orb;
+  if (!o) return undefined;
+  const k = lvlMult(it.lvl);
+  const out: NonNullable<WeaponDef['orb']> = {};
+  for (const key of ['regen', 'power', 'speed', 'defense', 'pull'] as const) if (o[key]) out[key] = o[key]! * k;
+  if (o.critDmg) out.critDmg = [o.critDmg[0] * k, o.critDmg[1] * k];
+  return out;
+}
+
+/** The class item's passive (CLASS_PASSIVE) at its quality, or null (none, or below CLASS_ITEM.passiveFrom). */
+export function itemPassive(it: Item | null | undefined) {
+  const p = it && CLASS_PASSIVE[it.def];
+  if (!p || it.rarity < CLASS_ITEM.passiveFrom) return null;
+  const value = p.v[Math.min(p.v.length - 1, it.rarity - CLASS_ITEM.passiveFrom)];
+  return { id: it.def, name: p.name, value, text: p.desc.replace('{v}', p.pct ? `${Math.round(value * 100)}%` : String(value)) };
+}
+
+/** Value of passive `def` when `it` is that item and has it, else 0. */
+export const passiveOf = (it: Item | null | undefined, def: string) => (it?.def === def ? itemPassive(it)?.value ?? 0 : 0);
+
 /** Damage one more copy would add (shown on pickup). */
 export function copyGain(it: Item) {
   return it.kind === 'weapon' ? Math.round(RARITY[it.rarity].copy * WEAPONS[it.def].dmgMul) : 0;
@@ -260,21 +292,13 @@ export function scrapValue(it: Item) {
 export function itemLines(it: Item): [string, string][] {
   if (it.kind === 'weapon') {
     const w = WEAPONS[it.def];
-    const g = w.guard;
+    const g = itemGuard(it);
     if (g) {
       const pc = (x: number) => `${Math.round(x * 100)}%`;
-      const out: [string, string][] = [['Блок', `−${pc(g.reduce)}`], ['Контратака', `${pc(g.counter.normal)}–${pc(g.counter.boss)}`]];
-      if (g.reflect) out.push(['Отражение', pc(g.reflect)]);
-      return out;
+      return [['Блок', `−${pc(g.reduce)}`], ['Контратака', `${pc(g.counter.normal)}–${pc(g.counter.boss)}`], ...passiveLine(it)];
     }
-    if (w.orb) return [orbLine(w.orb)];
-    if (w.pet) {
-      const p = PETS[w.pet];
-      const out: [string, string][] = [['Урон укуса', String(Math.round(weaponDamage(it)))], ['Тип', DAMAGE_TYPE_NAME[w.type]], ['Укусов/с', String(w.aps)]];
-      if (p.cleave) out.push(['Удар лапой', `все в ${p.cleave} м`]);
-      if (p.pounce) out.push(['Прыжок', `до ${p.pounce.range} м, ×${p.pounce.mult}`]);
-      return out;
-    }
+    if (w.orb) return [orbLine(itemOrb(it)!), ...passiveLine(it)];
+    if (w.pet) return [['Урон укуса', String(Math.round(weaponDamage(it)))], ['Тип', DAMAGE_TYPE_NAME[w.type]], ['Укусов/с', String(w.aps)], ...passiveLine(it)];
     return [
       ['Урон', String(Math.round(weaponDamage(it)))],
       ['Тип', DAMAGE_TYPE_NAME[w.type]],
@@ -287,6 +311,13 @@ export function itemLines(it: Item): [string, string][] {
   const out: [string, string][] = s.defense ? [['Защита', String(s.defense)]] : [];
   if (s.bonus) out.push([BONUS_NAME[s.bonus.stat], `+${s.bonus.value}`]);
   return out;
+}
+
+/** A class item's passive line: its effect, or from which quality it opens (none for other items). */
+function passiveLine(it: Item): [string, string][] {
+  const p = CLASS_PASSIVE[it.def];
+  if (!p) return [];
+  return [[p.name, itemPassive(it)?.text ?? `с ${RARITY[CLASS_ITEM.passiveFrom].name.toLowerCase().replace(/ое$/, 'ого')}`]];
 }
 
 let uidSeq = Date.now() % 1e9;

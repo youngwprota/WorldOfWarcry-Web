@@ -2,11 +2,11 @@ import * as THREE from 'three';
 import { Character } from './character';
 import { Creature } from './creature';
 import {
-  COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, PET_RARITY, RARITY, STAT_CURVE, STAT_SOURCE_NAME, STAVES, WEAPONS, isPctStat, type PetDef, type StatId,
+  CLASS_ITEM, CLASS_PASSIVE, COMBOS, DAMAGE_TYPE_NAME, DEFENSE_CAP, FACTIONS, HERO, PET_RARITY, RARITY, STAT_CURVE, STAT_SOURCE_NAME, STAVES, WEAPONS, isPctStat, type PetDef, type StatId,
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemLines, itemName, orbLine, slotOf, weaponBase, weaponDamage,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemGuard, itemLines, itemName, itemOrb, itemPassive, orbLine, slotOf, weaponBase, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -476,7 +476,7 @@ export class Inventory {
     const mainIcon = it.kind === 'weapon' && !WEAPONS[it.def].guard ? art('dps', 30) : art('defense', 30);
     const sub = rest.map(([k, v]) => `<div><span>${k}</span>${cmp(k, v)}</div>`).join('');
     let ability: string;
-    const orb = it.kind === 'weapon' ? WEAPONS[it.def].orb : undefined;
+    const orb = it.kind === 'weapon' ? itemOrb(it) : undefined;
     if (orb) {
       const v = orbLine(orb)[1];
       const what = orb.pull ? `<b>${v}</b> шанс выбить крутку в горнило с каждого моба`
@@ -502,9 +502,16 @@ export class Inventory {
         const o = STAVES.wind.orb;
         ability = `<div class="ab-title">Вихрь</div><p>Бьёт на <b>${w.range} м</b> и отбрасывает врагов. Каждый <b>${o.every}-й</b> удар бросает вихрь: <b>×${o.dmg}</b> урона в радиусе <b>${o.radius} м</b>, враги (и боссы) стягиваются к центру.</p>` + ability;
       }
-      if (w.guard) ability = `<div class="ab-title">Защита</div><p>−${Math.round(w.guard.reduce * 100)}% входящего урона. Удар по герою с шансом <b>${Math.round(w.guard.counter.normal * 100)}–${Math.round(w.guard.counter.boss * 100)}%</b> (чем сильнее враг, тем выше) вызывает контратаку оружием.${w.guard.reflect ? ` <b>${Math.round(w.guard.reflect * 100)}%</b> полученного урона возвращается атакующему.` : ''} Сам не бьёт.</p>`;
+      const gd = itemGuard(it);
+      if (gd) ability = `<div class="ab-title">Защита</div><p>−${Math.round(gd.reduce * 100)}% входящего урона. Удар по герою с шансом <b>${Math.round(gd.counter.normal * 100)}–${Math.round(gd.counter.boss * 100)}%</b> (чем сильнее враг, тем выше) вызывает контратаку оружием. Сам не бьёт. Блок и контратака растут с уровнем.</p>`;
     } else {
       ability = `<div class="ab-title">Комплект</div><p>${it.rarity > 0 || rest.length ? 'Бонус к стату действует, пока предмет надет.' : 'У обычных предметов нет бонуса. Ищи <b>необычные</b> и выше.'}</p>`;
+    }
+    // class items: the passive from «Эпическое» up (CLASS_PASSIVE)
+    const pa = CLASS_PASSIVE[it.def];
+    if (pa) {
+      const on = itemPassive(it);
+      ability += `<div class="ab-title">Пассивка: ${pa.name}</div><p>${on ? `${on.text[0].toUpperCase()}${on.text.slice(1)}. Сильнее на более высоком качестве.` : `Открывается с качества «${RARITY[CLASS_ITEM.passiveFrom].name}».`}</p>`;
     }
     const btn = (act: string, label: string, cls = '') => `<button class="btn ${cls}" data-act="${act}">${label}</button>`;
     let actions = '';

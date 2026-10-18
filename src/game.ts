@@ -5,13 +5,13 @@ import { Creature } from './creature';
 import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
-  ATTACK_HIT, FACTIONS, PETS, tokenChance, zoneScaleOf, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
+  ATTACK_HIT, FACTIONS, PETS, PET_STUN, tokenChance, zoneScaleOf, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
   SPAWN_PRESETS, type SpawnPreset, type SpawnPresetId, mobRank, zoneResist, ZONE_FOES, ZONE_SUN, type DamageType, type ResistTier, type ItemDrop, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
 import { ArenaFog, DROP_TINT, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, StatAuras, Telegraphs, type Bolt } from './fx';
 import { Glows, SunLight, type GlowOpts } from './vfx';
 import {
-  ARMOR, BAG_SIZE, CLASS_SET, armorTrim, copyGain, dropAny, dropIconId, dropItem, fixedRarity, rollDrop, itemClass, itemIcon, itemModel, itemName, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, CLASS_SET, armorTrim, copyGain, dropAny, dropIconId, dropItem, fixedRarity, rollDrop, itemClass, itemGuard, itemIcon, itemModel, itemName, itemOrb, passiveOf, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
@@ -525,7 +525,7 @@ export class Game {
 
   /** Model of the mage's orb floating over the shoulder, or null. */
   /** Bonuses of the equipped mage orb (WeaponDef.orb). */
-  private get orb() { const o = this.save.weapons[1]; return o ? WEAPONS[o.def].orb : undefined; }
+  private get orb() { return itemOrb(this.save.weapons[1]); }
   orbModel() { const o = this.save.weapons[1]; return o && WEAPONS[o.def].orb ? WEAPONS[o.def].model[this.faction] : null; }
 
   /** The hunter in a debug set draws the set's bow. */
@@ -881,6 +881,9 @@ export class Game {
     const roll = this.orb?.critDmg;
     const critMul = s.critMul + (roll ? roll[0] + Math.random() * (roll[1] - roll[0]) : 0);
     const dmg = this.itemDamage(it) * RESIST_MULT[tier] * mult * (crit ? critMul : 1) * (0.9 + Math.random() * 0.2);
+    // the demon orb's thirst (CLASS_PASSIVE.orb_demon): a crit heals
+    const thirst = crit ? passiveOf(this.save.weapons[1], 'orb_demon') : 0;
+    if (thirst) this.hp = Math.min(this.maxHp, this.hp + dmg * thirst);
     return { dmg: Math.max(1, Math.round(dmg)), tier, fx: (crit ? 'crit' : '') as HitFx };
   }
 
@@ -1175,11 +1178,17 @@ export class Game {
         this.fightOf(m).hits++;
         // only extra damage: mobs never turn on the pet, the bite does not wake or shove them
         this.damageMob(m, dmg, tier, 0, mul > 1 ? 'crit' : '', false);
+        // pet passives (CLASS_PASSIVE): the bone boar heals the hero, the boar's ram stuns
+        const heal = passiveOf(it, 'bone_boar');
+        if (heal) this.hp = Math.min(this.maxHp, this.hp + dmg * heal);
+        if (m.alive && !m.def.boss && Math.random() < passiveOf(it, 'boar')) m.stun = PET_STUN;
       };
       const m = foe as Mob;
       bite(m);
+      // the wolf may bite twice
+      if (m.alive && Math.random() < passiveOf(it, 'wolf')) bite(m);
       // the bear's paw also hits every fighting mob next to the target
-      const r = pet.def.cleave;
+      const r = passiveOf(it, 'bear');
       if (r) for (const o of this.mobs) if (o !== m && o.hittable && !o.passive && o.state !== 'idle' && o.pos.distanceTo(m.pos) - o.radius < r) bite(o);
     });
   }
@@ -1338,7 +1347,11 @@ export class Game {
   /** Stats of a dead unit go straight to the hero (a mob's wait for its death clip, see grantKillRewards). */
   private payRewards(u: Unit) {
     // glowing orbs fly out of it into the hero; each pays on arrival (Pickups.onCollect), at once if the pool is full
-    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) if (!this.pickups.spawn(u.pos, k)) this.collect(k);
+    // the fortune orb's bounty (CLASS_PASSIVE.orb_fortune): each orb may come twice
+    const twice = passiveOf(this.save.weapons[1], 'orb_fortune');
+    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) {
+      for (let i = 0; i < n; i++) for (let j = Math.random() < twice ? 2 : 1; j > 0; j--) if (!this.pickups.spawn(u.pos, k)) this.collect(k);
+    }
   }
 
   /** Spawners: a dead unit comes back when its charge's cooldown ends (the hero's position does not matter). */
@@ -2291,6 +2304,13 @@ export class Game {
       this.fx.spawn(v1.copy(this.hero.position).setY(barY), 'Уклон', 'hurt', 0.6, { color: '#9fe8ff', lift });
       return;
     }
+    // the ward orb's barrier (CLASS_PASSIVE.orb_ward): one blow in full every v s
+    const barrier = dot || exact ? 0 : passiveOf(this.save.weapons[1], 'orb_ward');
+    if (barrier && this.time >= this.barrierAt) {
+      this.barrierAt = this.time + barrier;
+      this.fx.spawn(v1.copy(this.hero.position).setY(barY), 'Барьер', 'hurt', 0.6, { color: '#9fd0ff', lift });
+      return;
+    }
     const crit = !dot && !!src && Math.random() < critChance(src.def.crit);
     // GDD 10.5: reduction = defense / (defense + 100).
     const dmg = exact ? Math.max(1, Math.round(raw)) : Math.max(1, Math.round(raw * (crit ? critMul(src!.def.critDmg) : 1) * armorMul(s.defense) * this.guardMul() * (0.9 + Math.random() * 0.2)));
@@ -2325,15 +2345,19 @@ export class Game {
   private guardMul() { return guardMul(this.save.weapons); }
 
   private lastCounter = -99;
+  /** Game time the ward orb's barrier is ready again. */
+  private barrierAt = 0;
   private counterHand = newHand(0);
 
   /** The class slot's shield: reflects a share of the blow, may counter-strike with the weapon. */
   private shieldAnswer(m: Mob, dmg: number) {
     const sh = this.save.weapons[1];
-    const g = sh && WEAPONS[sh.def].guard;
+    const g = itemGuard(sh);
     if (!g || !m.alive || this.dead) return;
-    if (g.reflect) {
-      const back = Math.max(1, Math.round(dmg * g.reflect));
+    // thorns: the spiked shield's passive (CLASS_PASSIVE)
+    const reflect = passiveOf(sh, 'shield_spiked');
+    if (reflect) {
+      const back = Math.max(1, Math.round(dmg * reflect));
       this.damageMob(m, back, 'normal', 0);
       this.particles.burst(v1.copy(m.pos).setY(1.1 * m.def.scale), 0xff6060, 6, 0.08, 4, 0.35);
     }
