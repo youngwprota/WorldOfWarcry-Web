@@ -3,7 +3,7 @@
 // in a worker) both run it.
 import * as CONFIG from './config';
 import {
-  ATTACK_HIT, BREAKABLES, CEMETERY_BOARS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
+  ATTACK_HIT, BREAKABLES, CEMETERY_BOARS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, LEASH, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
   CEMETERY_AREAS, CEMETERY_PACKS, DUNES_SPAWNERS, GROVE_SPAWNERS, HILLS_BANNERS, HILLS_EXTRA, HILLS_LIONS, HILLS_PACKS, HILLS_SNAGS, LAND_ELITES, MINI_PAIR_OF, PEAKS_SPAWNERS,
   SPAWN_PRESETS, SWAMP_SPAWNERS, PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, ZONE_FOES, ZONE_TIER, depthMul, zoneScaleOf, mobImpact, packUnits, mobRank, zoneResist,
   tokenChance as zoneTokenChance,
@@ -252,7 +252,9 @@ interface Unit {
  * Aggro (Game.updateMobs): an idle hostile mob rushes the hero within its MobDef.aggro; it wanders up to 2.5 m round its
  * spot, and the hero stands a pace off his target — on average a mob joins when its spot is within aggro + this of the
  * target's. On the way the hero sees them standing and gives them a berth: only those whose aggro reaches 1.5 m past
- * the line of his way join (the Peaks gate guards stand 4–6 m off the forest trail with aggro 5.2 — skirted).
+ * the line of his way join (the Peaks gate guards stand 4–6 m off the forest trail with aggro 5.2 — skirted). Those he
+ * cannot skirt chase him, but only as far as LEASH from home: he outruns them (5 m/s, mobs ~3.4) unless his target
+ * stands within it — the Ataman guards flank the only way to the cemetery and fought every passer-by (133% HP).
  */
 const AGGRO_AT_SPOT = 2;
 const AGGRO_ON_WAY = -1.5;
@@ -490,12 +492,13 @@ function foeOf(u: Unit): Foe {
 
 /**
  * One fight against a foe or a social pack (all of them strike, the hero downs them one by one: plain mobs first,
- * the weakest first, a boss last). `mean`: no dice (rolls at their expected value, slams hit for their expected share)
+ * the weakest first, a boss last; a tree whose chop pulled mobs waits for them — chopped on first, a warlord at his back
+ * killed him 7 times of 8). `mean`: no dice (rolls at their expected value, slams hit for their expected share)
  * — the bot's quick estimate. Weapon mechanics hit the current target only: crowd effects are left out.
  */
 function fight(h: Hero, foes: Foe | Foe[], mean = false, limit = 400): FightOut {
   const st = stats(h);
-  const list = (Array.isArray(foes) ? [...foes] : [foes]).sort((a, b) => (a.def.boss ? 1 : 0) - (b.def.boss ? 1 : 0) || a.hp - b.hp);
+  const list = (Array.isArray(foes) ? [...foes] : [foes]).sort((a, b) => (a.def.boss ? 1 : 0) - (b.def.boss ? 1 : 0) || (a.def.static ? 1 : 0) - (b.def.static ? 1 : 0) || a.hp - b.hp);
   const bossFoe = list.find((f) => f.def.boss);
   const boss = bossFoe?.def.boss;
   const roll = () => (mean ? 1 : 0.9 + rand() * 0.2);
@@ -922,7 +925,7 @@ function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string,
   };
   /** A fight with `g` where it stands: those by its spots join (the bot sees them standing there). */
   const atSpot = (g: Unit[]) => (OPT.aggro && !isBoss(g) ? join(g, g.flatMap(nearOf)) : g);
-  /** …and those the way from `from` passes (no warning: the bot did not weigh them). */
+  /** …and those the way from `from` passes that follow him to the target (no warning: the bot did not weigh them). */
   const onWay = (g: Unit[], from: Spot) => {
     if (!OPT.aggro || isBoss(g)) return g;
     const set = new Set<Unit>();
@@ -931,6 +934,8 @@ function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string,
       const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 2));
       for (let k = 0; k <= n; k++) rushAt(a.x + ((b.x - a.x) * k) / n, a.z + ((b.z - a.z) * k) / n, AGGRO_ON_WAY, set);
     }
+    const to = posOf(g[0].spot);
+    for (const x of set) { const p = posU.get(x)!; if (Math.hypot(p.x - to.x, p.z - to.z) >= LEASH) set.delete(x); }
     return join(g, set);
   };
   // the way to a target that pulled others is remembered: the bot weighs them in from then on (a player learns an ambush)
