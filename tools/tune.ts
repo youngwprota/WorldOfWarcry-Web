@@ -1,9 +1,9 @@
 // Balance tuner CLI over src/tuner.ts: the targets (src/tunetargets.ts or --targets file.json) → config numbers.
 // Run: npm run tune -- [--zone forest,cemetery] [--runs 8] [--iters 6] [--targets t.json] [--faction orc] [--write]
 import { readFileSync, writeFileSync } from 'node:fs';
-import { MOBS, ZONES, type FactionId, type ZoneId } from '../src/config';
+import { MOBS, TUNE_MANUAL, ZONES, type FactionId, type ZoneId } from '../src/config';
 import { DEFAULT_TARGETS, type TuneTargets } from '../src/tunetargets';
-import { tune, type Metrics } from '../src/tuner';
+import { getPath, tune, type Metrics } from '../src/tuner';
 import { writeTuned } from '../src/tunedblock';
 import { poolThreads, poolWorker, runPool } from './pool';
 
@@ -17,6 +17,8 @@ async function main() {
   console.log(`== Подбор: ${zones?.join(', ') ?? 'вся цепочка'}, прогонов ${arg('runs', '8')}, потоков ${poolThreads}`);
   const out = await tune(targets, (job) => runPool(job), {
     sim: { faction: arg('faction', 'human') as FactionId }, runs: +arg('runs', '8'), iters: +arg('iters', '6'), zones,
+    // hand-set knobs of config.ts (TUNE_MANUAL) stay as they are; --write keeps their marks
+    fixed: Object.fromEntries(TUNE_MANUAL.map((p) => [p, getPath(p)])),
     log: (s) => console.log(`[${sec()}] ${s}`),
   });
 
@@ -32,6 +34,7 @@ async function main() {
   }
   console.log('\n== Правки конфига');
   for (const [p, v] of Object.entries(out.sets)) console.log(`${p.padEnd(34)} ${out.was[p]} → ${v}`);
+  for (const [p, v] of Object.entries(out.fixed)) console.log(`${p.padEnd(34)} ${v} (вручную)`);
   console.log(`\nДля проверки: npm run sim -- ${Object.entries(out.sets).map(([p, v]) => `--set ${p}=${v}`).join(' ')}`);
   if (argv.includes('--write') && Object.keys(out.sets).length) {
     // npm runs from the project root
