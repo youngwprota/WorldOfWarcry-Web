@@ -27,6 +27,7 @@ import { classPreview } from './looks';
 import { registerMocks } from './mocks';
 import { startArtWave, startLoadingFx } from './loadfx';
 import { Post } from './post';
+import { PerfHud } from './perfhud';
 
 const ui = new UI();
 // the loading art comes alive: its background sways, sparks fly
@@ -56,6 +57,7 @@ const input = new Input(app);
 const labels = document.getElementById('labels')!;
 /** Glow, grade and vignette over the game view (src/post.ts); null on low graphics. */
 let post: Post | null = new Post(renderer);
+const perf = new PerfHud(renderer);
 
 function resize() {
   const w = app.clientWidth;
@@ -154,7 +156,8 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   const inv = new Inventory(ui, game);
   ui.onBag = ui.onArmor = game.onOpenCharacter = game.onOpenBag = () => { input.reset(); inv.open(); };
   ui.onClass = (c) => game?.switchClass(c);
-  const debug = new DebugPanel(app, game);
+  const debug = new DebugPanel(app, game, perf);
+  perf.toggle(perf.saved);
   ui.onDebug = () => debug.toggle(true);
   const map = new MapView(game);
   ui.onMap = game.onOpenMap = () => { if (inv.isOpen || ui.modalOpen) return; map.toggle(); };
@@ -334,10 +337,13 @@ function run() {
     const { w, h } = { w: app.clientWidth, h: app.clientHeight };
     if (game.camera.aspect !== w / h) { game.camera.aspect = w / h; game.camera.updateProjectionMatrix(); resize(); }
     game.viewH = renderer.domElement.height;
+    perf.begin();
     game.update(dt);
-    if (game.offscreen) return;
-    if (post) post.render(game.scene, game.camera);
-    else renderer.render(game.scene, game.camera);
+    if (!game.offscreen) {
+      if (post) post.render(game.scene, game.camera);
+      else renderer.render(game.scene, game.camera);
+    }
+    perf.end();
   });
 }
 
