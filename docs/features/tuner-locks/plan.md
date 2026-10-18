@@ -31,7 +31,7 @@
 ## Шаги
 - [x] 1. config.ts: `TUNE_MANUAL` перед блоком; `writeTuned(src, sets, manual)` с меткой и снятием метки;
   vite-плагин принимает `{ sets, manual }` (проверка путей/чисел для обоих); CLI --write без manual — метки из файла сохраняются.
-- [ ] 2. tuner.ts: `TUNE_KNOBS` (path, имя, zone | null) и `TuneOpts.fixed`; `set()` пропускает fixed, job кладёт fixed
+- [x] 2. tuner.ts: `TUNE_KNOBS` (path, имя, zone | null) и `TuneOpts.fixed`; `set()` пропускает fixed, job кладёт fixed
   перед sets, `TuneOut.fixed`; лог круга пишет «зафиксировано: …» для локации с ручными.
 - [ ] 3. balanceworker: job 'tune' несёт `fixed` → tune(); CLI: `fixed` = TUNE_MANUAL со значениями getPath.
 - [ ] 4. tunetab.ts: `<details>` «Статы подбора» (галка/поле, localStorage, «Как в конфиге»), `fixed` в job.

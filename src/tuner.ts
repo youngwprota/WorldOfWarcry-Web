@@ -19,6 +19,23 @@ const RANKS: FightRank[] = ['normal', 'elite', 'mini'];
 /** Pull weights by rank when the config has none (GACHA.token all 0) and a gacha share is wanted. */
 const TOKEN_BASE = { normal: 0.01, elite: 0.05, mini: 0.2, boss: 1 };
 
+/** A number the tuner may change; `zone` null — shared by all locations. */
+export interface Knob { path: string; name: string; zone: ZoneId | null }
+const OF_RANK: Record<FightRank, string> = { normal: 'мобов', elite: 'элиток', mini: 'мини-боссов' };
+/** Every number the tuner may change, by location along the chain, then the shared ones (balance.html lists them). */
+export const TUNE_KNOBS: Knob[] = [
+  ...CHAIN.flatMap(({ zone, boss }): Knob[] => [
+    ...RANKS.flatMap((rk): Knob[] => [
+      { path: `ZONE_SCALE.${zone}.hp.${rk}`, name: `HP ${OF_RANK[rk]}, ×`, zone },
+      { path: `ZONE_SCALE.${zone}.dmg.${rk}`, name: `урон ${OF_RANK[rk]}, ×`, zone },
+    ]),
+    { path: `ZONE_SCALE.${zone}.token`, name: 'шанс круток, ×', zone },
+    { path: `MOBS.${boss}.hp`, name: `HP босса (${MOBS[boss].name})`, zone },
+    { path: `MOBS.${boss}.dmg`, name: `урон босса (${MOBS[boss].name})`, zone },
+  ]),
+  ...(['normal', 'elite', 'mini', 'boss'] as const).map((rk): Knob => ({ path: `GACHA.token.${rk}`, name: `шанс крутки: ${rk === 'boss' ? 'босс' : OF_RANK[rk]}`, zone: null })),
+];
+
 export interface Metrics { at?: number; fight?: number; gacha?: number; fights: Partial<Record<FightRank, number>>; won: number }
 export interface ZoneReport {
   zone: ZoneId; boss: string; iters: number; ok: boolean;
@@ -26,7 +43,7 @@ export interface ZoneReport {
   before?: Metrics; after?: Metrics;
   notes: string[];
 }
-export interface TuneOut { sets: Record<string, number>; was: Record<string, number>; reports: ZoneReport[] }
+export interface TuneOut { sets: Record<string, number>; was: Record<string, number>; fixed: Record<string, number>; reports: ZoneReport[] }
 export interface TuneOpts {
   sim: Partial<SimOpts>;
   runs: number;
@@ -34,6 +51,8 @@ export interface TuneOpts {
   iters: number;
   /** Only these locations (others keep their numbers); default: the whole chain. */
   zones?: ZoneId[];
+  /** Hand-set knobs (TUNE_KNOBS paths): applied first, never changed. */
+  fixed?: Record<string, number>;
   log?: (s: string) => void;
 }
 
@@ -58,13 +77,16 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
   const log = o.log ?? (() => {});
   const sets: Record<string, number> = {};
   const was: Record<string, number> = {};
+  const fixed = o.fixed ?? {};
+  for (const [p, v] of Object.entries(fixed)) applySet(p, v);
   const set = (path: string, v: number) => {
+    if (path in fixed) return;
     if (!(path in was)) was[path] = getPath(path);
     v = round(v);
     sets[path] = v;
     applySet(path, v);
   };
-  const job = (ctl: RunCtl[], sim: Partial<SimOpts> = {}): TuneJob => ({ opts: { ...o.sim, runs: o.runs, ...sim }, sets: Object.entries(sets), ctl });
+  const job = (ctl: RunCtl[], sim: Partial<SimOpts> = {}): TuneJob => ({ opts: { ...o.sim, runs: o.runs, ...sim }, sets: [...Object.entries(fixed), ...Object.entries(sets)], ctl });
   const T = targets;
   const chain = CHAIN.filter((c) => T.bosses[c.boss]);
   const zones = o.zones ?? chain.map((c) => c.zone);
@@ -87,6 +109,8 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
     if (zones.includes(zone)) {
       reports.push(rep);
       log(`== ${MOBS[boss].name} (${zone}): цель ${goal.at} мин, бой ${goal.fight} с, гача ${Math.round(goal.gacha * 100)}%`);
+      const own = TUNE_KNOBS.filter((k) => k.zone === zone && k.path in fixed);
+      if (own.length) log(`  вручную: ${own.map((k) => `${k.path} = ${fixed[k.path]}`).join(', ')}`);
       let tProbe = tAt;
       let bestScore = Infinity;
       let early: [number, number] | null = null, late: [number, number] | null = null;
@@ -149,15 +173,17 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
         // the fight's HP as fielded (× ZONE_TIER, + the Spring sister of the same def) scales with the def's hp
         const dps = med(probes.map((p) => p.dps))!, total = probes[0].hp;
         set(`MOBS.${boss}.hp`, hp0 * clamp((dps * goal.fight) / total, 0.05, 20));
-        // 3. its damage: bisection (geometric) to a 50% win rate at the probe minute
-        let lo = getPath(`MOBS.${boss}.dmg`) / 16, hi = getPath(`MOBS.${boss}.dmg`) * 16;
-        for (let k = 0; k < 9; k++) {
-          const mid = Math.sqrt(lo * hi);
-          set(`MOBS.${boss}.dmg`, mid);
-          const rate = med(probeAll().map((p) => p.rate))!;
-          if (rate > 0.5) lo = mid; else hi = mid;
+        // 3. its damage: bisection (geometric) to a 50% win rate at the probe minute (unless set by hand)
+        if (!(`MOBS.${boss}.dmg` in fixed)) {
+          let lo = getPath(`MOBS.${boss}.dmg`) / 16, hi = getPath(`MOBS.${boss}.dmg`) * 16;
+          for (let k = 0; k < 9; k++) {
+            const mid = Math.sqrt(lo * hi);
+            set(`MOBS.${boss}.dmg`, mid);
+            const rate = med(probeAll().map((p) => p.rate))!;
+            if (rate > 0.5) lo = mid; else hi = mid;
+          }
+          set(`MOBS.${boss}.dmg`, Math.sqrt(lo * hi));
         }
-        set(`MOBS.${boss}.dmg`, Math.sqrt(lo * hi));
         // 4. the check: the bot plays on to the kill
         const c = await checkRound(`круг ${it + 1}`);
         const { at, okAt, okGacha, share, kills } = c;
@@ -200,6 +226,6 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
   const last = Math.max(...chain.filter((c) => zones.includes(c.zone)).map((c) => T.bosses[c.boss].at));
   const after = summarize((await run(job([{}], { until: (last + 20) * 60 }))).map((r) => r.out));
   for (const r of reports) r.after = metricsOf(after, r.zone, r.boss);
-  return { sets, was, reports };
+  return { sets, was, fixed, reports };
 }
 
