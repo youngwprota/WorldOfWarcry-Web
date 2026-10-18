@@ -34,10 +34,10 @@
 - [x] 2. tuner.ts: `TUNE_KNOBS` (path, имя, zone | null) и `TuneOpts.fixed`; `set()` пропускает fixed, job кладёт fixed
   перед sets, `TuneOut.fixed`; лог круга пишет «зафиксировано: …» для локации с ручными.
 - [x] 3. balanceworker: job 'tune' несёт `fixed` → tune(); CLI: `fixed` = TUNE_MANUAL со значениями getPath.
-- [ ] 4. tunetab.ts: `<details>` «Статы подбора» (галка/поле, localStorage, «Как в конфиге»), `fixed` в job.
-- [ ] 5. tunetab.ts: итог — ручные строки в «Подобранных числах» с пометкой «вручную»; запись шлёт `{ sets, manual }`;
+- [x] 4. tunetab.ts: `<details>` «Статы подбора» (галка/поле, localStorage, «Как в конфиге»), `fixed` в job.
+- [x] 5. tunetab.ts: итог — ручные строки в «Подобранных числах» с пометкой «вручную»; запись шлёт `{ sets, manual }`;
   кнопка «Записать ручные в config.ts».
-- [ ] 6. README.md: абзацы про balance.html → «Цели» и `npm run tune` — ручные статы и TUNE_MANUAL.
+- [x] 6. README.md: абзацы про balance.html → «Цели» и `npm run tune` — ручные статы и TUNE_MANUAL.
 
 ## Проверка
 - `npm run build` без ошибок

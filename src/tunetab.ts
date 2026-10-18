@@ -1,9 +1,9 @@
 // balance.html → «Цели»: the tuner's targets (src/tunetargets.ts, kept in localStorage, JSON in/out), a tuning run in a
 // worker (the whole src/tuner.ts there, its runs in nested workers), the table «цель / было / стало», charts and the
 // picked numbers: as the page's what-if edits, or written into src/config.ts by the dev server (vite.config.ts).
-import { MOBS, ZONES, type ZoneId } from './config';
+import { MOBS, TUNE_MANUAL, ZONES, type ZoneId } from './config';
 import { DEFAULT_OPTS, type SimOpts } from './simcore';
-import { CHAIN, type Metrics, type TuneOut } from './tuner';
+import { CHAIN, getPath, TUNE_KNOBS, type Metrics, type TuneOut } from './tuner';
 import { DEFAULT_TARGETS, type FightRank, type TuneTargets } from './tunetargets';
 import type { Job, JobMsg } from './balanceworker';
 
@@ -19,7 +19,7 @@ export interface TuneCtx {
   opts: () => SimOpts;
 }
 
-const KEY = { targets: 'warcry-balance-targets', tune: 'warcry-balance-tune' };
+const KEY = { targets: 'warcry-balance-targets', tune: 'warcry-balance-tune', locks: 'warcry-balance-locks' };
 const store = {
   get<T>(k: string, d: T): T { try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : d; } catch { return d; } },
   set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } },
@@ -45,11 +45,21 @@ const $ = <T extends HTMLElement>(sel: string, root: ParentNode) => root.querySe
 
 let targets: TuneTargets = store.get(KEY.targets, structuredClone(DEFAULT_TARGETS));
 let run = store.get(KEY.tune, { runs: 8, iters: 6, zones: CHAIN.map((c) => c.zone) as ZoneId[] });
+/** Hand-set knobs (path → number): the tuner keeps them. Default: TUNE_MANUAL of config.ts with its numbers. */
+const configLocks = () => Object.fromEntries(TUNE_MANUAL.map((p) => [p, getPath(p)])) as Record<string, number>;
+let locks: Record<string, number> = Object.fromEntries(Object.entries(store.get(KEY.locks, configLocks())).filter(([p]) => TUNE_KNOBS.some((k) => k.path === p)));
+let knobsOpen = false;
 let result: { out: TuneOut; ms: number } | null = null;
 let log: string[] = [];
 let busy = false;
 
 const saveTargets = () => store.set(KEY.targets, targets);
+const saveLocks = () => store.set(KEY.locks, locks);
+/** POST to the dev server: the picked numbers and the whole list of hand-set knobs into the `<tuned>` block. */
+async function writeConfig(sets: Record<string, number>, manual: Record<string, number>) {
+  const r = await fetch('/__tune-write', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sets, manual }) });
+  if (!r.ok) throw new Error(await r.text());
+}
 
 export function renderTune(root: HTMLElement, c: TuneCtx) {
   const { esc } = c;
@@ -68,6 +78,21 @@ export function renderTune(root: HTMLElement, c: TuneCtx) {
           <td><input type="checkbox" data-z="${zone}" ${run.zones.includes(zone) ? 'checked' : ''}></td></tr>`; }).join('')}
         </table>
       </div>
+      <details id="knobs" ${knobsOpen ? 'open' : ''}><summary>Статы подбора (вручную: <span id="nlocks">${Object.keys(locks).length}</span>)</summary>
+        <p class="muted" style="margin:0 0 6px">Галка «авто» — число подбирается. Снята — подбор его не трогает, стоит число из поля. В config.ts ручные помечены TUNE_MANUAL.</p>
+        <div class="scroll" style="max-height:none"><table>
+        ${[...CHAIN.map((x) => x.zone), null].map((z) => `<tr><th class="l" colspan="3" style="color:var(--fg)">${esc(z ? zoneName(z) : 'Общие')}</th></tr>
+          ${TUNE_KNOBS.filter((k) => k.zone === z).map((k) => { const hand = k.path in locks; return `<tr>
+            <td class="l" title="${esc(k.path)}">${esc(k.name)}</td>
+            <td><label><input type="checkbox" data-k="${esc(k.path)}" ${hand ? '' : 'checked'}> авто</label></td>
+            <td><span class="muted" ${hand ? 'hidden' : ''}>${getPath(k.path)}</span><input type="number" data-kv="${esc(k.path)}" step="any" value="${hand ? locks[k.path] : getPath(k.path)}" style="width:90px" ${hand ? '' : 'hidden'}></td></tr>`; }).join('')}`).join('')}
+        </table></div>
+        <div class="row" style="margin-top:6px">
+          <button class="btn" id="kreset" title="Ручные — как помечены в config.ts (TUNE_MANUAL), с его числами">Как в конфиге</button>
+          ${import.meta.env.DEV ? '<button class="btn" id="kwrite" title="Записать ручные числа и метки в блок // <tuned> src/config.ts без подбора (только npm run dev)">Записать ручные в config.ts</button>' : ''}
+          <span class="muted" id="kstatus"></span>
+        </div>
+      </details>
       <div class="form" style="margin-top:12px">
         <label class="f" title="Допустимый промах: 0.1 = ±10% (доля гачи — ±10 пунктов)">Допуск<input type="number" id="tol" step="0.01" value="${targets.tol}"></label>
         <label class="f" title="Сколько прогонов бота (разные seed) на каждую проверку: больше — точнее, но дольше">Прогонов<input type="number" id="runs" step="1" value="${run.runs}"></label>
@@ -104,6 +129,24 @@ export function renderTune(root: HTMLElement, c: TuneCtx) {
     run.zones = el.checked ? [...new Set([...run.zones, z])] : run.zones.filter((x) => x !== z);
     store.set(KEY.tune, run);
   }));
+  $('#knobs', root).addEventListener('toggle', (e) => { knobsOpen = (e.target as HTMLDetailsElement).open; });
+  root.querySelectorAll<HTMLInputElement>('[data-k]').forEach((el) => el.addEventListener('change', () => {
+    const p = el.dataset.k!;
+    const td = el.closest('tr')!.lastElementChild!;
+    const span = td.querySelector('span')!, inp = td.querySelector('input')!;
+    if (el.checked) delete locks[p]; else locks[p] = +inp.value;
+    span.hidden = !el.checked; inp.hidden = el.checked;
+    $('#nlocks', root).textContent = String(Object.keys(locks).length);
+    saveLocks();
+  }));
+  root.querySelectorAll<HTMLInputElement>('[data-kv]').forEach((el) => el.addEventListener('change', () => {
+    if (el.value !== '' && Number.isFinite(+el.value)) { locks[el.dataset.kv!] = +el.value; saveLocks(); }
+  }));
+  $('#kreset', root).addEventListener('click', () => { locks = configLocks(); saveLocks(); renderTune(root, c); });
+  $('#kwrite', root)?.addEventListener('click', async () => {
+    const st = $('#kstatus', root);
+    try { await writeConfig({}, locks); st.textContent = 'записано — страница перезагрузится'; } catch (err) { st.textContent = `ошибка: ${(err as Error).message}`; }
+  });
   $('#tol', root).addEventListener('change', (e) => { targets.tol = +(e.target as HTMLInputElement).value; saveTargets(); });
   $('#runs', root).addEventListener('change', (e) => { run.runs = Math.max(1, +(e.target as HTMLInputElement).value); store.set(KEY.tune, run); });
   $('#iters', root).addEventListener('change', (e) => { run.iters = Math.max(1, +(e.target as HTMLInputElement).value); store.set(KEY.tune, run); });
@@ -129,7 +172,7 @@ async function start(root: HTMLElement, c: TuneCtx) {
   ($('#log', root).parentElement as HTMLDetailsElement).open = true;
   const o = c.opts();
   const job: Job = {
-    kind: 'tune', targets, runs: run.runs, iters: run.iters, zones: run.zones, sets: c.sets(),
+    kind: 'tune', targets, runs: run.runs, iters: run.iters, zones: run.zones, sets: c.sets(), fixed: { ...locks },
     sim: { faction: o.faction, cls: o.cls, weapon: o.weapon, off: o.off, dodge: o.dodge, uptime: o.uptime, combo: o.combo, seed: o.seed ?? DEFAULT_OPTS.seed },
     threads: Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 8)),
   };
@@ -150,7 +193,7 @@ async function start(root: HTMLElement, c: TuneCtx) {
 
 function renderOut(out: HTMLElement, c: TuneCtx) {
   const { esc } = c;
-  const { reports, sets, was } = result!.out;
+  const { reports, sets, was, fixed } = result!.out;
   const tol = targets.tol;
   /** A number against its goal: green within the tolerance, red outside. */
   const cell = (v: number | undefined, want: number | undefined, d = 0, rel = true) => {
@@ -177,10 +220,11 @@ function renderOut(out: HTMLElement, c: TuneCtx) {
     <h2>Подобранные числа</h2>
     <div class="panel">
       <table><tr>${th('поле', 'Путь числа в src/config.ts: ZONE_SCALE.<локация>.hp/dmg.<ранг> — множитель HP/урона мобов ранга, .token — множитель шанса крутки, MOBS.<босс>.hp/dmg — числа босса', 'l')}${th('было', 'Значение в конфиге до подбора')}${th('стало', 'Подобранное значение')}</tr>
-        ${Object.entries(sets).map(([p, v]) => `<tr><td class="l mono">${esc(p)}</td><td>${was[p]}</td><td>${v}</td></tr>`).join('')}</table>
+        ${Object.entries(sets).map(([p, v]) => `<tr><td class="l mono">${esc(p)}</td><td>${was[p]}</td><td>${v}</td></tr>`).join('')}
+        ${Object.entries(fixed ?? {}).map(([p, v]) => `<tr><td class="l mono">${esc(p)}</td><td>${v}</td><td class="muted">${v} вручную</td></tr>`).join('')}</table>
       <div class="row" style="margin-top:10px">
         <button class="btn" id="apply" title="Добавить в правки вкладки «Конфиг» — «Сим» покажет их рядом с конфигом без правок">В правки страницы</button>
-        ${import.meta.env.DEV ? '<button class="btn primary" id="write" title="Переписать блок // <tuned> в конце src/config.ts (только npm run dev)">Записать в config.ts</button>' : '<span class="muted">запись в config.ts — только из npm run dev</span>'}
+        ${import.meta.env.DEV ? '<button class="btn primary" id="write" title="Переписать блок // <tuned> в конце src/config.ts: подобранные числа и ручные (с меткой TUNE_MANUAL) (только npm run dev)">Записать в config.ts</button>' : '<span class="muted">запись в config.ts — только из npm run dev</span>'}
         <span class="muted" id="wstatus"></span>
       </div>
     </div>`;
@@ -200,12 +244,11 @@ function renderOut(out: HTMLElement, c: TuneCtx) {
   three('Доля мощи от гачи', (r) => targets.bosses[r.boss].gacha, (x) => x?.gacha, (v) => `${Math.round(v * 100)}%`);
   three('Бой с мобом, с', (r) => targets.fights[r.zone]?.normal ?? 0, (x) => x?.fights.normal);
 
-  $('#apply', out).addEventListener('click', () => { c.addSets(sets); $('#wstatus', out).textContent = 'добавлено в правки'; });
+  $('#apply', out).addEventListener('click', () => { c.addSets({ ...fixed, ...sets }); $('#wstatus', out).textContent = 'добавлено в правки'; });
   $('#write', out)?.addEventListener('click', async () => {
     const st = $('#wstatus', out);
     try {
-      const r = await fetch('/__tune-write', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sets }) });
-      if (!r.ok) throw new Error(await r.text());
+      await writeConfig(sets, fixed ?? {});
       st.textContent = 'записано в src/config.ts — страница перезагрузится с новыми числами';
     } catch (err) { st.textContent = `ошибка: ${(err as Error).message}`; }
   });
