@@ -114,8 +114,6 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
       let bestScore = Infinity;
       let best: { sets: Record<string, number>; cps: (Checkpoint | undefined)[] } | null = null;
       const t0 = start.length ? Math.min(...start.map((c) => c!.t)) : 0;
-      /** Ranks fought before the kill in round 0 (the numbers as they were). */
-      const c0Ranks = new Set<FightRank>();
       /** The check: the bot plays on to the kill with the numbers as they are now; how far off that is. */
       const checkRound = async (label: string) => {
         const check = await run(job(Array.from({ length: o.runs }, (_, i) => ({ ...from(i), stopAt: boss })), { until: tAt * 1.6 + 600 }));
@@ -128,19 +126,19 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
         // the location's fights up to the kill, rank by rank (ranks the bot did not fight there are not judged)
         const fl = check.flatMap((r) => r.out.fights.filter((f) => f.win && f.zone === zone && f.t > t0 && f.t <= (r.out.bossAt[boss] ?? Infinity)));
         const mobD = Object.fromEntries(RANKS.map((rk) => [rk, med(fl.filter((f) => f.rank === rk).map((f) => f.dur))])) as Record<FightRank, number | undefined>;
-        const okMobs = RANKS.every((rk) => { const want = T.fights[zone]?.[rk]; const d = mobD[rk]; return !want || !d || Math.abs(d - want) <= T.tol * want; });
+        // a rank the bot fights in this location (the base runs) but not before the kill is off too: too hard for him then
+        const skipped = (rk: FightRank) => seen.has(`${zone}/${rk}`);
+        const okMobs = RANKS.every((rk) => { const want = T.fights[zone]?.[rk]; const d = mobD[rk]; return !want || (d ? Math.abs(d - want) <= T.tol * want : !skipped(rk)); });
         // HP lost per fight, a share of max HP (judged in points, like the gacha share)
         const mobL = Object.fromEntries(RANKS.map((rk) => [rk, med(fl.filter((f) => f.rank === rk).map((f) => f.taken / f.maxHp))])) as Record<FightRank, number | undefined>;
-        const okLoss = RANKS.every((rk) => { const want = T.loss?.[zone]?.[rk]; const l = mobL[rk]; return want === undefined || l === undefined || Math.abs(l - want) <= T.tol; });
+        const okLoss = RANKS.every((rk) => { const want = T.loss?.[zone]?.[rk]; const l = mobL[rk]; return want === undefined || (l !== undefined ? Math.abs(l - want) <= T.tol : !skipped(rk)); });
         log(`  ${label}: убит ${kills.length}/${check.length}, минута ${at === undefined ? '—' : (at / 60).toFixed(1)}, бой ${fight?.toFixed(0) ?? '—'} с, гача ${Math.round(share * 100)}%, мобы ${RANKS.map((rk) => mobD[rk]?.toFixed(0) ?? '—').join('/')} с, потеря HP ${RANKS.map((rk) => (mobL[rk] === undefined ? '—' : Math.round(mobL[rk]! * 100))).join('/')}%`);
         // how far off (relative misses summed; no kill is worst): the best round's numbers are kept
-        // a rank the bot fought here at the start but not in this round is not a hit: it is the worst miss
-        const fought = (rk: FightRank) => c0Ranks.has(rk);
+        // a skipped rank (above) is not a hit: it is the worst miss
         const miss = (v: number | undefined, want: number) => (v === undefined ? 1 : Math.abs(v - want) / want);
         const score = kills.length ? miss(at, tAt) + miss(fight, goal.fight) + Math.abs(share - goal.gacha)
-          + RANKS.reduce((a, rk) => { const want = T.fights[zone]?.[rk]; return a + (want && mobD[rk] ? miss(mobD[rk], want) * 0.5 : want && fought(rk) ? 0.5 : 0); }, 0)
-          + RANKS.reduce((a, rk) => { const want = T.loss?.[zone]?.[rk]; const l = mobL[rk]; return a + (want !== undefined && l !== undefined ? Math.abs(l - want) * 0.5 : want !== undefined && fought(rk) ? 0.5 : 0); }, 0) : 99;
-        if (!c0Ranks.size) for (const rk of RANKS) if (mobD[rk] !== undefined) c0Ranks.add(rk);
+          + RANKS.reduce((a, rk) => { const want = T.fights[zone]?.[rk]; return a + (want && mobD[rk] ? miss(mobD[rk], want) * 0.5 : want && skipped(rk) ? 0.5 : 0); }, 0)
+          + RANKS.reduce((a, rk) => { const want = T.loss?.[zone]?.[rk]; const l = mobL[rk]; return a + (want !== undefined && l !== undefined ? Math.abs(l - want) * 0.5 : want !== undefined && skipped(rk) ? 0.5 : 0); }, 0) : 99;
         const cps = kills.length ? check.map((r) => r.cps[boss]).filter((c): c is Checkpoint => !!c) : [];
         return { runs: check, at, fight, okAt, okGacha, share, kills, score, cps, mobsOk: okMobs && okLoss, ok: okAt && okFight && okGacha && okMobs && okLoss };
       };
@@ -223,24 +221,24 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
             }
             set(dmgPath, Math.sqrt(a * b));
           }
-        } else if (!last.mobsOk && last.okAt) {
+        } else {
           // the minute is right: the mobs are matched once more, by the fights of that check (up to the kill — the hero
           // grew among them as he will); they move the minute, so the threat's bracket starts over
-          tuneMobs(last.runs, ' по проверке', false);
-          lo = hi = null;
-        } else if (!bossFixed) {
-          // the last check brackets the threat: killed early → too weak, late (or never) → too strong
-          if (last.at !== undefined && last.at < tAt && !last.okAt) { lo = threat; if (hi !== null && hi <= lo) hi = null; }
-          if ((last.at === undefined || last.at > tAt) && !last.okAt) { hi = threat; if (lo !== null && lo >= hi) lo = null; }
-          const next = last.okAt ? threat
-            : lo !== null && hi !== null ? Math.sqrt(lo * hi)
-              : last.at === undefined ? threat * 0.5
-                : threat * clamp((tAt / last.at) ** 1.5, 0.5, 2);
-          // the fight's length follows the HP (the hero's DPS barely depends on it)
-          const hpNext = last.fight !== undefined && !(hpPath in fixed) && Math.abs(last.fight - goal.fight) > T.tol * goal.fight
-            ? hp * clamp(goal.fight / last.fight, 0.5, 2) ** 0.8 : hp;
-          if (dmgPath in fixed) set(hpPath, next / dmg);
-          else { set(hpPath, hpNext); set(dmgPath, next / getPath(hpPath)); }
+          if (!last.mobsOk && last.okAt) { tuneMobs(last.runs, ' по проверке'); lo = hi = null; }
+          if (!bossFixed) {
+            // the last check brackets the threat: killed early → too weak, late (or never) → too strong
+            if (last.at !== undefined && last.at < tAt && !last.okAt) { lo = threat; if (hi !== null && hi <= lo) hi = null; }
+            if ((last.at === undefined || last.at > tAt) && !last.okAt) { hi = threat; if (lo !== null && lo >= hi) lo = null; }
+            const next = last.okAt ? threat
+              : lo !== null && hi !== null ? Math.sqrt(lo * hi)
+                : last.at === undefined ? threat * 0.5
+                  : threat * clamp((tAt / last.at) ** 1.5, 0.5, 2);
+            // the fight's length follows the HP (the hero's DPS barely depends on it)
+            const hpNext = last.fight !== undefined && !(hpPath in fixed) && Math.abs(last.fight - goal.fight) > T.tol * goal.fight
+              ? hp * clamp(goal.fight / last.fight, 0.5, 2) ** 0.8 : hp;
+            if (dmgPath in fixed) set(hpPath, next / dmg);
+            else { set(hpPath, hpNext); set(dmgPath, next / getPath(hpPath)); }
+          }
         }
         const c = await checkRound(`круг ${it + 1} (HP ${getPath(hpPath)}, урон ${getPath(dmgPath)})`);
         last = c;

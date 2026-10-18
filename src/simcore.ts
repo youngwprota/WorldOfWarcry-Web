@@ -699,10 +699,9 @@ function lootItem(h: Hero, it: Item) {
 }
 const RANKS: MobRank[] = ['normal', 'elite', 'mini', 'boss'];
 /** The top rank of a fight's units; all static (trees, snags): 'static'. */
-const topRank = (g: Unit[]): MobRank | 'static' => {
-  const live = g.filter((u) => !MOBS[u.def].static);
-  return live.length ? RANKS[Math.max(...live.map((u) => RANKS.indexOf(mobRank(MOBS[u.def]))))] : 'static';
-};
+// a tree chopped with mobs that joined is still a chop (its length is the tree's HP): not a fight of their rank
+const topRank = (g: Unit[]): MobRank | 'static' =>
+  g.some((u) => MOBS[u.def].static) ? 'static' : RANKS[Math.max(...g.map((u) => RANKS.indexOf(mobRank(MOBS[u.def]))))];
 const dpsCache = new Map<string, number>();
 /**
  * Each class: the best weapon + class item it may use (party.ts classSlot) for each location, by DPS against the
@@ -770,7 +769,7 @@ export interface Snap {
 }
 export interface FightRec {
   def: string; depth: number; t: number; first: boolean; dur: number; swings: number; taken: number; maxHp: number; win: boolean; cls: HeroClass;
-  /** Where, and the top rank in the fight ('static': a tree or a snag, never strikes back). */
+  /** Where, and the top rank in the fight ('static': a tree or a snag was chopped, whoever joined). */
   zone: ZoneId; rank: MobRank | 'static';
 }
 /** What the bot did, for the map replay: a fight, a break, or a rest in the camp. */
