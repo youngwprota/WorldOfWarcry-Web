@@ -896,7 +896,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .g-hint { position: absolute; bottom: calc(22px + env(safe-area-inset-bottom)); font-size: 13px; font-weight: 700; color: #f0dcc0aa; animation: pulse 1s ease-in-out infinite alternate; }
 .g-result .g-tag { background: var(--rc); }
 .g-result .g-name { color: var(--rc); font-size: 28px; }
-.g-result.r3 .g-name { font-size: 32px; animation: g-pop 0.5s 0.3s both; }
+.g-result:is(.r3, .r4) .g-name { font-size: 32px; animation: g-pop 0.5s 0.3s both; }
 @keyframes g-pop { from { transform: scale(2); opacity: 0; } to { transform: none; opacity: 1; } }
 .g-got { position: relative; display: flex; align-items: center; gap: 10px; margin-top: 10px; text-align: left; }
 .g-got .cell { flex: none; }

@@ -87,7 +87,8 @@ export const sfx = {
     tone(110, 0.18, 'square', 0.12, 0.5);
   },
   reveal(rarity: number) {
-    const base = [392, 440, 523, 587][rarity];
+    // by gacha tier (GACHA.tiers): common, rare, epic, legendary, mythic
+    const base = [392, 440, 523, 587, 659][rarity];
     [1, 1.25, 1.5, 2].slice(0, 2 + Math.min(rarity, 2)).forEach((k, i) => tone(base * k, 0.4 + rarity * 0.25, 'triangle', 0.16, 1, i * 0.08));
     if (rarity >= 3) { noise(0.8, 0.5, 500, 0.4); tone(65, 1, 'sine', 0.35, 0.6); }
   },

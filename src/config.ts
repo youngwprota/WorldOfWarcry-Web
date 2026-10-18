@@ -1559,13 +1559,16 @@ export const CEMETERY_BOARS = { pack: pack(['undead_boar', 'undead_boar']), at: 
 export const LEASH = 15;
 
 /**
- * "Горнило судьбы" — gacha forge (docs/features/ludka). `rates` are the per-pull chances of gacha tiers 0..3;
- * a legendary always drops on pull number `pity` without one. Every legendary is the banner weapon.
+ * "Горнило судьбы" — gacha forge (docs/features/ludka). `rates` are the per-pull chances of gacha tiers 0..4;
+ * a legendary or better always drops on pull number `pity` without one. A legendary is the banner item with chance
+ * `bannerShare`, else a legendary class item; a mythic is always a class item (docs/features/fix-shield-additional-stats).
  */
 export const GACHA = {
-  /** Gacha tier 0..3 → RARITY index: common, rare, epic, legendary. */
-  tiers: [0, 2, 3, 4],
-  rates: [0.7, 0.22, 0.074, 0.006],
+  /** Gacha tier 0..4 → RARITY index: common, rare, epic, legendary, mythic. */
+  tiers: [0, 2, 3, 4, 5],
+  rates: [0.7, 0.22, 0.074, 0.005, 0.001],
+  /** Share of legendary pulls that give the banner item (the rest: a legendary class item). */
+  bannerShare: 0.5,
   pity: 60,
   /**
    * Chance a kill gives one pull, by mob rank. All 0 for now: a mob drops only what is shown above it (its stat
@@ -1651,7 +1654,7 @@ export const FORGE3D = {
    * Rings and amulets (showcase models, tools/blender/jewels.py): largest side (share of `itemSize`), strength of the
    * metal's reflections, stone glow (feeds the bloom); twinkles on the piece and motes circling it, by gacha tier.
    */
-  jewel: { size: 0.95, env: 0.4, glow: 0.8, diamond: 0.25, light: 1.2, metal: 0.75, bloom: 0.35, lean: 0.45, swing: 0.75, swaySpeed: 0.9, glints: [16, 28, 44, 64], motes: [0, 40, 80, 150] },
+  jewel: { size: 0.95, env: 0.4, glow: 0.8, diamond: 0.25, light: 1.2, metal: 0.75, bloom: 0.35, lean: 0.45, swing: 0.75, swaySpeed: 0.9, glints: [16, 28, 44, 64, 90], motes: [0, 40, 80, 150, 220] },
   anvilYaw: 0,
   ingot: [0, 0.04, 0] as [number, number, number],
   ingotYaw: 0,
