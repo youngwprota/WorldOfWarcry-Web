@@ -6,10 +6,13 @@ import {
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemGuard, itemLines, itemName, itemOrb, itemPassive, orbLine, slotOf, weaponBase, weaponDamage,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, BONUS_ICON, armorStats, EQUIP_BAR, SLOT_NAME, cellHtml, itemGuard, itemLines, itemName, itemOrb, itemPassive, orbLine, slotOf, weaponBase, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
+
+/** Art icon of a mage orb's bonus (WeaponDef.orb key) in the item card. */
+const ORB_ICON = { regen: 'regen', power: 'hit', speed: 'run', defense: 'defense', pull: 'anvil', critDmg: 'critdmg' } as const;
 import { DAMAGE_TYPE_ICON, fmtK, icon } from './icons';
 import { art } from './art';
 import type { Game } from './game';
@@ -474,8 +477,14 @@ export class Inventory {
       return cur && o !== undefined && o !== v ? `<i>${o}</i><em>›</em><b class="${cls}">${v}</b>` : `<b>${v}</b>`;
     };
     const [main, ...rest] = itemLines(it).filter(([k]) => k !== 'Тип');
-    // the stat's own icon: the coloured sword for damage, the coloured shield for defense (and a shield's block)
-    const mainIcon = it.kind === 'weapon' && !WEAPONS[it.def].guard ? art('dps', 30) : art('defense', 30);
+    // the stat's own icon: the coloured sword for damage, the coloured shield for defense (and a shield's block);
+    // jewels without defense and mage orbs: the icon of their bonus stat (the stat window's)
+    const w = it.kind === 'weapon' ? WEAPONS[it.def] : null;
+    const bonus = w ? null : armorStats(it).bonus;
+    const orbStat = w?.orb && (Object.keys(w.orb) as (keyof NonNullable<typeof w.orb>)[])[0];
+    const mainIcon = w?.orb ? art(ORB_ICON[orbStat!], 30)
+      : w ? art(w.guard ? 'defense' : 'dps', 30)
+      : art(main[0] === 'Защита' || !bonus ? 'defense' : BONUS_ICON[bonus.stat], 30);
     const sub = rest.map(([k, v]) => `<div><span>${k}</span>${cmp(k, v)}</div>`).join('');
     let ability: string;
     const orb = it.kind === 'weapon' ? itemOrb(it) : undefined;
