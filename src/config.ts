@@ -77,10 +77,10 @@ export interface WeaponDef {
   cycle?: boolean;
   /**
    * Shield (the warrior's class slot): never swings; incoming damage × (1 − `reduce`); a hit taken may trigger a
-   * counter-strike of the weapon at the attacker (`counter` chance by its rank), not more often than every `cd` s;
-   * `reflect`: that share of the damage taken goes back to the attacker.
+   * counter-strike of the weapon at the attacker (`counter` chance by its rank), not more often than every `cd` s.
+   * `reduce` and `counter` grow with copies (items.ts itemGuard); the spiked shield's thorns are its passive (CLASS_PASSIVE).
    */
-  guard?: { reduce: number; counter: Record<MobRank, number>; cd: number; reflect?: number };
+  guard?: { reduce: number; counter: Record<MobRank, number>; cd: number };
   /** Held in the left hand (the bow). */
   leftHand?: boolean;
   /**
@@ -105,8 +105,6 @@ export interface WeaponDef {
   pet?: string;
   /** Model per rarity (RARITY index), GLB props with their own materials (src/assets.ts loadProps); over `model`. */
   tiers?: string[];
-  /** The item exists only at this rarity (RARITY index): the mage's orbs. */
-  rarity?: number;
 }
 
 /** Share of the gun's pellets that hit a lone target on average (the fan's edges miss): for DPS and the simulator. */
@@ -156,7 +154,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   shield_spiked: {
     id: 'shield_spiked', name: 'Шипастый щит', type: 'crush', dmgMul: 0, aps: 1, shape: 'arc', arc: 0, range: 0,
     anim: 'AxeAttack', model: { human: 'shield', orc: 'shield' }, icon: '🛡️',
-    guard: { reduce: 0.15, counter: { normal: 0.15, elite: 0.2, mini: 0.25, boss: 0.3 }, cd: 0.4, reflect: 0.5 },
+    guard: { reduce: 0.15, counter: { normal: 0.15, elite: 0.2, mini: 0.25, boss: 0.3 }, cd: 0.4 },
   },
   // hunter (src/party.ts): ~2.5 sword ranges
   bow: {
@@ -190,27 +188,27 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   orb_vigor: {
     id: 'orb_vigor', name: 'Благословление бодрости', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_vigor', orc: 'orb_vigor' }, icon: '💚', orb: { regen: 0.3 }, rarity: 1,
+    anim: 'SwordAttack', model: { human: 'orb_vigor', orc: 'orb_vigor' }, icon: '💚', orb: { regen: 0.3 },
   },
   orb_fury: {
     id: 'orb_fury', name: 'Яростный клич', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_glass', orc: 'orb_glass' }, icon: '🎲', orb: { power: 0.1 }, rarity: 0,
+    anim: 'SwordAttack', model: { human: 'orb_glass', orc: 'orb_glass' }, icon: '🎲', orb: { power: 0.1 },
   },
   orb_swift: {
     id: 'orb_swift', name: 'Сфера ветра', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_swift', orc: 'orb_swift' }, icon: '💨', orb: { speed: 0.05 }, rarity: 2,
+    anim: 'SwordAttack', model: { human: 'orb_swift', orc: 'orb_swift' }, icon: '💨', orb: { speed: 0.05 },
   },
   orb_ward: {
     id: 'orb_ward', name: 'Сфера оберега', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_ward', orc: 'orb_ward' }, icon: '💠', orb: { defense: 0.2 }, rarity: 3,
+    anim: 'SwordAttack', model: { human: 'orb_ward', orc: 'orb_ward' }, icon: '💠', orb: { defense: 0.2 },
   },
   orb_fortune: {
     id: 'orb_fortune', name: 'Сфера удачи', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_fortune', orc: 'orb_fortune' }, icon: '🪙', orb: { pull: 0.01 }, rarity: 4,
+    anim: 'SwordAttack', model: { human: 'orb_fortune', orc: 'orb_fortune' }, icon: '🪙', orb: { pull: 0.01 },
   },
   orb_demon: {
     id: 'orb_demon', name: 'Сфера демона', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_demon', orc: 'orb_demon' }, icon: '😈', orb: { critDmg: [0.11, 0.66] }, rarity: 5,
+    anim: 'SwordAttack', model: { human: 'orb_demon', orc: 'orb_demon' }, icon: '😈', orb: { critDmg: [0.11, 0.66] },
   },
 };
 
@@ -255,17 +253,18 @@ export interface PetDef {
   range: number;
   /** Run speed, m/s: a bit above the hero's so it keeps up. */
   speed: number;
-  /** Every bite also hits all other foes within this many metres of the target (the bear's paw). */
-  cleave?: number;
-  /** Leaps at a target this far away (m) instead of running, the bite on landing deals × `mult` (the lion). */
-  pounce?: { range: number; mult: number; cd: number };
+  /**
+   * Leaps at a target this far away (m) instead of running (the lion), from «Эпическое» only: the landing bite's
+   * multiplier is its passive (CLASS_PASSIVE.lion). The bear's paw is its passive too (CLASS_PASSIVE.bear).
+   */
+  pounce?: { range: number; cd: number };
 }
 // Each pet differs by damage type (mob resists) and manner (docs/features/gacha-gear/concept.md). Placeholder numbers.
 export const PETS: Record<string, PetDef> = {
   boar: { id: 'boar', name: 'Вепрь', icon: 'boar', model: 'orc_boar', scale: 1.0, type: 'crush', dmg: 0.8, aps: 0.9, range: 1.3, speed: 6.5 },
   wolf: { id: 'wolf', name: 'Лютоволк', icon: 'boar', model: 'wild_direwolf', scale: 0.45, type: 'slash', dmg: 0.4, aps: 1.8, range: 1.2, speed: 7.5 },
-  bear: { id: 'bear', name: 'Медведь', icon: 'boar', model: 'wild_bear', scale: 0.55, type: 'chop', dmg: 1.35, aps: 0.55, range: 1.5, speed: 6.0, cleave: 2 },
-  lion: { id: 'lion', name: 'Лев', icon: 'boar', model: 'wild_lion', scale: 0.55, type: 'pierce', dmg: 0.75, aps: 0.85, range: 1.3, speed: 6.8, pounce: { range: 6, mult: 2.5, cd: 6 } },
+  bear: { id: 'bear', name: 'Медведь', icon: 'boar', model: 'wild_bear', scale: 0.55, type: 'chop', dmg: 1.35, aps: 0.55, range: 1.5, speed: 6.0 },
+  lion: { id: 'lion', name: 'Лев', icon: 'boar', model: 'wild_lion', scale: 0.55, type: 'pierce', dmg: 0.75, aps: 0.85, range: 1.3, speed: 6.8, pounce: { range: 6, cd: 6 } },
   bone_boar: { id: 'bone_boar', name: 'Костяной вепрь', icon: 'boar', model: 'undead_boar', scale: 1.0, type: 'magic', dmg: 0.75, aps: 0.9, range: 1.3, speed: 6.5 },
 };
 /** Pet size by item quality (RARITY index); the bite grows with the item's own damage (quality, level, sharpening). */
@@ -278,6 +277,47 @@ for (const p of Object.values(PETS)) {
     anim: 'SwordAttack', model: { human: p.model, orc: p.model }, icon: '🐾', pet: p.id,
   };
 }
+
+/**
+ * Class items (shields, mage orbs, pets; docs/features/fix-shield-additional-stats): their stats grow with copies
+ * like armour (items.ts lvlMult: a shield's block and counter chances, an orb's bonuses; a pet's bite is its damage),
+ * and from quality `passiveFrom` up each has a passive (CLASS_PASSIVE). Shield chances stop at the caps.
+ */
+export const CLASS_ITEM = { passiveFrom: 3, maxReduce: 0.6, maxCounter: 0.9 };
+/**
+ * Passive of a class item by its def: `v` = value at «Эпическое», «Легендарное», «Мифическое». `desc` shows it with `{v}` (a percent when `pct`). Numbers are placeholders until balance.
+ */
+export interface PassiveDef { name: string; desc: string; v: [number, number, number]; pct?: boolean }
+export const CLASS_PASSIVE: Record<string, PassiveDef> = {
+  // a share of every blow taken goes back to the attacker
+  shield_spiked: { name: 'Шипы', desc: 'возвращают {v} урона', v: [0.3, 0.5, 0.75], pct: true },
+  // every bite also hits all fighting foes within v m of the target
+  bear: { name: 'Удар лапой', desc: 'по всем в {v} м от цели', v: [2, 2.5, 3] },
+  // leaps at a foe up to PetDef.pounce.range away, the landing bite × v
+  lion: { name: 'Прыжок', desc: 'на цель до 6 м, укус ×{v}', v: [2, 2.5, 3] },
+  // a bite stuns a non-boss foe for PET_STUN s with chance v
+  boar: { name: 'Таран', desc: 'укус оглушает: {v}', v: [0.15, 0.22, 0.3], pct: true },
+  // chance of a second bite at once
+  wolf: { name: 'Рвать', desc: 'второй укус: {v}', v: [0.2, 0.3, 0.4], pct: true },
+  // share of the bite's damage that heals the hero
+  bone_boar: { name: 'Похищение жизни', desc: '{v} урона укуса в HP', v: [0.1, 0.15, 0.2], pct: true },
+  // a hero's blow deals double damage with chance v
+  orb_fury: { name: 'Неистовство', desc: 'двойной урон удара: {v}', v: [0.1, 0.15, 0.2], pct: true },
+  // HP regen × (1 + v) while HP is under ORB_LOW_HP
+  orb_vigor: { name: 'Второе дыхание', desc: 'реген +{v} при HP ниже 30%', v: [1, 1.5, 2], pct: true },
+  // extra dodge chance, added to the hero's dodge
+  orb_swift: { name: 'Попутный ветер', desc: '+{v} к уклонению', v: [0.05, 0.08, 0.12], pct: true },
+  // fully absorbs one blow every v s
+  orb_ward: { name: 'Барьер', desc: 'гасит удар раз в {v} с', v: [8, 6, 4] },
+  // chance each stat orb of a kill comes twice
+  orb_fortune: { name: 'Щедрость', desc: 'двойные сферы с врагов: {v}', v: [0.2, 0.3, 0.4], pct: true },
+  // the hero's crits heal by a share of their damage
+  orb_demon: { name: 'Жажда', desc: 'крит лечит на {v} урона', v: [0.04, 0.06, 0.08], pct: true },
+};
+/** Share of max HP under which the vigor orb's second wind works (CLASS_PASSIVE.orb_vigor). */
+export const ORB_LOW_HP = 0.3;
+/** Stun of the boar's ram (CLASS_PASSIVE.boar), s. */
+export const PET_STUN = 0.9;
 
 export const SHARPEN = { max: 10, perLevel: 0.08, cost: (lvl: number) => 40 + lvl * lvl * 25 };
 
@@ -1052,6 +1092,10 @@ export const STAT_SOURCE_NAME: Record<StatSource, string> = {
  */
 export const VIEW = { heroScale: 1.4, mobScale: 1, fov: 59, env: 1.15 };
 
+// Phones are GPU fill bound on high graphics: fewer pixels, no MSAA, a smaller hard-edged shadow map.
+const MOBILE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+export const GFX = { mobile: MOBILE, dpr: MOBILE ? 1.5 : 2, msaa: MOBILE ? 0 : 4, shadowMap: MOBILE ? 1024 : 2048 };
+
 export const HERO = {
   /**
    * All stats are whole numbers. power: flat damage added to the weapon's base (before its type
@@ -1519,13 +1563,16 @@ export const CEMETERY_BOARS = { pack: pack(['undead_boar', 'undead_boar']), at: 
 export const LEASH = 15;
 
 /**
- * "Горнило судьбы" — gacha forge (docs/features/ludka). `rates` are the per-pull chances of gacha tiers 0..3;
- * a legendary always drops on pull number `pity` without one. Every legendary is the banner weapon.
+ * "Горнило судьбы" — gacha forge (docs/features/ludka). `rates` are the per-pull chances of gacha tiers 0..4;
+ * a legendary or better always drops on pull number `pity` without one. A legendary is the banner item with chance
+ * `bannerShare`, else a legendary class item; a mythic is always a class item (docs/features/fix-shield-additional-stats).
  */
 export const GACHA = {
-  /** Gacha tier 0..3 → RARITY index: common, rare, epic, legendary. */
-  tiers: [0, 2, 3, 4],
-  rates: [0.7, 0.22, 0.074, 0.006],
+  /** Gacha tier 0..4 → RARITY index: common, rare, epic, legendary, mythic. */
+  tiers: [0, 2, 3, 4, 5],
+  rates: [0.7, 0.22, 0.074, 0.005, 0.001],
+  /** Share of legendary pulls that give the banner item (the rest: a legendary class item). */
+  bannerShare: 0.5,
   pity: 60,
   /**
    * Chance a kill gives one pull, by mob rank. All 0 for now: a mob drops only what is shown above it (its stat
@@ -1535,8 +1582,6 @@ export const GACHA = {
   /** Locations whose kills never give a pull (bosses there too): the first one is beaten on the forest's own drops alone. */
   noTokens: ['forest'] as ZoneId[],
   banner: { kind: 'armor' as const, def: 'ring_blood', name: 'Кольцо Короля-лича', subtitle: 'Пьёт кровь врагов и отдаёт её хозяину' },
-  /** Orbs (one quality each) a non-legendary gacha tier gives, by RARITY index: Fury / Vigor + Wind / Ward. */
-  orbs: [[0], [1, 2], [3]] as number[][],
   /** Hammer blows per pull; the rarity colour can climb after each, legendary only on the last one. */
   strikes: 5,
   /** Reveal timing, seconds: delay between hammer blows, then the final flash. */
@@ -1613,7 +1658,7 @@ export const FORGE3D = {
    * Rings and amulets (showcase models, tools/blender/jewels.py): largest side (share of `itemSize`), strength of the
    * metal's reflections, stone glow (feeds the bloom); twinkles on the piece and motes circling it, by gacha tier.
    */
-  jewel: { size: 0.95, env: 0.4, glow: 0.8, diamond: 0.25, light: 1.2, metal: 0.75, bloom: 0.35, lean: 0.45, swing: 0.75, swaySpeed: 0.9, glints: [16, 28, 44, 64], motes: [0, 40, 80, 150] },
+  jewel: { size: 0.95, env: 0.4, glow: 0.8, diamond: 0.25, light: 1.2, metal: 0.75, bloom: 0.35, lean: 0.45, swing: 0.75, swaySpeed: 0.9, glints: [16, 28, 44, 64, 90], motes: [0, 40, 80, 150, 220] },
   anvilYaw: 0,
   ingot: [0, 0.04, 0] as [number, number, number],
   ingotYaw: 0,

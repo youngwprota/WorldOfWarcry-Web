@@ -7,7 +7,7 @@ import './grade';
 import { assets } from './assets';
 import { setMuted, sfx, unlockAudio } from './audio';
 import { Character } from './character';
-import { FACTIONS, FORGE3D, MOBS, ORBS, PETS, WEAPONS, type FactionId, type OrbKind } from './config';
+import { FACTIONS, FORGE3D, GFX, MOBS, ORBS, PETS, WEAPONS, type FactionId, type OrbKind } from './config';
 import { GEAR_MODELS } from './items';
 import { Game } from './game';
 import { Input } from './input';
@@ -27,17 +27,18 @@ import { classPreview } from './looks';
 import { registerMocks } from './mocks';
 import { startArtWave, startLoadingFx } from './loadfx';
 import { Post } from './post';
+import { PerfHud, prof } from './perfhud';
 
 const ui = new UI();
 // the loading art comes alive: its background sways, sparks fly
 startArtWave(document.getElementById('loading')!, `${import.meta.env.BASE_URL}assets/ui/loading.jpg`);
 startLoadingFx(document.getElementById('loading')!);
 const app = ui.app;
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ antialias: !GFX.mobile, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, GFX.dpr));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = GFX.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.domElement.className = 'game';
 app.prepend(renderer.domElement);
 // three.js stops the loop on context loss and restarts it on restore. If the browser never gives
@@ -56,6 +57,7 @@ const input = new Input(app);
 const labels = document.getElementById('labels')!;
 /** Glow, grade and vignette over the game view (src/post.ts); null on low graphics. */
 let post: Post | null = new Post(renderer);
+const perf = new PerfHud(renderer);
 
 function resize() {
   const w = app.clientWidth;
@@ -128,7 +130,7 @@ let game: Game | null = null;
 
 function applyGfx(low: boolean) {
   renderer.shadowMap.enabled = !low;
-  renderer.setPixelRatio(low ? 1 : Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(low ? 1 : Math.min(devicePixelRatio, GFX.dpr));
   if (low) { post?.dispose(); post = null; } else post ??= new Post(renderer);
   resize();
   game?.setLowGfx(low);
@@ -154,7 +156,8 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
   const inv = new Inventory(ui, game);
   ui.onBag = ui.onArmor = game.onOpenCharacter = game.onOpenBag = () => { input.reset(); inv.open(); };
   ui.onClass = (c) => game?.switchClass(c);
-  const debug = new DebugPanel(app, game);
+  const debug = new DebugPanel(app, game, perf);
+  perf.toggle(perf.saved);
   ui.onDebug = () => debug.toggle(true);
   const map = new MapView(game);
   ui.onMap = game.onOpenMap = () => { if (inv.isOpen || ui.modalOpen) return; map.toggle(); };
@@ -334,10 +337,15 @@ function run() {
     const { w, h } = { w: app.clientWidth, h: app.clientHeight };
     if (game.camera.aspect !== w / h) { game.camera.aspect = w / h; game.camera.updateProjectionMatrix(); resize(); }
     game.viewH = renderer.domElement.height;
+    perf.begin();
     game.update(dt);
-    if (game.offscreen) return;
-    if (post) post.render(game.scene, game.camera);
-    else renderer.render(game.scene, game.camera);
+    prof.start();
+    if (!game.offscreen) {
+      if (post) post.render(game.scene, game.camera);
+      else renderer.render(game.scene, game.camera);
+    }
+    prof.lap(0);
+    perf.end();
   });
 }
 

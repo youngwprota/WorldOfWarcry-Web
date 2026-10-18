@@ -371,6 +371,8 @@ export class Prologue {
   }
 
   dispose() {
+    this.particles.dispose();
+    this.pickups.dispose();
     this.layer.remove();
     this.hud.remove();
     this.cine.remove();

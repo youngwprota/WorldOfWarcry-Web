@@ -5,13 +5,14 @@ import { Creature } from './creature';
 import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
-  ATTACK_HIT, FACTIONS, PETS, tokenChance, zoneScaleOf, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
+  ATTACK_HIT, FACTIONS, ORB_LOW_HP, PETS, PET_STUN, tokenChance, zoneScaleOf, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
   SPAWN_PRESETS, type SpawnPreset, type SpawnPresetId, mobRank, zoneResist, ZONE_FOES, ZONE_SUN, type DamageType, type ResistTier, type ItemDrop, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
+  GFX,
 } from './config';
 import { ArenaFog, DROP_TINT, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, StatAuras, Telegraphs, type Bolt } from './fx';
 import { Glows, SunLight, type GlowOpts } from './vfx';
 import {
-  ARMOR, BAG_SIZE, CLASS_SET, armorTrim, copyGain, dropAny, dropIconId, dropItem, fixedRarity, rollDrop, itemClass, itemIcon, itemModel, itemName, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, CLASS_SET, armorTrim, copyGain, dropAny, dropIconId, dropItem, rollDrop, itemClass, itemGuard, itemIcon, itemModel, itemName, itemOrb, passiveOf, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
@@ -56,6 +57,17 @@ const SUN_LIGHT = 3.3;
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
+/**
+ * Puts a screen-space UI element over projected point `p` (NDC); `at` keeps the last spot (to 0.1 px: sub-pixel, so
+ * moving bars stay smooth), so a standing camera writes nothing (every transform write restyles the element).
+ */
+function placeBar(el: HTMLElement, at: THREE.Vector2, p: THREE.Vector3, w: number, h: number, dy: string) {
+  const x = Math.round((p.x * 0.5 + 0.5) * w * 10) / 10;
+  const y = Math.round((-p.y * 0.5 + 0.5) * h * 10) / 10;
+  if (x === at.x && y === at.y) return;
+  at.set(x, y);
+  el.style.transform = `translate(${x}px, ${y}px) translate(-50%, ${dy})`;
+}
 const fxA = new THREE.Vector3();
 const fxB = new THREE.Vector3();
 const camProj = new THREE.Matrix4();
@@ -63,6 +75,18 @@ const camFrustum = new THREE.Frustum();
 const cullSphere = new THREE.Sphere();
 /** Extra metres around a mob's body when testing it against the camera view: the matrices are from the previous frame. */
 const CULL_PAD = 1.5;
+/** Shadow box fitted to the view: tallest receivers seen on screen (tree crowns), m, and a margin for the soft edge. */
+const SHADOW_TOP = 6;
+const SHADOW_PAD = 2;
+/** The old fixed shadow box (shadow camera space, m): the fitted one stays inside it. Sizes are multiples of SHADOW_STEP. */
+const SHADOW_BOX = { left: -26, right: 26, bottom: -26, top: 32 };
+const SHADOW_STEP = 2;
+const sunLs = new THREE.Vector3();
+const SCREEN_CORNERS = [-1, -1, 1, -1, 1, 1, -1, 1];
+const SHADOW_LEVELS = [0, SHADOW_TOP];
+const toLight = new THREE.Matrix4();
+const viewRay = new THREE.Vector3();
+const viewHit = new THREE.Vector3();
 const sparMates: Mob[] = [];
 const isSparring = (o: Mob | null | undefined) => !!o && o.alive && o.state === 'idle' && o.behavior.idle === 'spar';
 /** RARITY colours as numbers (particles). */
@@ -181,7 +205,7 @@ export class Game {
   private puffs: FogPuffs;
   /** Pollen, wisps, snow, fireflies… in the air round the hero (src/ambient.ts). */
   private ambient = new Ambient();
-  /** Dunes sandstorm: sand sheets + haze (src/sandstorm.ts). */
+  /** Zone storms: dunes sandstorm, Snow Pass blizzard (src/sandstorm.ts). */
   private sandstorm = new Sandstorm();
   /** Drawing-buffer height in pixels (set by main.ts; ambient point sizes). */
   viewH = 1600;
@@ -229,7 +253,7 @@ export class Game {
   offscreen = false;
   private moveDir = new THREE.Vector3();
   /** Player HP floating above the hero's head. */
-  private heroBar!: { el: HTMLDivElement; fill: HTMLDivElement; text: HTMLSpanElement };
+  private heroBar!: { el: HTMLDivElement; fill: HTMLDivElement; text: HTMLSpanElement; at: THREE.Vector2; fillK: number };
 
   private labels: HTMLElement;
 
@@ -243,9 +267,9 @@ export class Game {
     this.sun.position.set(-6, 12, 5);
     // Real-time shadows in a box that follows the camera.
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(GFX.shadowMap, GFX.shadowMap);
     const sc = this.sun.shadow.camera;
-    sc.left = -26; sc.right = 26; sc.top = 32; sc.bottom = -26; sc.near = 1; sc.far = 90;
+    sc.left = SHADOW_BOX.left; sc.right = SHADOW_BOX.right; sc.top = SHADOW_BOX.top; sc.bottom = SHADOW_BOX.bottom; sc.near = 1; sc.far = 90;
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.03;
     this.scene.add(this.hemi, this.sun, this.sun.target);
@@ -313,7 +337,7 @@ export class Game {
     hb.className = 'herohp';
     hb.innerHTML = '<div class="fill"></div><span></span>';
     labels.appendChild(hb);
-    this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, text: hb.querySelector('span')! };
+    this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, text: hb.querySelector('span')!, at: new THREE.Vector2(NaN, NaN), fillK: -1 };
     this.particles = new Particles(this.scene);
     this.glows = new Glows(this.scene);
     this.pickups = new Pickups(this.scene, this.camera);
@@ -329,7 +353,7 @@ export class Game {
     this.waves = new Shockwaves(this.scene);
     this.spells = new Spells(this.scene);
     this.syncPet();
-    this.puffs = new FogPuffs(this.scene);
+    this.puffs = new FogPuffs(this.scene, this.camera);
     this.scene.add(this.ambient.points);
     this.scene.add(this.sandstorm.group);
     // (no camp NPC by the gate for now: src/npc.ts CampNpc is kept for later)
@@ -525,7 +549,7 @@ export class Game {
 
   /** Model of the mage's orb floating over the shoulder, or null. */
   /** Bonuses of the equipped mage orb (WeaponDef.orb). */
-  private get orb() { const o = this.save.weapons[1]; return o ? WEAPONS[o.def].orb : undefined; }
+  private get orb() { return itemOrb(this.save.weapons[1]); }
   orbModel() { const o = this.save.weapons[1]; return o && WEAPONS[o.def].orb ? WEAPONS[o.def].model[this.faction] : null; }
 
   /** The hunter in a debug set draws the set's bow. */
@@ -633,7 +657,7 @@ export class Game {
     for (const a of this.arenas.values()) a.update(dt, this.time);
     this.world.update(dt, this.time, this.hero.position);
     this.ambient.update(this.time, this.hero.position, this.viewH);
-    this.sandstorm.update(this.time, this.hero.position, this.ambient.storm, this.lowGfx);
+    this.sandstorm.update(this.time, this.hero.position, this.ambient.storm, this.ambient.stormLook, this.lowGfx);
     this.render(dt);
     this.saveT += dt;
     if (this.saveT > 5) { this.saveT = 0; this.persist(); }
@@ -689,20 +713,64 @@ export class Game {
     this.hemi.groundColor.copy(this.env.hemiGround);
     this.hemi.intensity = HEMI_LIGHT * this.env.light;
     this.sun.intensity = SUN_LIGHT * this.env.light;
+    this.fitShadow();
     const { w, h } = this.ui.size();
     this.fx.update(dt, w, h);
     // hero HP bar above the head
     v1.copy(hp).setY(2.45 * this.heroScale).project(this.camera);
     const hb = this.heroBar;
-    hb.el.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
+    placeBar(hb.el, hb.at, v1, w, h, '-100%');
     hb.el.classList.toggle('dead', this.dead);
-    hb.fill.style.width = `${(this.hp / this.maxHp) * 100}%`;
-    hb.text.textContent = fmtK(Math.ceil(this.hp));
+    const heroFill = this.hp / this.maxHp;
+    if (hb.fillK !== heroFill) { hb.fillK = heroFill; hb.fill.style.width = `${heroFill * 100}%`; }
+    const heroText = fmtK(Math.ceil(this.hp));
+    if (hb.text.textContent !== heroText) hb.text.textContent = heroText;
     hb.el.classList.toggle('low', this.hp < this.maxHp * 0.3);
     this.updateMobBars(w, h);
     this.hudT -= dt;
     if (this.hudT <= 0) { this.hudT = 0.1; this.refreshHud(false); }
     this.ui.minimap(this.hero.position, this.hero.facing, this.mapDots(45), this.world, this.mapMarks(45));
+  }
+
+  /**
+   * Fits the sun's orthographic shadow box to the ground the camera sees (between y 0 and SHADOW_TOP). A caster outside
+   * the view that shades a visible point lies on the same sun ray, so it projects inside the box too: nothing on screen
+   * loses a shadow, and everything off screen stays out of the shadow pass.
+   */
+  private fitShadow() {
+    const cam = this.camera;
+    const sc = this.sun.shadow.camera;
+    cam.updateMatrixWorld();
+    // the shadow camera looks from the sun at its target; a rotation, so the inverse is the transpose. The box is worked
+    // out in world-anchored light space (no translation), so its texel grid stays put while the sun follows the camera
+    toLight.lookAt(this.sun.position, this.sun.target.position, sc.up).transpose();
+    sunLs.copy(this.sun.position).applyMatrix4(toLight);
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let i = 0; i < SCREEN_CORNERS.length; i += 2) {
+      viewRay.set(SCREEN_CORNERS[i], SCREEN_CORNERS[i + 1], 0.5).unproject(cam).sub(cam.position).normalize();
+      for (const h of SHADOW_LEVELS) {
+        // (a camera below the level hits it at the camera itself, never behind it)
+        const t = viewRay.y < -1e-3 ? Math.min(Math.max(0, (h - cam.position.y) / viewRay.y), cam.far) : cam.far;
+        viewHit.copy(cam.position).addScaledVector(viewRay, t).applyMatrix4(toLight);
+        x0 = Math.min(x0, viewHit.x); x1 = Math.max(x1, viewHit.x);
+        y0 = Math.min(y0, viewHit.y); y1 = Math.max(y1, viewHit.y);
+      }
+    }
+    // never bigger than the old fixed box (so never coarser): a ray to the horizon would stretch it over the whole map
+    const B = SHADOW_BOX;
+    x0 = Math.max(x0 - SHADOW_PAD, sunLs.x + B.left); x1 = Math.min(x1 + SHADOW_PAD, sunLs.x + B.right);
+    y0 = Math.max(y0 - SHADOW_PAD, sunLs.y + B.bottom); y1 = Math.min(y1 + SHADOW_PAD, sunLs.y + B.top);
+    // size in SHADOW_STEP steps (a texel changes only when it steps), edges on whole texels: no shimmer while walking
+    const map = this.sun.shadow.mapSize;
+    const w = Math.max(1, Math.ceil((x1 - x0) / SHADOW_STEP - 1e-6)) * SHADOW_STEP;
+    const h = Math.max(1, Math.ceil((y1 - y0) / SHADOW_STEP - 1e-6)) * SHADOW_STEP;
+    const tx = w / map.x, ty = h / map.y;
+    const left = Math.floor(x0 / tx) * tx - sunLs.x;
+    const bottom = Math.floor(y0 / ty) * ty - sunLs.y;
+    if (sc.left === left && sc.right === left + w && sc.bottom === bottom && sc.top === bottom + h) return;
+    sc.left = left; sc.right = left + w;
+    sc.bottom = bottom; sc.top = bottom + h;
+    sc.updateProjectionMatrix();
   }
 
   private updateHero(dt: number) {
@@ -782,6 +850,8 @@ export class Game {
 
     // regen; much faster in the camp
     let rate = this.regen; // HP per second
+    // the vigor orb's second wind (CLASS_PASSIVE.orb_vigor): faster regen at low HP
+    if (this.hp < this.maxHp * ORB_LOW_HP) rate *= 1 + passiveOf(this.save.weapons[1], 'orb_vigor');
     if (inCamp(p.x, p.z)) rate += (HERO.campRegen / 100) * this.maxHp;
     this.hp = Math.min(this.maxHp, this.hp + rate * dt);
 
@@ -858,11 +928,11 @@ export class Game {
     }
     if (h.launch >= 0) {
       h.launch -= dt;
-      if (h.launch < 0 && w.staff && t) { h.bolt = this.spells.bolt(this.castPoint(v1), t.pos, h.flight, STAVES[w.staff].bolt); h.aim = t; }
+      if (h.launch < 0 && w.staff && t) { h.bolt = this.spells.bolt(this.castPoint(v1), t.pos, h.flight, STAVES[w.staff].bolt); h.shot = h.bolt.shot; h.aim = t; }
     }
     // the mob left the staff's reach: the bolt fizzles and the hit is lost
     if (h.bolt && h.impact >= 0 && !this.inStrike(h.aim!, w.range)) {
-      this.spells.drop(h.bolt);
+      this.spells.drop(h.bolt, h.shot);
       h.impact = -1;
     }
     if (h.impact >= 0) {
@@ -880,7 +950,12 @@ export class Game {
     const crit = Math.random() < s.crit;
     const roll = this.orb?.critDmg;
     const critMul = s.critMul + (roll ? roll[0] + Math.random() * (roll[1] - roll[0]) : 0);
-    const dmg = this.itemDamage(it) * RESIST_MULT[tier] * mult * (crit ? critMul : 1) * (0.9 + Math.random() * 0.2);
+    // the fury orb's frenzy (CLASS_PASSIVE.orb_fury): a double blow
+    const frenzy = Math.random() < passiveOf(this.save.weapons[1], 'orb_fury') ? 2 : 1;
+    const dmg = this.itemDamage(it) * RESIST_MULT[tier] * mult * frenzy * (crit ? critMul : 1) * (0.9 + Math.random() * 0.2);
+    // the demon orb's thirst (CLASS_PASSIVE.orb_demon): a crit heals
+    const thirst = crit ? passiveOf(this.save.weapons[1], 'orb_demon') : 0;
+    if (thirst) this.hp = Math.min(this.maxHp, this.hp + dmg * thirst);
     return { dmg: Math.max(1, Math.round(dmg)), tier, fx: (crit ? 'crit' : '') as HitFx };
   }
 
@@ -1175,11 +1250,17 @@ export class Game {
         this.fightOf(m).hits++;
         // only extra damage: mobs never turn on the pet, the bite does not wake or shove them
         this.damageMob(m, dmg, tier, 0, mul > 1 ? 'crit' : '', false);
+        // pet passives (CLASS_PASSIVE): the bone boar heals the hero, the boar's ram stuns
+        const heal = passiveOf(it, 'bone_boar');
+        if (heal) this.hp = Math.min(this.maxHp, this.hp + dmg * heal);
+        if (m.alive && !m.def.boss && Math.random() < passiveOf(it, 'boar')) m.stun = PET_STUN;
       };
       const m = foe as Mob;
       bite(m);
+      // the wolf may bite twice
+      if (m.alive && Math.random() < passiveOf(it, 'wolf')) bite(m);
       // the bear's paw also hits every fighting mob next to the target
-      const r = pet.def.cleave;
+      const r = passiveOf(it, 'bear');
       if (r) for (const o of this.mobs) if (o !== m && o.hittable && !o.passive && o.state !== 'idle' && o.pos.distanceTo(m.pos) - o.radius < r) bite(o);
     });
   }
@@ -1338,7 +1419,11 @@ export class Game {
   /** Stats of a dead unit go straight to the hero (a mob's wait for its death clip, see grantKillRewards). */
   private payRewards(u: Unit) {
     // glowing orbs fly out of it into the hero; each pays on arrival (Pickups.onCollect), at once if the pool is full
-    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) for (let i = 0; i < n; i++) if (!this.pickups.spawn(u.pos, k)) this.collect(k);
+    // the fortune orb's bounty (CLASS_PASSIVE.orb_fortune): each orb may come twice
+    const twice = passiveOf(this.save.weapons[1], 'orb_fortune');
+    for (const [k, n] of Object.entries(u.reward) as [OrbKind, number][]) {
+      for (let i = 0; i < n; i++) for (let j = Math.random() < twice ? 2 : 1; j > 0; j--) if (!this.pickups.spawn(u.pos, k)) this.collect(k);
+    }
   }
 
   /** Spawners: a dead unit comes back when its charge's cooldown ends (the hero's position does not matter). */
@@ -1593,6 +1678,8 @@ export class Game {
       // Sleep far away mobs (GDD 5: "мобы дальше радиуса активности спят").
       m.awake = dHero < 40;
       m.ch.root.visible = m.state !== 'dead' ? dHero < 34 : m.ch.root.visible && dHero < 34;
+      // three.js walks the bone tree of hidden objects too: a far mob's model leaves the scene, the mob itself stays
+      if (dHero < 34) { if (!m.ch.root.parent) this.scene.add(m.ch.root); } else if (m.ch.root.parent) m.ch.root.removeFromParent();
       if (m.state === 'dead') {
         this.arenas.get(m)?.set(false);
         m.deadT += dt;
@@ -2286,9 +2373,16 @@ export class Game {
     const s = this.stats;
     const barY = 2.45 * this.heroScale;
     const lift = this.heroBar.el.offsetHeight + 14;
-    // dodge: any blow, boss specials too
-    if (!dot && !exact && Math.random() < s.dodge) {
+    // dodge: any blow, boss specials too (+ the wind orb's tailwind, CLASS_PASSIVE.orb_swift)
+    if (!dot && !exact && Math.random() < s.dodge + passiveOf(this.save.weapons[1], 'orb_swift')) {
       this.fx.spawn(v1.copy(this.hero.position).setY(barY), 'Уклон', 'hurt', 0.6, { color: '#9fe8ff', lift });
+      return;
+    }
+    // the ward orb's barrier (CLASS_PASSIVE.orb_ward): one blow in full every v s
+    const barrier = dot || exact ? 0 : passiveOf(this.save.weapons[1], 'orb_ward');
+    if (barrier && this.time >= this.barrierAt) {
+      this.barrierAt = this.time + barrier;
+      this.fx.spawn(v1.copy(this.hero.position).setY(barY), 'Барьер', 'hurt', 0.6, { color: '#9fd0ff', lift });
       return;
     }
     const crit = !dot && !!src && Math.random() < critChance(src.def.crit);
@@ -2325,15 +2419,19 @@ export class Game {
   private guardMul() { return guardMul(this.save.weapons); }
 
   private lastCounter = -99;
+  /** Game time the ward orb's barrier is ready again. */
+  private barrierAt = 0;
   private counterHand = newHand(0);
 
   /** The class slot's shield: reflects a share of the blow, may counter-strike with the weapon. */
   private shieldAnswer(m: Mob, dmg: number) {
     const sh = this.save.weapons[1];
-    const g = sh && WEAPONS[sh.def].guard;
+    const g = itemGuard(sh);
     if (!g || !m.alive || this.dead) return;
-    if (g.reflect) {
-      const back = Math.max(1, Math.round(dmg * g.reflect));
+    // thorns: the spiked shield's passive (CLASS_PASSIVE)
+    const reflect = passiveOf(sh, 'shield_spiked');
+    if (reflect) {
+      const back = Math.max(1, Math.round(dmg * reflect));
       this.damageMob(m, back, 'normal', 0);
       this.particles.burst(v1.copy(m.pos).setY(1.1 * m.def.scale), 0xff6060, 6, 0.08, 4, 0.35);
     }
@@ -2409,36 +2507,42 @@ export class Game {
 
   private updateMobBars(w: number, h: number) {
     const hp = this.hero.position;
-    const explored = (p: THREE.Vector3) => this.world.fog.isExplored(p.x, p.z);
+    const fog = this.world.fog;
     for (const u of this.units) {
       // HP bar + weakness icons + reward over living units near the hero.
-      const show = u.alive && u.visible && u.pos.distanceTo(hp) < u.barRange && explored(u.pos);
+      const show = u.alive && u.visible && u.pos.distanceTo(hp) < u.barRange && fog.isExplored(u.pos.x, u.pos.z);
       if (!show) { if (u.uiEl.classList.contains('show')) u.uiEl.classList.remove('show'); }
       else {
         v1.copy(u.pos).setY(u.barY).project(this.camera);
         u.uiEl.classList.add('show');
         u.uiEl.classList.toggle('hurt', u.hp < u.maxHp);
-        u.uiEl.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
-        u.hpFill.style.width = `${Math.max(0, u.hp / u.maxHp) * 100}%`;
+        placeBar(u.uiEl, u.barAt, v1, w, h, '-100%');
+        const fill = Math.max(0, u.hp / u.maxHp);
+        if (u.barFill !== fill) { u.barFill = fill; u.hpFill.style.width = `${fill * 100}%`; }
         if (u.hpText) {
           // every unit has the same bar: current HP only
           const t = fmtK(Math.ceil(u.hp));
           if (u.hpText.textContent !== t) u.hpText.textContent = t;
         }
-        if (u instanceof Mob && u.def.boss) (u.uiEl.querySelector('.bname') as HTMLElement).style.color = this.bossColor(u);
+        if (u instanceof Mob && u.def.boss) {
+          const c = this.bossColor(u);
+          if (u.barColor !== c) { u.barColor = c; (u.uiEl.querySelector('.bname') as HTMLElement).style.color = c; }
+        }
       }
       // Respawn loader at the spawn point (for a mob, once the corpse has gone).
       // a spawn shows one loader, at its centre, once all of it is down
       const at = u.spawner?.at ?? u.spawn;
       const dead = !u.alive && u.loaderReady && u.respawnAt < Infinity && (!u.spawner || u.spawner.leader === u)
-        && at.distanceTo(hp) < 30 && explored(at);
+        && at.distanceTo(hp) < 30 && fog.isExplored(at.x, at.z);
       if (!dead) { if (u.respawnEl.classList.contains('show')) u.respawnEl.classList.remove('show'); continue; }
       v1.copy(at).setY(0.5).project(this.camera);
       if (Math.abs(v1.x) > 1.1 || Math.abs(v1.y) > 1.1) { u.respawnEl.classList.remove('show'); continue; }
       const left = u.respawnAt - this.time;
       u.respawnEl.classList.add('show');
-      u.respawnEl.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -50%)`;
-      u.respawnEl.style.setProperty('--p', `${Math.min(1, Math.max(0, 1 - left / (u.respawnTotal || 1))) * 360}deg`);
+      placeBar(u.respawnEl, u.loaderAt, v1, w, h, '-50%');
+      // a custom property restyles the whole loader: write it only when the ring moves by a degree
+      const deg = Math.round(Math.min(1, Math.max(0, 1 - left / (u.respawnTotal || 1))) * 360);
+      if (u.loaderDeg !== deg) { u.loaderDeg = deg; u.respawnEl.style.setProperty('--p', `${deg}deg`); }
       u.setRespawnText(left);
       if (u.spawner) setChargeBars(u.respawnEl, u.chargesUsed, u.spawner.def.charges.length);
     }
@@ -2782,7 +2886,6 @@ export class Game {
     for (const [kind, defs] of [['weapon', Object.keys(WEAPONS).filter((w) => weaponClass(w))], ['armor', Object.keys(ARMOR)]] as const) {
       for (const def of defs) {
         for (let rarity = 0; rarity < 6; rarity++) {
-          if ((fixedRarity(kind, def) ?? rarity) !== rarity) continue;
           const it = dropItem({ kind, def, rarity });
           if (own.some((x) => sameItem(x, it))) continue;
           this.save.bag.push(it);
@@ -3086,11 +3189,11 @@ interface Hand {
   i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number;
   /** Staff: seconds until the bolt leaves the staff (< 0 = none pending), and its flight time. */
   launch: number; flight: number;
-  /** Staff: the bolt in flight and the mob it flies at. */
-  bolt: Bolt | null; aim: Unit | null;
+  /** Staff: the bolt in flight (`shot`: its launch, see Spells.drop) and the mob it flies at. */
+  bolt: Bolt | null; shot: number; aim: Unit | null;
 }
 function newHand(i: 0 | 1): Hand {
-  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, launch: -1, flight: 0, bolt: null, aim: null };
+  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, launch: -1, flight: 0, bolt: null, shot: 0, aim: null };
 }
 
 /** How a blow landed: a crit, dodged, or plain (''). */

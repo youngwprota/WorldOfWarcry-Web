@@ -3,6 +3,7 @@ import { HIT_FLASH, addUnmaskedFlash, applyHitFlash } from './hitflash';
 import { assets } from './assets';
 import { blobShadow, fixSkinBounds, skinReach } from './character';
 import { ATTACK_HIT, type AttackAnim } from './config';
+import { mergeSkinnedParts } from './skinmerge';
 
 /**
  * Per-model rig data. stride: ground speed of the `walk` clip at scale 1 and timeScale 1 (planted-foot speed
@@ -104,6 +105,7 @@ export class Creature {
     for (const n of hide) this.model.getObjectByName(n)!.visible = false;
     this.root.add(this.model);
     this.root.add(blobShadow(this.rig.shadow * scale));
+    mergeSkinnedParts(this.model, `${modelName}|${hide.join()}`);
     this.model.updateMatrixWorld(true);
     const cache = new Map<THREE.Material, THREE.MeshStandardMaterial>();
     this.model.traverse((o) => {

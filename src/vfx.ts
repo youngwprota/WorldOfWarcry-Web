@@ -3,6 +3,9 @@ import * as THREE from 'three';
 
 const v = new THREE.Vector3();
 const w = new THREE.Vector3();
+const nrm = new THREE.Vector3();
+const sz = new THREE.Vector3();
+const c = new THREE.Color();
 
 /** Options of one glow particle burst (Glows.emit). Speeds in m/s, sizes in m. */
 export interface GlowOpts {
@@ -123,7 +126,7 @@ export class Glows {
   setViewport(heightPx: number) { this.uPx.value = heightPx / 2; }
 
   emit(at: THREE.Vector3, count: number, o: GlowOpts) {
-    const c = new THREE.Color(o.color).multiplyScalar(o.bright ?? 1);
+    c.setHex(o.color).multiplyScalar(o.bright ?? 1);
     for (let k = 0; k < count; k++) {
       const i = this.next;
       this.next = (this.next + 1) % this.n;
@@ -232,8 +235,8 @@ export class SunLight {
       const pos = w.set(centre.x + r.off.x, 0, centre.z + r.off.y);
       // long axis along the sun direction, the face turned to the camera
       const right = v.subVectors(camPos, pos).cross(sunDir).negate().normalize();
-      const normal = new THREE.Vector3().crossVectors(right, sunDir).normalize();
-      r.mesh.matrix.makeBasis(right, sunDir, normal).scale(new THREE.Vector3(r.width, 18, 1)).setPosition(pos);
+      const normal = nrm.crossVectors(right, sunDir).normalize();
+      r.mesh.matrix.makeBasis(right, sunDir, normal).scale(sz.set(r.width, 18, 1)).setPosition(pos);
       r.mesh.matrixWorldNeedsUpdate = true;
       // a slow, smooth swell: never a blink
       const s = 0.5 - 0.5 * Math.cos(r.phase * Math.PI * 2);

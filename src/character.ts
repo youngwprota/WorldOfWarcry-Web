@@ -7,6 +7,7 @@ import { PART_PREFIXES, type VisualPart } from './items';
 import { ATTACK_HIT, type AttackAnim, type BossAnim } from './config';
 import { FLOAT_TIME, patchFloat } from './floaters';
 import { magicOrb } from './orbfx';
+import { mergeSkinnedParts } from './skinmerge';
 
 const shadowTex = (() => {
   const c = document.createElement('canvas');
@@ -170,12 +171,14 @@ export class Character {
   private baseParts = new Map<VisualPart, THREE.Mesh[]>();
   private outfitParts = new Map<VisualPart, { model: string; meshes: THREE.Mesh[] }>();
 
-  constructor(modelName: string, weaponName: string | null, scale = 1, skin?: string) {
+  /** `mergeParts`: body parts become one mesh per material (mobs, NPCs); never for a body that changes outfits. */
+  constructor(modelName: string, weaponName: string | null, scale = 1, skin?: string, mergeParts = false) {
     this.model = assets.clone(modelName);
     this.handR = this.model.getObjectByName('hand_r') ?? null;
     this.model.scale.multiplyScalar(scale);
     this.root.add(this.model);
     this.root.add(blobShadow(1.3 * scale));
+    if (mergeParts) mergeSkinnedParts(this.model, modelName);
     this.model.updateMatrixWorld(true);
     // Per-instance materials so hit flashes do not leak to other characters.
     const cache = new Map<THREE.Material, THREE.MeshLambertMaterial>();
