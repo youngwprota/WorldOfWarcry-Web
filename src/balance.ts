@@ -3,7 +3,7 @@ import {
   DEFENSE_CAP, HERO, RESIST_MULT, STAT_CURVE, STAT_SOURCES, WEAPONS, attackMul,
   type DamageType, type FactionId, type PctStat, type ResistTier, type SavedSource, type StatId, type StatSource,
 } from './config';
-import { armorStats, weaponDamage, type ArmorSlot, type Item } from './items';
+import { armorStats, itemGuard, itemOrb, weaponDamage, type ArmorSlot, type Item } from './items';
 
 export type StatPoints = Partial<Record<StatId, number>>;
 export type PctPoints = Partial<Record<PctStat, number>>;
@@ -125,7 +125,7 @@ export function heroStats(b: HeroBuild) {
 
 /** Passive multipliers of the equipped mage orb (1 without one). */
 export function orbMul(weapons: HeroBuild['weapons']) {
-  const o = weapons[1] && WEAPONS[weapons[1].def].orb;
+  const o = itemOrb(weapons[1]);
   return { regen: 1 + (o?.regen ?? 0), power: 1 + (o?.power ?? 0), speed: 1 + (o?.speed ?? 0), defense: 1 + (o?.defense ?? 0) };
 }
 
@@ -149,7 +149,7 @@ export function heroDps(weapons: HeroBuild['weapons'], power: number, powerMul: 
 /** Incoming damage multiplier from the shields in hand. */
 export function guardMul(weapons: HeroBuild['weapons']) {
   let k = 1;
-  for (const it of weapons) if (it && WEAPONS[it.def].guard) k *= 1 - WEAPONS[it.def].guard!.reduce;
+  for (const it of weapons) { const g = itemGuard(it); if (g) k *= 1 - g.reduce; }
   return k;
 }
 
