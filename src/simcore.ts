@@ -34,10 +34,11 @@ export interface SimOpts {
   seed: number;
   keep: boolean; // never change weapons
   probes: number; // dice fights behind each win-rate estimate (boss tries, minute snapshots)
+  aggro: boolean; // hostile mobs near a fight's spot or the way to it join the fight (Game: idle mobs rush the hero within `aggro`)
 }
 const ZONE_IDS = CONFIG.ZONES.map((z) => z.id);
 export const DEFAULT_OPTS: SimOpts = {
-  faction: 'human', cls: 'party', weapon: '', off: '', runs: 10, until: 90 * 60, dodge: 0.6, uptime: 0.8, combo: 0.85, bossWin: 0.5, seed: 1, keep: false, probes: 12,
+  faction: 'human', cls: 'party', weapon: '', off: '', runs: 10, until: 90 * 60, dodge: 0.6, uptime: 0.8, combo: 0.85, bossWin: 0.5, seed: 1, keep: false, probes: 12, aggro: true,
 };
 let OPT: SimOpts = { ...DEFAULT_OPTS };
 
@@ -244,7 +245,17 @@ interface Unit {
   pack?: string;
   /** World picks the spot at random: the sim's is the same kind of spot, not the same one. */
   approx?: boolean;
+  /** A spawn slot's disposition is not hostile (a sparring camp, an ambush): it never rushes the hero by itself. */
+  calm?: boolean;
 }
+/**
+ * Aggro (Game.updateMobs): an idle hostile mob rushes the hero within its MobDef.aggro; it wanders up to 2.5 m round its
+ * spot, and the hero stands a pace off his target — on average a mob joins when its spot is within aggro + this of the
+ * target's. On the way the hero sees them standing and gives them a berth: only those whose aggro reaches 1.5 m past
+ * the line of his way join (the Peaks gate guards stand 4–6 m off the forest trail with aggro 5.2 — skirted).
+ */
+const AGGRO_AT_SPOT = 2;
+const AGGRO_ON_WAY = -1.5;
 /**
  * The outer locations (World.buildOuterLands and its *Mobs): what stands there and in which packs, from the config
  * lists. Hand-picked spots are exact; World's random spreads are random walkable spots of the location here, its road
@@ -253,13 +264,13 @@ interface Unit {
 function buildLands(us: Unit[], packs: [number, number][]) {
   const r = layoutRng(61);
   type P = { x: number; z: number };
-  const one = (id: string, d: SpawnerDef, p: P, zone: ZoneId, pack?: string, approx = false) => us.push({
-    id, kind: d.unit, def: d.id, zone, spot: landSpot(p.x, p.z, zone), depth: 0, n: 0, respawnAt: 0, pack, approx: approx || undefined,
+  const one = (id: string, d: SpawnerDef, p: P, zone: ZoneId, pack?: string, approx = false, calm = false) => us.push({
+    id, kind: d.unit, def: d.id, zone, spot: landSpot(p.x, p.z, zone), depth: 0, n: 0, respawnAt: 0, pack, approx: approx || undefined, calm: calm || undefined,
     charges: d.charges ?? [d.unit === 'mob' ? MOBS[d.id].respawn : BREAKABLES[d.id].respawn],
   });
   const group = (id: string, p: CONFIG.PackDef, c: P, zone: ZoneId, approx = false) =>
     ringSpots(c.x, c.z, p.slots.length, 1.8).forEach((q, i) =>
-      one(`${id}:${i}`, { unit: 'mob', id: p.slots[i].id, charges: p.charges }, q, zone, p.link === 'social' ? id : undefined, approx));
+      one(`${id}:${i}`, { unit: 'mob', id: p.slots[i].id, charges: p.charges }, q, zone, p.link === 'social' ? id : undefined, approx, !!p.slots[i].behavior?.disposition && p.slots[i].behavior?.disposition !== 'hostile'));
   const pin = (x: number, z: number) => { packs.push([x, z]); return { x, z }; };
   const rnd = (zone: ZoneId) => emptyIn(zone, r, packs);
   /** `n` spots along road `k` of LAND_TRAILS, alternating sides `off` m off it, inside `zone` (else a random spot). */
@@ -874,6 +885,58 @@ function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string,
   /** What a pull of `u` fights: its pack (those standing), else it alone. */
   const groupOf = (u: Unit) => (u.pack ? packOf.get(u.pack)!.filter((x) => x.respawnAt <= t) : [u]);
   const foesOf = (g: Unit[]) => [...g.map(foeOf), ...g.flatMap(partnersOf)];
+  // aggro: hostile mobs by grid cell (their spots never move), who stands by each unit's spot (cached)
+  const CELL = 12;
+  const rushes = (x: Unit) => x.kind === 'mob' && !x.calm && !x.temp && !MOBS[x.def].static && !MOBS[x.def].boss && (MOBS[x.def].behavior?.disposition ?? 'hostile') === 'hostile';
+  const posU = new Map<Unit, { x: number; z: number }>();
+  const grid = new Map<string, Unit[]>();
+  const cellKey = (x: number, z: number) => `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`;
+  if (OPT.aggro) for (const x of units) if (rushes(x)) {
+    const p = posOf(x.spot);
+    posU.set(x, p);
+    const k = cellKey(p.x, p.z);
+    grid.set(k, [...(grid.get(k) ?? []), x]);
+  }
+  /** Hostile mobs whose aggro (+ `r`) reaches (x, z), into `out`. */
+  const rushAt = (x: number, z: number, r: number, out: Set<Unit>) => {
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const u of grid.get(`${cx + i},${cz + j}`) ?? []) {
+      const p = posU.get(u)!;
+      if (Math.hypot(p.x - x, p.z - z) < MOBS[u.def].aggro + r) out.add(u);
+    }
+  };
+  const nearSpot = new Map<Unit, Unit[]>();
+  const nearOf = (u: Unit) => {
+    let n = nearSpot.get(u);
+    if (!n) { const set = new Set<Unit>(); const p = posOf(u.spot); rushAt(p.x, p.z, AGGRO_AT_SPOT, set); set.delete(u); n = [...set]; nearSpot.set(u, n); }
+    return n;
+  };
+  /** `extra` standing now, with their own social packs, that are not in `g` yet: appended to it. */
+  const join = (g: Unit[], extra: Iterable<Unit>) => {
+    const has = new Set(g);
+    const out = [...g];
+    for (const x of extra) {
+      if (has.has(x) || x.respawnAt > t || !open.has(x.zone)) continue;
+      for (const y of groupOf(x)) if (!has.has(y)) { has.add(y); out.push(y); }
+    }
+    return out;
+  };
+  /** A fight with `g` where it stands: those by its spots join (the bot sees them standing there). */
+  const atSpot = (g: Unit[]) => (OPT.aggro && !isBoss(g) ? join(g, g.flatMap(nearOf)) : g);
+  /** …and those the way from `from` passes (no warning: the bot did not weigh them). */
+  const onWay = (g: Unit[], from: Spot) => {
+    if (!OPT.aggro || isBoss(g)) return g;
+    const set = new Set<Unit>();
+    const pts = route(from, g[0].spot);
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 2));
+      for (let k = 0; k <= n; k++) rushAt(a.x + ((b.x - a.x) * k) / n, a.z + ((b.z - a.z) * k) / n, AGGRO_ON_WAY, set);
+    }
+    return join(g, set);
+  };
+  // the way to a target that pulled others is remembered: the bot weighs them in from then on (a player learns an ambush)
+  const ambush = new Map<Unit, Unit[]>();
+  const weighed = (u: Unit, g: Unit[]) => { const a = ambush.get(u); return a ? join(atSpot(g), a) : atSpot(g); };
   const isBoss = (g: Unit[]) => g.some((x) => !!MOBS[x.def].boss);
   const bossRate = (c: HeroClass, g: Unit[]) => { let w = 0; for (let i = 0; i < OPT.probes; i++) if (fight(full(c, g[0].zone), foesOf(g)).win) w++; return w / OPT.probes; };
   /** The bot's estimate of the fight, by the best class for it: a boss by win rate, a mob by a safe and quick win. */
@@ -1028,8 +1091,9 @@ function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string,
       for (const u of units) {
         if (u.respawnAt > t || !open.has(u.zone)) continue;
         let dur = 0, e: Est | null = null;
-        const g = groupOf(u);
-        if (g[0] !== u) continue; // a pack is weighed once, by its first member standing
+        const g0 = groupOf(u);
+        if (g0[0] !== u) continue; // a pack is weighed once, by its first member standing
+        const g = u.kind === 'mob' ? weighed(u, g0) : g0;
         if (u.kind === 'mob') {
           e = estimate(g);
           if (isBoss(g) ? (e.rate ?? 0) < bossMin : !e.win || e.taken > 0.7 * st.maxHp) continue;
@@ -1060,7 +1124,9 @@ function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string,
       continue;
     }
     const u = best;
-    const group = u.kind === 'mob' ? groupOf(u) : [u];
+    const seen = u.kind === 'mob' ? weighed(u, groupOf(u)) : [u];
+    const group = u.kind === 'mob' ? onWay(seen, h.spot) : seen;
+    if (group.length > seen.length) ambush.set(u, [...(ambush.get(u) ?? []), ...group.slice(seen.length)]);
     // a player sends the class that does best and swaps to the weapons the location is weak to
     wear(h, bestEst?.cls ?? h.cls, u.zone);
     h.hp = Math.min(h.hp, stats(h).maxHp);

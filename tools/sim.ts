@@ -22,6 +22,7 @@ async function main() {
     runs: +arg('runs', String(D.runs)),
     until: +arg('until', String(D.until / 60)) * 60,
     dodge: +arg('dodge', String(D.dodge)),
+    aggro: !flag('no-aggro'),
     uptime: +arg('uptime', String(D.uptime)),
     combo: +arg('combo', String(D.combo)),
     bossWin: +arg('boss-win', String(D.bossWin)),
