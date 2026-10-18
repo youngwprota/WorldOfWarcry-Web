@@ -14,6 +14,8 @@ import {
 import { buildOcean, buildPond, pondR } from './water';
 import { applyScenery, patchScenery, scenery, type SceneryLook } from './atmos';
 import { buildDecor } from './decor';
+import { bakeStatic } from './staticbatch';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BREAKABLES } from './config';
 export { BREAKABLES, type BreakableDef, type BreakEvent } from './config';
 
@@ -95,6 +97,8 @@ interface Inst { x: number; z: number; s: number; r?: number; y?: number; tint?:
 const ENV = VIEW.env;
 /** Models whose size the layout depends on (the bone gate: its posts and the barrier are placed for it). */
 const FIXED_SIZE = new Set(['undead_tusk_gate']);
+/** Placed models whose largest extent (m) is under this cast no shadow. */
+const NO_SHADOW_UNDER = 0.6;
 
 /** Foliage models and how much they bend in the wind (SceneryLook.sway; the bend grows with height²). */
 const FOLIAGE: Record<string, number> = { elf_tree: 0.55, elf_foliage_small: 4, elf_foliage_mid: 6, elf_foliage_big: 2.5 };
@@ -248,6 +252,8 @@ export class World {
   /** Trunk spots of every tree (mushrooms and ferns grow round them). */
   private treeSpots: [number, number][] = [];
   private sizeCache = new Map<string, THREE.Vector3>();
+  /** Every model from place(), baked by bakeStatic once the level is complete. */
+  private props: THREE.Object3D[] = [];
   private packCenters: [number, number][] = [];
   /** Circles [x, z, r] trail mobs never stand in (cemetery village and chapel). */
   private keepOut: [number, number, number][] = [];
@@ -282,6 +288,8 @@ export class World {
     this.group.add(this.mist.group);
     this.fog = new FogOfWar(this.time);
     this.group.add(this.fog.mesh);
+    bakeStatic(this.group, this.props, this.flames);
+    this.props.length = 0;
     this.buildGrid();
   }
 
@@ -376,13 +384,15 @@ export class World {
     const lift = Math.max(0, -this.minY(name)) * scale;
     m.position.set(x, heightAt(x, z) + lift, z);
     m.rotation.y = rot;
+    const sz = this.size(name);
+    const shadow = Math.max(sz.x, sz.y, sz.z) * scale >= NO_SHADOW_UNDER;
     m.traverse((o) => {
       const mesh = o as THREE.Mesh;
-      if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true; }
+      if (mesh.isMesh) { mesh.castShadow = shadow; mesh.receiveShadow = true; }
     });
     applyScenery(m, lookOf(name));
     this.group.add(m);
-    const sz = this.size(name);
+    this.props.push(m);
     this.groundUnder(name, x, z, sz.x * scale, sz.y * scale, sz.z * scale);
     const r = collide === 'auto' ? Math.min(sz.x, sz.z) * scale * 0.45 : collide;
     if (r > 0) this.obstacles.push({ x, z, r });
@@ -426,7 +436,11 @@ export class World {
    */
   /** `look`: the level look over the model's own (src/atmos.ts); `snow`: its textures are dropped for a flat white (tint still applies). */
   private scatter(name: string, items: Inst[], shadow = true, look: ScatterLook = {}) {
-    for (const band of bands(items)) this.scatterBand(name, band, shadow, look);
+    const sz = assets.has(name) ? this.size(name) : null;
+    const k = FIXED_SIZE.has(name) ? 1 : ENV;
+    const casts = (t: Inst) => shadow && !!sz && Math.max(sz.x, sz.y, sz.z) * t.s * k >= NO_SHADOW_UNDER;
+    for (const band of bands(items.filter(casts))) this.scatterBand(name, band, true, look);
+    for (const band of bands(items.filter((t) => !casts(t)))) this.scatterBand(name, band, false, look);
   }
 
   private scatterBand(name: string, items: Inst[], shadow: boolean, { snow, ...lookOver }: ScatterLook) {
@@ -470,10 +484,22 @@ export class World {
       parts = [];
       const src = assets.clone(name);
       src.updateMatrixWorld(true);
+      // parts with the same material and attributes become one geometry (one draw per band instead of one per part)
+      const same = new Map<string, THREE.Mesh[]>();
       src.traverse((o) => {
         const mesh = o as THREE.Mesh;
-        if (mesh.isMesh) parts!.push({ geo: mesh.geometry.clone().applyMatrix4(mesh.matrixWorld), mat: mesh.material, patched: new Map() });
+        if (!mesh.isMesh) return;
+        const mat = Array.isArray(mesh.material) ? mesh.material.map((x) => x.id).join(',') : mesh.material.id;
+        const key = `${mat}|${Object.keys(mesh.geometry.attributes).sort().join()}|${mesh.geometry.index ? 1 : 0}`;
+        const list = same.get(key);
+        if (list) list.push(mesh); else same.set(key, [mesh]);
       });
+      for (const list of same.values()) {
+        const geos = list.map((mesh) => mesh.geometry.clone().applyMatrix4(mesh.matrixWorld));
+        const geo = geos.length > 1 && !Array.isArray(list[0].material) ? mergeGeometries(geos) : null;
+        if (geo) parts.push({ geo, mat: list[0].material, patched: new Map() });
+        else for (let i = 0; i < list.length; i++) parts.push({ geo: geos[i], mat: list[i].material, patched: new Map() });
+      }
       this.scatterCache.set(name, parts);
     }
     return parts;
@@ -483,8 +509,7 @@ export class World {
   private pines(items: Inst[]) {
     items = items.map((t) => ({ ...t, s: t.s * ENV }));
     const trunk = new THREE.CylinderGeometry(0.15, 0.25, 1.4, 5).translate(0, 0.7, 0);
-    const c1 = new THREE.ConeGeometry(1.4, 2.6, 7).translate(0, 2.4, 0);
-    const c2 = new THREE.ConeGeometry(1.0, 2.0, 7).translate(0, 3.6, 0);
+    const crown = mergeGeometries([new THREE.ConeGeometry(1.4, 2.6, 7).translate(0, 2.4, 0), new THREE.ConeGeometry(1.0, 2.0, 7).translate(0, 3.6, 0)]);
     const trunkMat = scenery(new THREE.MeshLambertMaterial({ color: 0x6b4a2f, flatShading: true }), { sway: 0.5 });
     const leafMat = scenery(new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), { sway: 0.5 });
     const m = new THREE.Matrix4();
@@ -496,7 +521,7 @@ export class World {
       this.treeSpots.push([t.x, t.z]);
     }
     for (const band of bands(items)) {
-      const meshes = [new THREE.InstancedMesh(trunk, trunkMat, band.length), new THREE.InstancedMesh(c1, leafMat, band.length), new THREE.InstancedMesh(c2, leafMat, band.length)];
+      const meshes = [new THREE.InstancedMesh(trunk, trunkMat, band.length), new THREE.InstancedMesh(crown, leafMat, band.length)];
       band.forEach((t, i) => {
         q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), t.r ?? 0);
         m.compose(new THREE.Vector3(t.x, heightAt(t.x, t.z), t.z), q, new THREE.Vector3(t.s, t.s, t.s));

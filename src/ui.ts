@@ -15,6 +15,9 @@ import type { Wearer } from './looks';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 /** Seconds a "+N stat" line stays under the buffs after the last orb of that stat. */
 const GAIN_SHOW = 2.5;
+/** Minimap background layer: size relative to the minimap and re-bake period, s. */
+const MM_BG = 1.5;
+const MM_BG_DT = 1 / 15;
 
 export interface HudState {
   hp: number; maxHp: number;
@@ -68,6 +71,45 @@ const MAP_ICON: Record<string, string> = { bow: 'cls_hunter' };
 
 /** An item icon on a tile of its quality colour (elites and bosses' drops on the maps); `cls`: whose item, a badge at the corner. */
 function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number, id: string, color: string, s: number, cls?: HeroClass, any = false) {
+  // baked once at the target pixel size: a big PNG shrunk to ~10 px every frame shimmers while the map scrolls,
+  // a small bilinear-filtered sprite moves smoothly at sub-pixel offsets and costs one drawImage
+  const k = g.getTransform().a;
+  const key = `${id}|${color}|${cls ?? ''}|${any}|${Math.round(r * k)}|${s}`;
+  let spr: HTMLCanvasElement | null | undefined = markSprites.get(key);
+  if (spr === undefined) {
+    spr = bakeFramedItem(r, k, id, color, s, cls, any);
+    if (spr) markSprites.set(key, spr);
+  }
+  if (!spr) return;
+  const e = r * MARK_PAD;
+  g.drawImage(spr, x - e, y - e, e * 2, e * 2);
+}
+
+/** The badge and «?» stick out of the tile up to ~1.6 r. */
+const MARK_PAD = 1.7;
+const markSprites = new Map<string, HTMLCanvasElement>();
+/** A bake that failed (icon still loading) leaves its canvas here for the retry: no new canvas every frame. */
+let markSpare: HTMLCanvasElement | null = null;
+
+/** Null while an icon is still loading (retried next frame). */
+function bakeFramedItem(r: number, k: number, id: string, color: string, s: number, cls: HeroClass | undefined, any: boolean) {
+  const e = r * MARK_PAD;
+  const n = Math.ceil(e * 2 * k);
+  const c = markSpare ?? document.createElement('canvas');
+  markSpare = null;
+  // (setting the size also clears it and resets the context state)
+  c.width = c.height = n;
+  const g = c.getContext('2d')!;
+  g.imageSmoothingQuality = 'high';
+  g.setTransform(n / (e * 2), 0, 0, n / (e * 2), n / 2, n / 2);
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  if (drawFramedItem(g, 0, 0, r, id, color, s, cls, any)) return c;
+  markSpare = c;
+  return null;
+}
+
+function drawFramedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number, id: string, color: string, s: number, cls?: HeroClass, any = false) {
   // the tile is filled with the quality colour (thin dark edge), the item's own icon on it in white
   g.fillStyle = color;
   g.strokeStyle = '#000';
@@ -81,17 +123,21 @@ function framedItem(g: CanvasRenderingContext2D, x: number, y: number, r: number
   const png = hasPng(id) ? id : !hasIcon(id) && hasPng(`${id}_common`) ? `${id}_common` : null;
   const img = png ? whiteArt(png) : iconImage(id, '#fff', Math.max(8, Math.ceil(r * 1.6 * g.getTransform().a)));
   const h = r * 0.8;
-  if (img && (!(img instanceof HTMLImageElement) || img.complete)) g.drawImage(img, x - h, y - h, h * 2, h * 2);
-  if (cls) classBadge(g, x + r * 0.85, y - r * 0.85, r * 0.75, cls, s);
+  const ready = !!img && (!(img instanceof HTMLImageElement) || img.complete);
+  if (!ready && (png || hasIcon(id))) return false;
+  if (img && ready) g.drawImage(img, x - h, y - h, h * 2, h * 2);
+  if (cls && !classBadge(g, x + r * 0.85, y - r * 0.85, r * 0.75, cls, s)) return false;
   if (any) {
     // a random weapon of the class: «?» at the bottom-right corner
     g.font = `900 ${Math.round(r * 1.1)}px Rubik, sans-serif`;
+    if (!document.fonts.check(g.font)) return false;
     g.lineWidth = 3 * s;
     g.strokeStyle = '#000';
     g.fillStyle = '#fff';
     g.strokeText('?', x + r * 0.7, y + r * 0.6);
     g.fillText('?', x + r * 0.7, y + r * 0.6);
   }
+  return true;
 }
 
 /** Respawn loader on the map: a dark ring, filled clockwise from the top by `p` (0..1); no numbers. */
@@ -118,9 +164,11 @@ function classBadge(g: CanvasRenderingContext2D, x: number, y: number, r: number
   g.arc(x, y, r, 0, Math.PI * 2);
   g.fill();
   g.stroke();
-  if (!hasIcon(d.icon)) return;
+  if (!hasIcon(d.icon)) return true;
   const img = iconImage(d.icon, '#fff', Math.max(8, Math.ceil(r * 1.8 * g.getTransform().a)));
-  if (img.complete) g.drawImage(img, x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8);
+  if (!img.complete) return false;
+  g.drawImage(img, x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8);
+  return true;
 }
 
 /**
@@ -175,12 +223,19 @@ export class UI {
   onFlyEnd: (el: FlyEl) => void = () => {};
   private gains = new Map<OrbKind, { el: HTMLDivElement; n: number; until: number }>();
   private mm = $<HTMLCanvasElement>('minimap').getContext('2d')!;
+  /** Minimap backing-store size; re-read (a forced layout) only after a resize. */
+  private mmPx = 0;
+  /** Map + fog layer, MM_BG × the minimap, re-baked every MM_BG_DT s or when the hero nears its edge; each frame only shifts it. */
+  private mmBg = document.createElement('canvas').getContext('2d')!;
+  private mmBgAt = new THREE.Vector2(NaN, NaN);
+  private mmBgT = 0;
 
   constructor() {
     $('btn-settings').addEventListener('click', () => { sfx.click(); this.onSettings(); });
     $('btn-bag').addEventListener('click', () => { sfx.click(); this.onBag(); });
     $('btn-gacha').addEventListener('click', () => { sfx.click(); this.onGacha(); });
     $('minimap').addEventListener('click', () => { sfx.click(); this.onMap(); });
+    new ResizeObserver(() => { this.mmPx = 0; }).observe($('minimap'));
     $('bosses').addEventListener('click', () => { sfx.click(); this.onMap(); });
     $('btn-settings').innerHTML = art('gear', 40);
     $('btn-bag').insertAdjacentHTML('afterbegin', art('bag', 48));
@@ -212,6 +267,7 @@ export class UI {
     const { w, h } = this.size();
     const { hud, modal } = UI_REF;
     this.scale = Math.min(w / hud.w, h / hud.h);
+    this.mmPx = 0;
     const st = this.app.style;
     st.setProperty('--hs', String(this.scale));
     st.setProperty('--ms', String(Math.min(w / modal.w, h / modal.h)));
@@ -727,10 +783,12 @@ export class UI {
     // the backing store follows the on-screen size (HUD scale, expanded map) × the pixel ratio, so nothing is
     // stretched; the drawing itself stays in S × S units
     const c = g.canvas;
-    const px = Math.round(c.getBoundingClientRect().width * Math.min(devicePixelRatio, 2)) || S;
+    if (!this.mmPx) this.mmPx = Math.round(c.getBoundingClientRect().width * Math.min(devicePixelRatio, 2));
+    const px = this.mmPx || S;
     if (c.width !== px) c.width = c.height = px;
     g.setTransform(px / S, 0, 0, px / S, 0, 0);
     const scale = S / 70; // ~70 m across
+    this.bakeMinimapBg(hero, world, px, S, scale);
     g.clearRect(0, 0, S, S);
     g.save();
     g.beginPath();
@@ -738,8 +796,8 @@ export class UI {
     g.clip();
     const tx = (x: number) => S / 2 + (x - hero.x) * scale;
     const tz = (z: number) => S / 2 + (z - hero.z) * scale;
-    world.drawMap(g, tx, tz, scale);
-    world.fog.drawOnMap(g, tx, tz, scale);
+    const B = S * MM_BG;
+    g.drawImage(this.mmBg.canvas, S / 2 - B / 2 + (this.mmBgAt.x - hero.x) * scale, S / 2 - B / 2 + (this.mmBgAt.y - hero.z) * scale, B, B);
     g.fillStyle = '#ff3b3b';
     for (const u of units) g.fillRect(tx(u.x) - 3, tz(u.z) - 3, 6, 6); // mobs and props alike
     drawMarks(g, marks, tx, tz, 1.15);
@@ -752,5 +810,24 @@ export class UI {
     g.moveTo(0, -12); g.lineTo(8, 9); g.lineTo(-8, 9); g.closePath();
     g.fill();
     g.restore();
+  }
+
+  private bakeMinimapBg(hero: THREE.Vector3, world: World, px: number, S: number, scale: number) {
+    const b = this.mmBg;
+    const at = this.mmBgAt;
+    const now = performance.now();
+    const edge = (S * (MM_BG - 1)) / 2 / scale;
+    const size = Math.round(px * MM_BG);
+    if (b.canvas.width === size && now < this.mmBgT && Math.abs(hero.x - at.x) < edge && Math.abs(hero.z - at.y) < edge) return;
+    this.mmBgT = now + MM_BG_DT * 1000;
+    at.set(hero.x, hero.z);
+    if (b.canvas.width !== size) b.canvas.width = b.canvas.height = size;
+    const B = S * MM_BG;
+    b.setTransform(px / S, 0, 0, px / S, 0, 0);
+    b.clearRect(0, 0, B, B);
+    const tx = (x: number) => B / 2 + (x - at.x) * scale;
+    const tz = (z: number) => B / 2 + (z - at.y) * scale;
+    world.drawMap(b, tx, tz, scale);
+    world.fog.drawOnMap(b, tx, tz, scale);
   }
 }

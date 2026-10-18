@@ -3,6 +3,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { ARCHER_TEXTURES } from './archerTextures';
+import { mergeGroups } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { floatMaterial, markFloaters } from './floaters';
 
 const BASE = import.meta.env.BASE_URL + 'assets/';
@@ -95,6 +96,8 @@ class Assets {
       if (fbm) return ARCHER_TEXTURES.has(fbm[1]) ? `${BASE}textures/archers/${fbm[1]}.png` : BLANK;
       return /\.(tga|png|jpg)$/i.test(url) ? BLANK : url;
     });
+    // without a .tga handler FBXLoader warns about every TGA path before the modifier above swaps it for a blank
+    this.manager.addHandler(/\.tga$/i, new THREE.TextureLoader(this.manager));
   }
 
   async loadAll(names: string[], onProgress: (p: number) => void) {
@@ -309,11 +312,15 @@ class Assets {
         const glow = p.name.endsWith('_glow');
         const map = p.map && baked ? p.map : null;
         if (map) map.colorSpace = THREE.SRGBColorSpace;
+        // a light glow (white, gold) lit by the sun plus its emission is far brighter than white, and the post bloom
+        // blows the small gem up into a hard square: cap the glow's luminance so it only just reaches the bloom
+        const lum = p.color.r * 0.2126 + p.color.g * 0.7152 + p.color.b * 0.0722;
+        const dim = glow ? Math.min(1, 0.5 / Math.max(lum, 1e-3)) : 1;
         // a texture shows as is (the FBX writes Blender's 0.8 colour factor, 0xcccccc, which only dims it);
         // without its baked texture a textured part is a light cloth colour
         m = new THREE.MeshLambertMaterial({
-          name: p.name, map, color: map ? 0xffffff : !p.map ? p.color : new THREE.Color(0xd8d0c4),
-          emissive: glow ? p.color : 0x000000, emissiveIntensity: glow ? 0.9 : 1,
+          name: p.name, map, color: map ? 0xffffff : !p.map ? p.color.clone().multiplyScalar(dim) : new THREE.Color(0xd8d0c4),
+          emissive: glow ? p.color : 0x000000, emissiveIntensity: glow ? 0.9 * dim : 1,
         });
       }
       conv.set(src, m);
@@ -335,6 +342,9 @@ class Assets {
       } else mesh.material = mats;
       // floating crystals (the mythic set): their glow material bobs them (src/floaters.ts)
       if (markFloaters(mesh)) for (const m of [mesh.material].flat()) if (m.name.endsWith('_glow')) floatMaterial(m);
+      // the FBX splits faces into many runs per material (the caster sets: ~100 on a head), and every run is a draw call;
+      // after markFloaters, which needs the unindexed geometry
+      if (mesh.geometry.groups.length > 1) mergeGroups(mesh.geometry);
       mesh.castShadow = false;
       mesh.receiveShadow = false;
     });

@@ -61,6 +61,12 @@ export abstract class Unit {
   hpText: HTMLSpanElement | null;
   /** Shown at the spawn point while the unit is dead. */
   respawnEl: HTMLDivElement;
+  /** Last values written to the bar (DOM writes only on change). */
+  barFill = -1;
+  barColor = '';
+  barAt = new THREE.Vector2(NaN, NaN);
+  loaderAt = new THREE.Vector2(NaN, NaN);
+  loaderDeg = -1;
   private lastSec = -1;
   constructor(public spawn: THREE.Vector3, layer: HTMLElement, uiCls: string, uiHtml: string, loaderCls: string) {
     this.uiEl = document.createElement('div');

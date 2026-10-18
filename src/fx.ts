@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { OrbKind } from './config';
 
 const tmp = new THREE.Vector3();
+const pm = new THREE.Matrix4();
+const pq = new THREE.Quaternion();
+const ps = new THREE.Vector3();
 
 /** Pooled DOM labels projected from world space (damage numbers, pickups, barks). */
 export class FloatingText {
@@ -48,75 +51,101 @@ export class FloatingText {
   }
 }
 
-interface Particle { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3; t: number; life: number; active: boolean; }
+interface Particle { pos: THREE.Vector3; vel: THREE.Vector3; rot: THREE.Euler; spinX: number; spinY: number; s: number; color: THREE.Color; t: number; life: number }
 
-/** Debris chunks and sparks (instanced would be cheaper; pooled meshes are enough here). */
+const PARTICLE_CAP = 160;
+
+/** Debris chunks and sparks: one InstancedMesh, the live ones packed at the front (`count`). */
 export class Particles {
-  private pool: Particle[] = [];
-  private geo = new THREE.BoxGeometry(1, 1, 1);
-  private mats = new Map<number, THREE.MeshLambertMaterial>();
+  private live: Particle[] = [];
+  private free: Particle[] = [];
+  private mesh: THREE.InstancedMesh;
 
   constructor(scene: THREE.Scene) {
-    for (let i = 0; i < 160; i++) {
-      const mesh = new THREE.Mesh(this.geo, this.mat(0xffffff));
-      mesh.visible = false;
-      scene.add(mesh);
-      this.pool.push({ mesh, vel: new THREE.Vector3(), spin: new THREE.Vector3(), t: 0, life: 1, active: false });
+    this.mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial(), PARTICLE_CAP);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(PARTICLE_CAP * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    this.mesh.count = 0;
+    this.mesh.visible = false;
+    // chunks fly anywhere round the map; one draw call either way
+    this.mesh.frustumCulled = false;
+    scene.add(this.mesh);
+    for (let i = 0; i < PARTICLE_CAP; i++) {
+      this.free.push({ pos: new THREE.Vector3(), vel: new THREE.Vector3(), rot: new THREE.Euler(), spinX: 0, spinY: 0, s: 1, color: new THREE.Color(), t: 0, life: 1 });
     }
-  }
-
-  private mat(color: number) {
-    let m = this.mats.get(color);
-    if (!m) { m = new THREE.MeshLambertMaterial({ color }); this.mats.set(color, m); }
-    return m;
   }
 
   burst(pos: THREE.Vector3, color: number, count: number, size: number, speed: number, life = 0.9) {
     for (let i = 0; i < count; i++) {
-      const p = this.pool.find((x) => !x.active);
+      const p = this.free.pop();
       if (!p) return;
-      p.active = true;
+      this.live.push(p);
       p.t = 0;
       p.life = life * (0.7 + Math.random() * 0.6);
-      p.mesh.material = this.mat(color);
-      p.mesh.visible = true;
-      p.mesh.position.copy(pos);
-      const s = size * (0.5 + Math.random());
-      p.mesh.scale.set(s, s, s);
+      p.color.setHex(color);
+      p.pos.copy(pos);
+      p.s = size * (0.5 + Math.random());
+      p.rot.set(Math.random() * Math.PI * 2, Math.random() * Math.PI * 2, 0);
       const a = Math.random() * Math.PI * 2;
       const up = 0.5 + Math.random();
       p.vel.set(Math.cos(a) * speed * Math.random(), up * speed, Math.sin(a) * speed * Math.random());
-      p.spin.set(Math.random() * 10, Math.random() * 10, Math.random() * 10);
+      p.spinX = Math.random() * 10;
+      p.spinY = Math.random() * 10;
     }
   }
 
   update(dt: number) {
-    for (const p of this.pool) {
-      if (!p.active) continue;
+    const list = this.live;
+    let n = 0;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
       p.t += dt;
-      if (p.t >= p.life) { p.active = false; p.mesh.visible = false; continue; }
+      if (p.t >= p.life) { this.free.push(p); continue; }
       p.vel.y -= 18 * dt;
-      p.mesh.position.addScaledVector(p.vel, dt);
-      if (p.mesh.position.y < p.mesh.scale.y * 0.5) {
-        p.mesh.position.y = p.mesh.scale.y * 0.5;
+      p.pos.addScaledVector(p.vel, dt);
+      if (p.pos.y < p.s * 0.5) {
+        p.pos.y = p.s * 0.5;
         p.vel.y *= -0.3;
         p.vel.x *= 0.6;
         p.vel.z *= 0.6;
       }
-      p.mesh.rotation.x += p.spin.x * dt;
-      p.mesh.rotation.y += p.spin.y * dt;
+      p.rot.x += p.spinX * dt;
+      p.rot.y += p.spinY * dt;
       const k = 1 - Math.max(0, (p.t - p.life * 0.6) / (p.life * 0.4));
-      p.mesh.scale.setScalar(Math.max(0.001, p.mesh.scale.x * (k < 1 ? 0.95 : 1)));
+      p.s = Math.max(0.001, p.s * (k < 1 ? 0.95 : 1));
+      list[n] = p;
+      pm.compose(p.pos, pq.setFromEuler(p.rot), ps.setScalar(p.s));
+      this.mesh.setMatrixAt(n, pm);
+      this.mesh.setColorAt(n++, p.color);
     }
+    list.length = n;
+    this.mesh.count = n;
+    this.mesh.visible = n > 0;
+    if (!n) return;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.instanceColor!.needsUpdate = true;
+  }
+
+  dispose() {
+    this.mesh.removeFromParent();
+    this.mesh.geometry.dispose();
+    (this.mesh.material as THREE.Material).dispose();
+    this.mesh.dispose();
   }
 }
 
-/** Red ground warnings for boss attacks (GDD 10.6: 1–1.5 s, just run out of it). */
+interface Telegraph {
+  outer: THREE.Mesh; inner: THREE.Mesh; t: number; dur: number; r: number; cb: (tag?: unknown) => void; tag?: unknown;
+  ball?: THREE.Mesh; from: THREE.Vector3; to: THREE.Vector3;
+}
+
+function noop() {}
+
+/** Red ground warnings for boss attacks (GDD 10.6: 1–1.5 s, just run out of it). Meshes are pooled. */
 export class Telegraphs {
-  private items: {
-    outer: THREE.Mesh; inner: THREE.Mesh; t: number; dur: number; r: number; cb: (tag?: unknown) => void; tag?: unknown;
-    ball?: THREE.Mesh; from?: THREE.Vector3; to?: THREE.Vector3;
-  }[] = [];
+  private items: Telegraph[] = [];
+  private free: Telegraph[] = [];
+  private balls: THREE.Mesh[] = [];
   private ringGeo = new THREE.RingGeometry(0.94, 1, 48).rotateX(-Math.PI / 2);
   private discGeo = new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2);
   private ballGeo = new THREE.SphereGeometry(0.25, 8, 6);
@@ -130,16 +159,11 @@ export class Telegraphs {
 
   /** A circle; `from` makes a ball fly from that point and land in it when the time is up. */
   add(pos: THREE.Vector3, r: number, dur: number, cb: (tag?: unknown) => void, tag?: unknown, from?: THREE.Vector3) {
-    const outer = new THREE.Mesh(this.ringGeo, this.outerMat);
-    const fill = new THREE.Mesh(this.discGeo, this.fillMat);
-    outer.add(fill);
-    const inner = new THREE.Mesh(this.discGeo, this.innerMat);
-    this.push(outer, inner, pos, r, dur, cb, tag);
+    const it = this.push(this.ringGeo, this.discGeo, 0, pos, r, dur, cb, tag);
     if (!from) return;
-    const it = this.items[this.items.length - 1];
-    it.ball = new THREE.Mesh(this.ballGeo, this.ballMat);
-    it.from = from.clone();
-    it.to = pos.clone().setY(0.3);
+    it.ball = this.balls.pop() ?? new THREE.Mesh(this.ballGeo, this.ballMat);
+    it.from.copy(from);
+    it.to.copy(pos).setY(0.3);
     this.scene.add(it.ball);
   }
 
@@ -153,21 +177,35 @@ export class Telegraphs {
       };
       this.sectors.set(half, g);
     }
-    const outer = new THREE.Mesh(g.arc, this.outerMat);
-    outer.add(new THREE.Mesh(g.fill, this.fillMat));
-    const inner = new THREE.Mesh(g.fill, this.innerMat);
     // the sector geometry points along +X; rotation.y = yaw - pi/2 turns it to the (sin yaw, cos yaw) direction
-    outer.rotation.y = inner.rotation.y = yaw - Math.PI / 2;
-    this.push(outer, inner, pos, len, dur, cb, tag);
+    this.push(g.arc, g.fill, yaw - Math.PI / 2, pos, len, dur, cb, tag);
   }
 
-  private push(outer: THREE.Mesh, inner: THREE.Mesh, pos: THREE.Vector3, r: number, dur: number, cb: (tag?: unknown) => void, tag?: unknown) {
-    outer.position.set(pos.x, 0.04, pos.z);
-    inner.position.set(pos.x, 0.05, pos.z);
-    outer.scale.setScalar(r);
-    inner.scale.setScalar(0.001);
-    this.scene.add(outer, inner);
-    this.items.push({ outer, inner, t: 0, dur, r, cb, tag });
+  /** A pooled (or new) warning with these shapes, added to the scene. */
+  private push(arc: THREE.BufferGeometry, disc: THREE.BufferGeometry, yaw: number, pos: THREE.Vector3, r: number, dur: number,
+    cb: (tag?: unknown) => void, tag?: unknown) {
+    let it = this.free.pop();
+    if (!it) {
+      const outer = new THREE.Mesh(arc, this.outerMat);
+      outer.add(new THREE.Mesh(disc, this.fillMat));
+      it = { outer, inner: new THREE.Mesh(disc, this.innerMat), t: 0, dur, r, cb, from: new THREE.Vector3(), to: new THREE.Vector3() };
+    }
+    const fill = it.outer.children[0] as THREE.Mesh;
+    it.outer.geometry = arc;
+    fill.geometry = it.inner.geometry = disc;
+    it.outer.rotation.y = it.inner.rotation.y = yaw;
+    it.outer.position.set(pos.x, 0.04, pos.z);
+    it.inner.position.set(pos.x, 0.05, pos.z);
+    it.outer.scale.setScalar(r);
+    it.inner.scale.setScalar(0.001);
+    it.t = 0;
+    it.dur = dur;
+    it.r = r;
+    it.cb = cb;
+    it.tag = tag;
+    this.scene.add(it.outer, it.inner);
+    this.items.push(it);
+    return it;
   }
 
   clear() {
@@ -175,25 +213,31 @@ export class Telegraphs {
     this.items.length = 0;
   }
 
-  private remove(it: Telegraphs['items'][number]) {
+  private remove(it: Telegraph) {
     this.scene.remove(it.outer, it.inner);
-    if (it.ball) this.scene.remove(it.ball);
+    if (it.ball) { this.scene.remove(it.ball); this.balls.push(it.ball); it.ball = undefined; }
+    it.cb = noop;
+    it.tag = undefined;
+    this.free.push(it);
   }
 
   update(dt: number) {
     for (let i = this.items.length - 1; i >= 0; i--) {
+      // a callback below may have cleared the list (the hit killed the hero)
+      if (i >= this.items.length) continue;
       const it = this.items[i];
       it.t += dt;
       const k = Math.min(1, it.t / it.dur);
       it.inner.scale.setScalar(Math.max(0.001, it.r * k));
       if (it.ball) {
-        it.ball.position.lerpVectors(it.from!, it.to!, k);
+        it.ball.position.lerpVectors(it.from, it.to, k);
         it.ball.position.y += Math.sin(Math.PI * k) * 3;
       }
       if (it.t >= it.dur) {
+        const cb = it.cb, tag = it.tag;
         this.remove(it);
         this.items.splice(i, 1);
-        it.cb(it.tag);
+        cb(tag);
       }
     }
   }
@@ -215,10 +259,8 @@ const tB = new THREE.Vector3();
 const side = new THREE.Vector3();
 /** Drop colours: the ORBS hues, softened toward the game's painted palette. */
 export const DROP_TINT: Record<PickupKind, number> = { power: 0xc8553d, hp: 0x6fb46a, regen: 0x5ea8c4, speed: 0xd9ad4f };
-const pm = new THREE.Matrix4();
-const pq = new THREE.Quaternion();
+const KINDS = Object.keys(DROP_TINT) as PickupKind[];
 const pe = new THREE.Euler();
-const ps = new THREE.Vector3();
 const pp = new THREE.Vector3();
 
 /** Shapes are faceted (non-indexed, flat normals) and centred on the origin, about 0.4 m across. */
@@ -254,7 +296,7 @@ function pickupGeo(kind: PickupKind) {
     g = new THREE.ExtrudeGeometry(s, { depth: 0.06, bevelEnabled: false });
   }
   g.center();
-  g = g.toNonIndexed();
+  if (g.index) g = g.toNonIndexed();
   g.computeVertexNormals();
   return g;
 }
@@ -325,6 +367,19 @@ export class Pickups {
     }
   }
 
+  dispose() {
+    this.trail.removeFromParent();
+    this.trail.geometry.dispose();
+    (this.trail.material as THREE.Material).dispose();
+    for (const k of KINDS) {
+      const m = this.meshes[k];
+      m.removeFromParent();
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+      m.dispose();
+    }
+  }
+
   /** False when that stat's pool is full (the caller pays the drop at once). */
   spawn(pos: THREE.Vector3, kind: PickupKind) {
     const list = this.live[kind];
@@ -344,7 +399,7 @@ export class Pickups {
 
   update(dt: number, hero: THREE.Vector3) {
     let slot = 0;
-    for (const k of Object.keys(this.live) as PickupKind[]) {
+    for (const k of KINDS) {
       const list = this.live[k];
       const mesh = this.meshes[k];
       let n = 0;
@@ -524,7 +579,7 @@ export class StatAuras {
   }
 
   update(dt: number, hero: THREE.Vector3) {
-    for (const k of Object.keys(this.auras) as PickupKind[]) {
+    for (const k of KINDS) {
       const a = this.auras[k];
       if (a.t >= AURA_LIFE) continue;
       a.t += dt * AURA_SPEED;
@@ -546,12 +601,18 @@ export class StatAuras {
 /** Expanding ground ring for combo finishers. */
 export class Shockwaves {
   private items: { mesh: THREE.Mesh; t: number; dur: number; r: number }[] = [];
+  /** Finished rings, each keeping its own material (the opacity is per ring). */
+  private free: THREE.Mesh[] = [];
   private geo = new THREE.RingGeometry(0.8, 1, 48).rotateX(-Math.PI / 2);
 
   constructor(private scene: THREE.Scene) {}
 
   add(pos: THREE.Vector3, radius: number, color: number, dur = 0.35) {
-    const mesh = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false }));
+    const mesh = this.free.pop() ?? new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }));
+    const mat = mesh.material as THREE.MeshBasicMaterial;
+    mat.color.setHex(color);
+    mat.opacity = 0.9;
+    mesh.scale.setScalar(0.3);
     mesh.position.set(pos.x, 0.08, pos.z);
     this.scene.add(mesh);
     this.items.push({ mesh, t: 0, dur, r: radius });
@@ -566,15 +627,22 @@ export class Shockwaves {
       (it.mesh.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - k);
       if (k >= 1) {
         this.scene.remove(it.mesh);
-        (it.mesh.material as THREE.Material).dispose();
+        this.free.push(it.mesh);
         this.items.splice(i, 1);
       }
     }
   }
 }
 
-export interface Bolt { mesh: THREE.Sprite; from: THREE.Vector3; to: THREE.Vector3 | null; t: number; dur: number }
+/** `shot`: which launch the pooled bolt carries now (the pool reuses it once it lands). */
+export interface Bolt { mesh: THREE.Sprite; from: THREE.Vector3; to: THREE.Vector3 | null; t: number; dur: number; shot: number }
 interface Glow { mesh: THREE.Mesh; vel: THREE.Vector3; t: number; dur: number; size: number }
+interface Flame { pos: THREE.Vector3; vel: THREE.Vector3; t: number; dur: number; size: number }
+/** All flame licks of one colour: one InstancedMesh, the live ones packed at the front. */
+interface FlameBatch { color: number; mesh: THREE.InstancedMesh; live: Flame[] }
+
+/** Flames alive at once per colour; more are skipped (about 6 per burning mob). */
+const FLAME_CAP = 256;
 
 /**
  * Mage staff effects, all pooled: gradient bolts flying from the hand to a target, the wind orb's swirl where it
@@ -587,8 +655,10 @@ export class Spells {
   private mats = new Map<string, THREE.MeshBasicMaterial>();
   private boltMats = new Map<string, THREE.SpriteMaterial>();
   private bolts: Bolt[] = [];
+  private shots = 0;
   private swirls: Glow[] = [];
-  private flames: Glow[] = [];
+  private flames: FlameBatch[] = [];
+  private flameFree: Flame[] = [];
 
   constructor(private scene: THREE.Scene) {}
 
@@ -640,7 +710,8 @@ export class Spells {
   /** A sphere from `from` to `to` in `dur` s; `to` is followed live (a mob's position), aimed 1 m above it. */
   bolt(from: THREE.Vector3, to: THREE.Vector3, dur: number, colors: readonly [number, number], size = 0.16) {
     const b = this.take(this.bolts, Spells.idle(this.bolts) ? null
-      : { mesh: new THREE.Sprite(), from: new THREE.Vector3(), to: null, t: 0, dur: 1 });
+      : { mesh: new THREE.Sprite(), from: new THREE.Vector3(), to: null, t: 0, dur: 1, shot: 0 });
+    b.shot = ++this.shots;
     b.mesh.material = this.boltMat(colors[0], colors[1]);
     b.mesh.scale.setScalar(size * 2.6);
     b.mesh.position.copy(from);
@@ -650,8 +721,12 @@ export class Spells {
     return b;
   }
 
-  /** Removes bolt `b` mid-flight. */
-  drop(b: Bolt) { b.mesh.visible = false; b.to = null; }
+  /** Removes launch `shot` of bolt `b` mid-flight; a bolt already reused for another launch is left alone. */
+  drop(b: Bolt, shot: number) {
+    if (b.shot !== shot) return;
+    b.mesh.visible = false;
+    b.to = null;
+  }
 
   /** A spinning see-through sphere of `radius` m at `at` for `dur` s. */
   swirl(at: THREE.Vector3, radius: number, dur: number, color: number) {
@@ -666,13 +741,29 @@ export class Spells {
 
   /** One flame lick rising from `at`. */
   flame(at: THREE.Vector3, color: number) {
-    const f = this.take(this.flames, Spells.idle(this.flames) ? null
-      : { mesh: new THREE.Mesh(this.flameGeo), vel: new THREE.Vector3(), t: 0, dur: 1, size: 1 });
-    f.mesh.material = this.mat(color);
-    f.mesh.position.set(at.x + (Math.random() - 0.5) * 0.5, at.y + Math.random() * 0.6, at.z + (Math.random() - 0.5) * 0.5);
+    const b = this.flameBatch(color);
+    if (b.live.length >= FLAME_CAP) return;
+    const f = this.flameFree.pop() ?? { pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, dur: 1, size: 1 };
+    b.live.push(f);
+    f.t = 0;
+    f.pos.set(at.x + (Math.random() - 0.5) * 0.5, at.y + Math.random() * 0.6, at.z + (Math.random() - 0.5) * 0.5);
     f.vel.set((Math.random() - 0.5) * 0.3, 1.2 + Math.random() * 0.8, (Math.random() - 0.5) * 0.3);
     f.dur = 0.4 + Math.random() * 0.25;
     f.size = 0.07 + Math.random() * 0.06;
+  }
+
+  private flameBatch(color: number) {
+    for (const b of this.flames) if (b.color === color) return b;
+    const mesh = new THREE.InstancedMesh(this.flameGeo, this.mat(color), FLAME_CAP);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.count = 0;
+    mesh.visible = false;
+    // burning mobs are spread over the map; one draw call either way
+    mesh.frustumCulled = false;
+    this.scene.add(mesh);
+    const b = { color, mesh, live: [] };
+    this.flames.push(b);
+    return b;
   }
 
   update(dt: number) {
@@ -696,14 +787,25 @@ export class Spells {
       s.mesh.rotation.x = Math.sin(s.t * 5) * 0.3;
       if (k >= 1) s.mesh.visible = false;
     }
-    for (const f of this.flames) {
-      if (!f.mesh.visible) continue;
+    for (const b of this.flames) this.updateFlames(b, dt);
+  }
+
+  private updateFlames(b: FlameBatch, dt: number) {
+    const list = b.live;
+    let n = 0;
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i];
       f.t += dt;
       const k = f.t / f.dur;
-      f.mesh.position.addScaledVector(f.vel, dt);
-      f.mesh.scale.set(f.size * (1 - k), f.size * 1.8 * (1 - k), f.size * (1 - k));
-      if (k >= 1) f.mesh.visible = false;
+      if (k >= 1) { this.flameFree.push(f); continue; }
+      f.pos.addScaledVector(f.vel, dt);
+      list[n] = f;
+      b.mesh.setMatrixAt(n++, pm.compose(f.pos, pq.identity(), ps.set(f.size * (1 - k), f.size * 1.8 * (1 - k), f.size * (1 - k))));
     }
+    list.length = n;
+    b.mesh.count = n;
+    b.mesh.visible = n > 0;
+    if (n) b.mesh.instanceMatrix.needsUpdate = true;
   }
 }
 
@@ -724,20 +826,52 @@ function puffTexture() {
   return puffTex;
 }
 
-interface Puff { sprite: THREE.Sprite; vel: THREE.Vector3; t: number; life: number; size: number; peak: number; active: boolean }
+interface Puff { pos: THREE.Vector3; vel: THREE.Vector3; color: THREE.Color; rot: number; t: number; life: number; size: number; peak: number; active: boolean }
 
-/** Drifting fog puffs (sprites): swell, rise slowly and fade. */
+const AXIS_Z = new THREE.Vector3(0, 0, 1);
+
+/** Per-instance opacity for the puff batch: `puffAlpha` multiplies the map's alpha. */
+function injectPuffAlpha(shader: THREE.WebGLProgramParametersWithUniforms) {
+  shader.vertexShader = 'attribute float puffAlpha;\nvarying float vPuffAlpha;\n' + shader.vertexShader.replace(
+    '#include <begin_vertex>', '#include <begin_vertex>\n\tvPuffAlpha = puffAlpha;');
+  shader.fragmentShader = 'varying float vPuffAlpha;\n' + shader.fragmentShader.replace(
+    '#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.a *= vPuffAlpha;');
+}
+
+function puffCacheKey() { return 'puff-alpha'; }
+
+/**
+ * Drifting fog puffs: swell, rise slowly and fade. One InstancedMesh of camera-facing quads (what sprites were),
+ * sorted far to near every frame so the soft edges blend as separate sprites did. `count` slots, reused round-robin.
+ */
 export class FogPuffs {
   private pool: Puff[] = [];
   private next = 0;
+  private mesh: THREE.InstancedMesh;
+  private alpha: THREE.InstancedBufferAttribute;
+  private order: Uint16Array;
+  private depth: Float32Array;
 
-  constructor(scene: THREE.Scene, count = 140) {
+  constructor(scene: THREE.Scene, private camera: THREE.Camera, count = 140) {
+    const geo = new THREE.PlaneGeometry(1, 1);
+    this.alpha = new THREE.InstancedBufferAttribute(new Float32Array(count), 1).setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('puffAlpha', this.alpha);
+    const mat = new THREE.MeshBasicMaterial({ map: puffTexture(), transparent: true, depthWrite: false });
+    mat.onBeforeCompile = injectPuffAlpha;
+    mat.customProgramCacheKey = puffCacheKey;
+    this.mesh = new THREE.InstancedMesh(geo, mat, count);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(count * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    this.mesh.count = 0;
+    this.mesh.visible = false;
+    this.mesh.renderOrder = 2;
+    // puffs drift anywhere round the map; one draw call either way
+    this.mesh.frustumCulled = false;
+    scene.add(this.mesh);
+    this.order = new Uint16Array(count);
+    this.depth = new Float32Array(count);
     for (let i = 0; i < count; i++) {
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: puffTexture(), transparent: true, depthWrite: false, opacity: 0 }));
-      sprite.visible = false;
-      sprite.renderOrder = 2;
-      scene.add(sprite);
-      this.pool.push({ sprite, vel: new THREE.Vector3(), t: 0, life: 1, size: 1, peak: 0.5, active: false });
+      this.pool.push({ pos: new THREE.Vector3(), vel: new THREE.Vector3(), color: new THREE.Color(), rot: 0, t: 0, life: 1, size: 1, peak: 0.5, active: false });
     }
   }
 
@@ -751,10 +885,9 @@ export class FogPuffs {
     p.size = size;
     p.peak = peak;
     p.vel.set((Math.random() - 0.5) * 0.4, 0.25 + Math.random() * 0.3, (Math.random() - 0.5) * 0.4);
-    p.sprite.position.copy(pos);
-    (p.sprite.material as THREE.SpriteMaterial).color.set(color);
-    p.sprite.material.rotation = Math.random() * Math.PI * 2;
-    p.sprite.visible = true;
+    p.pos.copy(pos);
+    p.color.setHex(color);
+    p.rot = Math.random() * Math.PI * 2;
   }
 
   /** `count` puffs scattered over a disc of `radius` m around `pos`. */
@@ -768,16 +901,40 @@ export class FogPuffs {
   }
 
   update(dt: number) {
-    for (const p of this.pool) {
+    const cam = this.camera;
+    // view direction: depth along it orders the puffs far to near
+    const fwd = tmp.set(0, 0, -1).applyQuaternion(cam.quaternion);
+    const { order, depth } = this;
+    let n = 0;
+    for (let i = 0; i < this.pool.length; i++) {
+      const p = this.pool[i];
       if (!p.active) continue;
       p.t += dt;
-      const k = p.t / p.life;
-      if (k >= 1) { p.active = false; p.sprite.visible = false; continue; }
-      p.sprite.position.addScaledVector(p.vel, dt);
-      p.sprite.scale.setScalar(p.size * (0.6 + 0.6 * k));
-      // fade in over the first fifth, out over the rest
-      (p.sprite.material as THREE.SpriteMaterial).opacity = p.peak * (k < 0.2 ? k / 0.2 : (1 - k) / 0.8);
+      if (p.t >= p.life) { p.active = false; continue; }
+      p.pos.addScaledVector(p.vel, dt);
+      const d = (p.pos.x - cam.position.x) * fwd.x + (p.pos.y - cam.position.y) * fwd.y + (p.pos.z - cam.position.z) * fwd.z;
+      // insertion sort, farthest first: the order barely changes between frames
+      let j = n++;
+      while (j > 0 && depth[j - 1] < d) { order[j] = order[j - 1]; depth[j] = depth[j - 1]; j--; }
+      order[j] = i;
+      depth[j] = d;
     }
+    this.mesh.count = n;
+    this.mesh.visible = n > 0;
+    if (!n) return;
+    for (let j = 0; j < n; j++) {
+      const p = this.pool[order[j]];
+      const k = p.t / p.life;
+      // facing the camera like a sprite, turned by its own angle in the view plane
+      pq.setFromAxisAngle(AXIS_Z, p.rot).premultiply(cam.quaternion);
+      this.mesh.setMatrixAt(j, pm.compose(p.pos, pq, ps.setScalar(p.size * (0.6 + 0.6 * k))));
+      this.mesh.setColorAt(j, p.color);
+      // fade in over the first fifth, out over the rest
+      this.alpha.setX(j, p.peak * (k < 0.2 ? k / 0.2 : (1 - k) / 0.8));
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.instanceColor!.needsUpdate = true;
+    this.alpha.needsUpdate = true;
   }
 }
 

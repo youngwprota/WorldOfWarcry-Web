@@ -4,6 +4,7 @@ import { SPAWN_PRESETS, ZONES } from './config';
 import type { SpawnPresetId, ZoneId } from './config';
 import { ARENA, FOREST_MINI, FORT, GATES, ISLAND, LAND_BOSSES } from './island';
 import type { Game } from './game';
+import type { PerfHud } from './perfhud';
 import { CLASSES, CLASS_IDS, type HeroClass } from './party';
 import { CLASS_SET } from './items';
 
@@ -162,7 +163,7 @@ export class DebugPanel {
   private info: HTMLElement;
   private timer = 0;
 
-  constructor(app: HTMLElement, private game: Game) {
+  constructor(app: HTMLElement, private game: Game, private perf: PerfHud) {
     this.el.id = 'debug';
     this.el.className = 'ui-block hidden';
     const btn = ([label, , cls]: Action, si: number, ai: number) => `<button class="${cls ?? ''}" data-a="${si}:${ai}">${label}</button>`;
@@ -180,7 +181,7 @@ export class DebugPanel {
       html += sec;
       if (col && !SECTIONS[si + 1]?.[2]) html += '</div>';
     });
-    this.el.innerHTML = `<div class="dbg-head"><b>🛠 Дебаг</b><span><button data-min title="Свернуть">–</button> <button data-close>✕</button></span></div><pre class="dbg-info"></pre>` + html;
+    this.el.innerHTML = `<div class="dbg-head"><b>🛠 Дебаг</b><span><button data-perf class="dbg-wide">debug info</button> <button data-min title="Свернуть">–</button> <button data-close>✕</button></span></div><pre class="dbg-info"></pre>` + html;
     app.appendChild(this.el);
     this.info = this.el.querySelector('.dbg-info')!;
     this.el.addEventListener('pointerdown', this.dragStart);
@@ -192,6 +193,7 @@ export class DebugPanel {
       sfx.click();
       if (b.dataset.close !== undefined) { this.toggle(false); return; }
       if (b.dataset.apply !== undefined) { this.applyBuild(); return; }
+      if (b.dataset.perf !== undefined) { this.perf.toggle(); return; }
       if (b.dataset.min !== undefined) { this.el.classList.toggle('min'); b.textContent = this.el.classList.contains('min') ? '+' : '–'; return; }
       const [si, ai] = b.dataset.a!.split(':').map(Number);
       const a = SECTIONS[si][1][ai];

@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { ZONE_IDS, zoneWeights } from './island';
 import type { ZoneId } from './config';
-import { WIND, stormGust } from './sandstorm';
+import { STORMS, WIND, stormGust, stormPower, type StormLook } from './sandstorm';
 
 interface Style {
   color: number;
@@ -25,12 +25,15 @@ interface Style {
   glow: number;
   /** 0..1: points stretch into streaks along the wind (sandstorm). */
   streak?: number;
+  /** Look at the height of this zone's storm (STORMS), blended in by its power; streaks only in gusts. */
+  storm?: { size: number; rise: number; drift: number; amount: number; streak: number };
 }
 
 const STYLES: Record<ZoneId, Style> = {
   forest: { color: 0xfff2b0, size: 0.07, rise: 0.12, wobble: 0.5, drift: 0.35, flicker: 0.35, amount: 0.19, glow: 1 },
   cemetery: { color: 0x9ef0ff, size: 0.16, rise: 0.35, wobble: 0.7, drift: 0.15, flicker: 0.8, amount: 0.29, glow: 1 },
-  peaks: { color: 0xffffff, size: 0.09, rise: -0.9, wobble: 0.45, drift: 0.6, flicker: 0, amount: 0.38, glow: 0 },
+  peaks: { color: 0xffffff, size: 0.09, rise: -0.9, wobble: 0.45, drift: 0.6, flicker: 0, amount: 0.38, glow: 0,
+    storm: { size: 0.12, rise: -2.2, drift: 8, amount: 1, streak: 0.7 } },
   swamp: { color: 0xd8ff6a, size: 0.1, rise: 0.05, wobble: 0.9, drift: 0.1, flicker: 1, amount: 0.23, glow: 1 },
   grove: { color: 0xf09a3a, size: 0.13, rise: -0.45, wobble: 0.9, drift: 0.5, flicker: 0, amount: 0.21, glow: 0 },
   dunes: { color: 0xf4e2b0, size: 0.4, rise: -0.05, wobble: 0.15, drift: 9, flicker: 0, amount: 1, glow: 0, streak: 1 },
@@ -49,10 +52,11 @@ export class Ambient {
     // rise and drift integrated over time (m): the blended speeds change as the hero walks, so time × speed would jump
     uRiseOff: { value: 0 }, uDriftOff: { value: 0 },
     uFlicker: { value: 0 }, uAmount: { value: 0 }, uGlow: { value: 1 }, uScale: { value: 400 },
-    uStreak: { value: 0 }, uWind: { value: WIND }, uAlphaK: { value: 1 },
+    uStreak: { value: 0 }, uWind: { value: WIND }, uSlant: { value: 0 }, uAlphaK: { value: 1 },
   };
-  /** Dunes weight 0..1 where the hero stands (the sandstorm effects follow it). */
+  /** Storm zone weight × its power 0..1 where the hero stands (sandstorm.ts follows it), and that storm's look. */
   storm = 0;
+  stormLook: StormLook | null = null;
   private w: number[] = [];
   private last = -1;
   private tmp = new THREE.Color();
@@ -73,7 +77,7 @@ export class Ambient {
       vertexShader: /* glsl */ `
         attribute vec4 aSeed;
         uniform float uTime; uniform vec3 uCenter; uniform vec3 uBox; uniform float uSize; uniform float uRise; uniform float uWobble;
-        uniform float uDrift; uniform vec2 uWind; uniform float uFlicker; uniform float uAmount; uniform float uScale; uniform float uRiseOff; uniform float uDriftOff;
+        uniform float uDrift; uniform vec2 uWind; uniform float uSlant; uniform float uFlicker; uniform float uAmount; uniform float uScale; uniform float uRiseOff; uniform float uDriftOff;
         varying float vAlpha; varying vec2 vDir;
         void main(){
           float k = 0.7 + aSeed.w * 0.6;
@@ -93,7 +97,7 @@ export class Ambient {
           float flick = mix(1.0, 0.5 + 0.5 * sin(uTime * (2.0 + aSeed.y * 5.0) + aSeed.z * 50.0), uFlicker);
           vAlpha = edge * flick * step(aSeed.w, uAmount);
           // screen direction of the wind, for streaks
-          vec4 ahead = projectionMatrix * (mv + viewMatrix * vec4(uWind.x, 0.0, uWind.y, 0.0));
+          vec4 ahead = projectionMatrix * (mv + viewMatrix * vec4(uWind.x, uSlant, uWind.y, 0.0));
           vec2 sd = ahead.xy / ahead.w - gl_Position.xy / gl_Position.w;
           vDir = normalize(vec2(sd.x * projectionMatrix[1][1] / projectionMatrix[0][0], -sd.y) + 1e-5);
           gl_PointSize = uSize * projectionMatrix[1][1] * uScale / -mv.z;
@@ -134,27 +138,39 @@ export class Ambient {
     for (let i = 0; i < wt.length; i++) sum += wt[i];
     if (!sum) sum = 1;
     u.uColor.value.setRGB(0, 0, 0);
-    let size = 0, rise = 0, wobble = 0, drift = 0, flicker = 0, amount = 0, glow = 0, streak = 0;
+    let size = 0, rise = 0, wobble = 0, drift = 0, flicker = 0, amount = 0, glow = 0, streak = 0, gusty = 0;
     this.storm = 0;
+    this.stormLook = null;
+    const gust = stormGust(time);
     for (let i = 0; i < ZONE_IDS.length; i++) {
       const k = wt[i] / sum;
       if (k <= 0) continue;
       const id = ZONE_IDS[i];
       const s = STYLES[id];
+      const look = STORMS[id];
+      const p = look ? stormPower(look, time) : 0;
+      const st = s.storm;
       u.uColor.value.add(this.tmp.set(s.color).multiplyScalar(k));
-      size += s.size * k; rise += s.rise * k; wobble += s.wobble * k; drift += s.drift * k;
-      flicker += s.flicker * k; amount += s.amount * k; glow += s.glow * k;
+      size += (st ? s.size + (st.size - s.size) * p : s.size) * k;
+      rise += (st ? s.rise + (st.rise - s.rise) * p : s.rise) * k;
+      drift += (st ? s.drift + (st.drift - s.drift) * p : s.drift) * k;
+      amount += (st ? s.amount + (st.amount - s.amount) * p : s.amount) * k;
+      wobble += s.wobble * k; flicker += s.flicker * k; glow += s.glow * k;
       streak += (s.streak ?? 0) * k;
-      if (id === 'dunes') this.storm = k;
+      if (st) gusty += st.streak * p * gust * k;
+      if (look && k * p > this.storm) { this.storm = k * p; this.stormLook = look; }
     }
     // dt clamped: a hidden tab or a pause must not throw the points far
     const dt = this.last < 0 ? 0 : Math.min(0.1, Math.max(0, time - this.last));
     this.last = time;
     u.uRiseOff.value += rise * dt;
-    // gusts speed the sand up in the dunes (integrated: no jumps in the pattern)
-    u.uDriftOff.value += drift * (1 + 0.7 * this.storm * stormGust(time)) * dt;
+    // gusts speed the sand / snow up in a storm (integrated: no jumps in the pattern)
+    u.uDriftOff.value += drift * (1 + 0.7 * this.storm * gust) * dt;
     u.uSize.value = size; u.uRise.value = rise; u.uWobble.value = wobble; u.uDrift.value = drift;
+    streak += gusty;
     u.uStreak.value = streak; u.uAlphaK.value = 1 - 0.45 * streak;
+    // falling snow streaks tilt down along its path (the sand streaks stay level)
+    u.uSlant.value = gusty > 0 ? rise / Math.max(drift, 0.1) : 0;
     u.uFlicker.value = flicker; u.uAmount.value = amount; u.uGlow.value = glow;
   }
 }
