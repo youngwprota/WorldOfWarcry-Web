@@ -26,6 +26,20 @@ const store = {
 };
 const RANKS: FightRank[] = ['normal', 'elite', 'mini'];
 const RANK_NAME: Record<FightRank, string> = { normal: 'моб', elite: 'элитка', mini: 'мини' };
+/** Column hints (title on hover, dotted underline). */
+const HINT = {
+  boss: 'Главный босс локации: его первое убийство открывает следующие локации',
+  zone: 'Локация, чьи мобы и босс подбираются в этой строке',
+  at: 'Минута первого убийства босса, считая от начала игры (не от входа в локацию)',
+  fight: 'Сколько секунд длится победный бой с боссом: отсюда его HP',
+  gacha: 'Какая доля общей мощи героя (урон в секунду × живучесть) приходится на гача-предметы в момент убийства босса. 0 — гача не нужна, 30 — треть силы из гачи',
+  normal: 'Средняя длина боя с обычным мобом этой локации (пачка — один бой), с: отсюда HP мобов',
+  elite: 'Средняя длина боя с элиткой этой локации, с',
+  mini: 'Средняя длина боя с мини-боссом этой локации, с',
+  pick: 'Подбирать числа этой локации. Снято — её числа не меняются, но бот всё равно проходит её по цепочке',
+} as const;
+const th = (label: string, hint: string, cls = '') => `<th class="${cls}" title="${hint}"><span class="hint">${label}</span></th>`;
+const rankTh = (r: FightRank) => th(`${RANK_NAME[r]}, с`, HINT[r]);
 const zoneName = (id: string) => ZONES.find((z) => z.id === id)?.name ?? id;
 const $ = <T extends HTMLElement>(sel: string, root: ParentNode) => root.querySelector(sel) as T;
 
@@ -46,7 +60,7 @@ export function renderTune(root: HTMLElement, c: TuneCtx) {
         от гача-предметов в этот момент, сколько длятся бои с мобами по локациям. «Подобрать» гоняет бота по цепочке локаций и подбирает
         HP и урон мобов и боссов (ZONE_SCALE, MOBS) и шанс круток (GACHA.token), начиная с правок вкладки «Конфиг».</p>
       <div class="scroll" style="max-height:none">
-        <table><tr><th class="l">босс</th><th class="l">локация</th><th>минута</th><th>бой, с</th><th>гача, %</th>${RANKS.map((r) => `<th>${RANK_NAME[r]}, с</th>`).join('')}<th>подбирать</th></tr>
+        <table><tr>${th('босс', HINT.boss, 'l')}${th('локация', HINT.zone, 'l')}${th('минута', HINT.at)}${th('бой, с', HINT.fight)}${th('гача, %', HINT.gacha)}${RANKS.map(rankTh).join('')}${th('подбирать', HINT.pick)}</tr>
         ${CHAIN.map(({ zone, boss }) => { const b = targets.bosses[boss]; const f = targets.fights[zone] ?? {}; return `<tr>
           <td class="l">${esc(MOBS[boss].name)}</td><td class="l">${esc(zoneName(zone))}</td>
           <td>${num(`bosses.${boss}.at`, b?.at, 1)}</td><td>${num(`bosses.${boss}.fight`, b?.fight, 5)}</td><td>${num(`bosses.${boss}.gacha%`, b ? Math.round(b.gacha * 100) : undefined, 1)}</td>
@@ -56,8 +70,8 @@ export function renderTune(root: HTMLElement, c: TuneCtx) {
       </div>
       <div class="form" style="margin-top:12px">
         <label class="f" title="Допустимый промах: 0.1 = ±10% (доля гачи — ±10 пунктов)">Допуск<input type="number" id="tol" step="0.01" value="${targets.tol}"></label>
-        <label class="f" title="Прогонов бота на каждую проверку">Прогонов<input type="number" id="runs" step="1" value="${run.runs}"></label>
-        <label class="f" title="Кругов подбора на локацию">Кругов<input type="number" id="iters" step="1" value="${run.iters}"></label>
+        <label class="f" title="Сколько прогонов бота (разные seed) на каждую проверку: больше — точнее, но дольше">Прогонов<input type="number" id="runs" step="1" value="${run.runs}"></label>
+        <label class="f" title="Сколько кругов подбора на локацию максимум: круг = мобы → HP и урон босса → проверочный прогон. Сошлось раньше — дальше не крутит">Кругов<input type="number" id="iters" step="1" value="${run.iters}"></label>
       </div>
       <div class="row" style="margin-top:12px">
         <button class="btn primary" id="go" ${busy ? 'disabled' : ''}>Подобрать</button>
@@ -152,7 +166,7 @@ function renderOut(out: HTMLElement, c: TuneCtx) {
   out.innerHTML = `
     <h2>Итог: цель / было / стало</h2>
     <div class="scroll" style="max-height:none"><table>
-      <tr><th class="l"></th><th>минута</th><th>бой, с</th><th>гача, %</th>${RANKS.map((r) => `<th>${RANK_NAME[r]}, с</th>`).join('')}</tr>
+      <tr><th class="l"></th>${th('минута', HINT.at)}${th('бой, с', HINT.fight)}${th('гача, %', HINT.gacha)}${RANKS.map(rankTh).join('')}</tr>
       ${reports.map((r) => { const g = targets.bosses[r.boss], f = targets.fights[r.zone] ?? {}; return `
         <tr><th class="l" colspan="7" style="color:var(--fg)">${r.ok ? '<span class="ok">✓</span>' : '<span class="no">✗</span>'} ${esc(MOBS[r.boss].name)} · ${esc(zoneName(r.zone))} · кругов ${r.iters}
           ${r.notes.map((n) => `<div class="muted" style="font-weight:400">${esc(n)}</div>`).join('')}</th></tr>
@@ -162,7 +176,7 @@ function renderOut(out: HTMLElement, c: TuneCtx) {
     <div class="charts" id="tcharts" style="margin-top:12px"></div>
     <h2>Подобранные числа</h2>
     <div class="panel">
-      <table><tr><th class="l">поле</th><th>было</th><th>стало</th></tr>
+      <table><tr>${th('поле', 'Путь числа в src/config.ts: ZONE_SCALE.<локация>.hp/dmg.<ранг> — множитель HP/урона мобов ранга, .token — множитель шанса крутки, MOBS.<босс>.hp/dmg — числа босса', 'l')}${th('было', 'Значение в конфиге до подбора')}${th('стало', 'Подобранное значение')}</tr>
         ${Object.entries(sets).map(([p, v]) => `<tr><td class="l mono">${esc(p)}</td><td>${was[p]}</td><td>${v}</td></tr>`).join('')}</table>
       <div class="row" style="margin-top:10px">
         <button class="btn" id="apply" title="Добавить в правки вкладки «Конфиг» — «Сим» покажет их рядом с конфигом без правок">В правки страницы</button>
