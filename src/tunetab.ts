@@ -36,14 +36,18 @@ const HINT = {
   normal: 'Средняя длина боя с обычным мобом этой локации (пачка — один бой), с: отсюда HP мобов',
   elite: 'Средняя длина боя с элиткой этой локации, с',
   mini: 'Средняя длина боя с мини-боссом этой локации, с',
+  loss: 'Сколько HP (% от максимума) герой теряет за победный бой с этим рангом: 90 — на грани, 30 — легко. Отсюда урон мобов. Пусто — урон не подбирается',
   pick: 'Подбирать числа этой локации. Снято — её числа не меняются, но бот всё равно проходит её по цепочке',
 } as const;
 const th = (label: string, hint: string, cls = '') => `<th class="${cls}" title="${hint}"><span class="hint">${label}</span></th>`;
 const rankTh = (r: FightRank) => th(`${RANK_NAME[r]}, с`, HINT[r]);
+const lossTh = (r: FightRank) => th(`${RANK_NAME[r]}, −HP%`, `${RANK_NAME[r]}: ${HINT.loss}`);
 const zoneName = (id: string) => ZONES.find((z) => z.id === id)?.name ?? id;
 const $ = <T extends HTMLElement>(sel: string, root: ParentNode) => root.querySelector(sel) as T;
 
 let targets: TuneTargets = store.get(KEY.targets, structuredClone(DEFAULT_TARGETS));
+// targets saved before the HP-loss goal: take its defaults
+targets.loss ??= structuredClone(DEFAULT_TARGETS.loss);
 let run = store.get(KEY.tune, { runs: 8, iters: 6, zones: CHAIN.map((c) => c.zone) as ZoneId[] });
 /** Hand-set knobs (path → number): the tuner keeps them. Default: TUNE_MANUAL of config.ts with its numbers. */
 const configLocks = () => Object.fromEntries(TUNE_MANUAL.map((p) => [p, getPath(p)])) as Record<string, number>;
@@ -68,13 +72,15 @@ export function renderTune(root: HTMLElement, c: TuneCtx) {
     <div class="panel">
       <p class="muted" style="margin:0 0 10px">Цели баланса: когда (минута от начала) и за сколько секунд падает каждый босс, какая доля мощи героя
         от гача-предметов в этот момент, сколько длятся бои с мобами по локациям. «Подобрать» гоняет бота по цепочке локаций и подбирает
-        HP и урон мобов и боссов (ZONE_SCALE, MOBS) и шанс круток (GACHA.token), начиная с правок вкладки «Конфиг».</p>
+        HP и урон мобов и боссов (ZONE_SCALE, MOBS) и шанс круток (GACHA.token), начиная с правок вкладки «Конфиг». «−HP%» — насколько
+        бой на грани: сколько HP герой теряет за бой; минута босса при этом держится своей целью.</p>
       <div class="scroll" style="max-height:none">
-        <table><tr>${th('босс', HINT.boss, 'l')}${th('локация', HINT.zone, 'l')}${th('минута', HINT.at)}${th('бой, с', HINT.fight)}${th('гача, %', HINT.gacha)}${RANKS.map(rankTh).join('')}${th('подбирать', HINT.pick)}</tr>
-        ${CHAIN.map(({ zone, boss }) => { const b = targets.bosses[boss]; const f = targets.fights[zone] ?? {}; return `<tr>
+        <table><tr>${th('босс', HINT.boss, 'l')}${th('локация', HINT.zone, 'l')}${th('минута', HINT.at)}${th('бой, с', HINT.fight)}${th('гача, %', HINT.gacha)}${RANKS.map(rankTh).join('')}${RANKS.map(lossTh).join('')}${th('подбирать', HINT.pick)}</tr>
+        ${CHAIN.map(({ zone, boss }) => { const b = targets.bosses[boss]; const f = targets.fights[zone] ?? {}; const l = targets.loss?.[zone] ?? {}; return `<tr>
           <td class="l">${esc(MOBS[boss].name)}</td><td class="l">${esc(zoneName(zone))}</td>
           <td>${num(`bosses.${boss}.at`, b?.at, 1)}</td><td>${num(`bosses.${boss}.fight`, b?.fight, 5)}</td><td>${num(`bosses.${boss}.gacha%`, b ? Math.round(b.gacha * 100) : undefined, 1)}</td>
           ${RANKS.map((r) => `<td>${num(`fights.${zone}.${r}`, f[r], 1)}</td>`).join('')}
+          ${RANKS.map((r) => `<td>${num(`loss.${zone}.${r}`, l[r] === undefined ? undefined : Math.round(l[r]! * 100), 5)}</td>`).join('')}
           <td><input type="checkbox" data-z="${zone}" ${run.zones.includes(zone) ? 'checked' : ''}></td></tr>`; }).join('')}
         </table>
       </div>
@@ -118,8 +124,9 @@ export function renderTune(root: HTMLElement, c: TuneCtx) {
       const b = (targets.bosses[id] ??= { at: 0, fight: 0, gacha: 0 });
       if (v !== undefined) (key === 'gacha%' ? (b.gacha = v / 100) : (b[key as 'at' | 'fight'] = v));
     } else {
-      const f = (targets.fights[id as ZoneId] ??= {});
-      if (v === undefined) delete f[key as FightRank]; else f[key as FightRank] = v;
+      // fights: seconds; loss: % in the field, a share in the targets
+      const f = group === 'loss' ? ((targets.loss ??= {})[id as ZoneId] ??= {}) : (targets.fights[id as ZoneId] ??= {});
+      if (v === undefined) delete f[key as FightRank]; else f[key as FightRank] = group === 'loss' ? v / 100 : v;
     }
     saveTargets();
     $<HTMLTextAreaElement>('#json', root).value = JSON.stringify(targets, null, 2);
@@ -203,17 +210,18 @@ function renderOut(out: HTMLElement, c: TuneCtx) {
     return `<td class="${ok ? 'ok' : 'no'}">${v.toFixed(d)}</td>`;
   };
   const row = (label: string, m: Metrics | undefined, zone: ZoneId, boss: string) => {
-    const g = targets.bosses[boss], f = targets.fights[zone] ?? {};
-    return `<tr><td class="l muted">${label}</td>${cell(m?.at, g.at, 1)}${cell(m?.fight, g.fight)}${cell(m?.gacha === undefined ? undefined : m.gacha * 100, g.gacha * 100, 0, false)}${RANKS.map((r) => cell(m?.fights[r], f[r])).join('')}</tr>`;
+    const g = targets.bosses[boss], f = targets.fights[zone] ?? {}, l = targets.loss?.[zone] ?? {};
+    const pc = (v: number | undefined) => (v === undefined ? undefined : v * 100);
+    return `<tr><td class="l muted">${label}</td>${cell(m?.at, g.at, 1)}${cell(m?.fight, g.fight)}${cell(pc(m?.gacha), g.gacha * 100, 0, false)}${RANKS.map((r) => cell(m?.fights[r], f[r])).join('')}${RANKS.map((r) => cell(pc(m?.loss?.[r]), pc(l[r]), 0, false)).join('')}</tr>`;
   };
   out.innerHTML = `
     <h2>Итог: цель / было / стало</h2>
     <div class="scroll" style="max-height:none"><table>
-      <tr><th class="l"></th>${th('минута', HINT.at)}${th('бой, с', HINT.fight)}${th('гача, %', HINT.gacha)}${RANKS.map(rankTh).join('')}</tr>
-      ${reports.map((r) => { const g = targets.bosses[r.boss], f = targets.fights[r.zone] ?? {}; return `
-        <tr><th class="l" colspan="7" style="color:var(--fg)">${r.ok ? '<span class="ok">✓</span>' : '<span class="no">✗</span>'} ${esc(MOBS[r.boss].name)} · ${esc(zoneName(r.zone))} · кругов ${r.iters}
+      <tr><th class="l"></th>${th('минута', HINT.at)}${th('бой, с', HINT.fight)}${th('гача, %', HINT.gacha)}${RANKS.map(rankTh).join('')}${RANKS.map(lossTh).join('')}</tr>
+      ${reports.map((r) => { const g = targets.bosses[r.boss], f = targets.fights[r.zone] ?? {}, l = targets.loss?.[r.zone] ?? {}; return `
+        <tr><th class="l" colspan="10" style="color:var(--fg)">${r.ok ? '<span class="ok">✓</span>' : '<span class="no">✗</span>'} ${esc(MOBS[r.boss].name)} · ${esc(zoneName(r.zone))} · кругов ${r.iters}
           ${r.notes.map((n) => `<div class="muted" style="font-weight:400">${esc(n)}</div>`).join('')}</th></tr>
-        <tr><td class="l muted">цель</td><td>${g.at}</td><td>${g.fight}</td><td>${Math.round(g.gacha * 100)}</td>${RANKS.map((rk) => `<td>${f[rk] ?? '—'}</td>`).join('')}</tr>
+        <tr><td class="l muted">цель</td><td>${g.at}</td><td>${g.fight}</td><td>${Math.round(g.gacha * 100)}</td>${RANKS.map((rk) => `<td>${f[rk] ?? '—'}</td>`).join('')}${RANKS.map((rk) => `<td>${l[rk] === undefined ? '—' : Math.round(l[rk]! * 100)}</td>`).join('')}</tr>
         ${row('было', r.before, r.zone, r.boss)}${row('стало', r.after, r.zone, r.boss)}`; }).join('')}
     </table></div>
     <div class="charts" id="tcharts" style="margin-top:12px"></div>
@@ -243,6 +251,7 @@ function renderOut(out: HTMLElement, c: TuneCtx) {
   three('Бой с боссом, с', (r) => targets.bosses[r.boss].fight, (x) => x?.fight);
   three('Доля мощи от гачи', (r) => targets.bosses[r.boss].gacha, (x) => x?.gacha, (v) => `${Math.round(v * 100)}%`);
   three('Бой с мобом, с', (r) => targets.fights[r.zone]?.normal ?? 0, (x) => x?.fights.normal);
+  three('Потеря HP за бой с элиткой', (r) => targets.loss?.[r.zone]?.elite ?? 0, (x) => x?.loss?.elite, (v) => `${Math.round(v * 100)}%`);
 
   $('#apply', out).addEventListener('click', () => { c.addSets({ ...fixed, ...sets }); $('#wstatus', out).textContent = 'добавлено в правки'; });
   $('#write', out)?.addEventListener('click', async () => {

@@ -23,13 +23,13 @@ async function main() {
   });
 
   const zoneName = (id: string) => ZONES.find((z) => z.id === id)?.name ?? id;
-  const m = (x: Metrics | undefined) => x ? `${x.at === undefined ? '—' : x.at.toFixed(1)} мин, бой ${x.fight?.toFixed(0) ?? '—'} с, гача ${x.gacha === undefined ? '—' : Math.round(x.gacha * 100) + '%'}, мобы ${(['normal', 'elite', 'mini'] as const).map((r) => x.fights[r]?.toFixed(0) ?? '—').join('/')} с` : '—';
+  const m = (x: Metrics | undefined) => x ? `${x.at === undefined ? '—' : x.at.toFixed(1)} мин, бой ${x.fight?.toFixed(0) ?? '—'} с, гача ${x.gacha === undefined ? '—' : Math.round(x.gacha * 100) + '%'}, мобы ${(['normal', 'elite', 'mini'] as const).map((r) => x.fights[r]?.toFixed(0) ?? '—').join('/')} с, потеря HP ${(['normal', 'elite', 'mini'] as const).map((r) => (x.loss?.[r] === undefined ? '—' : Math.round(x.loss[r]! * 100))).join('/')}%` : '—';
   console.log('\n== Итог: было → стало (полный прогон с начала), цель');
   for (const r of out.reports) {
     const g = targets.bosses[r.boss];
     const f = targets.fights[r.zone] ?? {};
     console.log(`${r.ok ? '✓' : '✗'} ${MOBS[r.boss].name} (${zoneName(r.zone)}), кругов ${r.iters}`);
-    console.log(`    было:  ${m(r.before)}\n    стало: ${m(r.after)}\n    цель:  ${g.at} мин, бой ${g.fight} с, гача ${Math.round(g.gacha * 100)}%, мобы ${f.normal ?? '—'}/${f.elite ?? '—'}/${f.mini ?? '—'} с`);
+    console.log(`    было:  ${m(r.before)}\n    стало: ${m(r.after)}\n    цель:  ${g.at} мин, бой ${g.fight} с, гача ${Math.round(g.gacha * 100)}%, мобы ${f.normal ?? '—'}/${f.elite ?? '—'}/${f.mini ?? '—'} с, потеря HP ${(['normal', 'elite', 'mini'] as const).map((rk) => { const v = targets.loss?.[r.zone]?.[rk]; return v === undefined ? '—' : Math.round(v * 100); }).join('/')}%`);
     for (const n of r.notes) console.log(`    ! ${n}`);
   }
   console.log('\n== Правки конфига');
