@@ -111,9 +111,7 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
       log(`== ${MOBS[boss].name} (${zone}): цель ${goal.at} мин, бой ${goal.fight} с, гача ${Math.round(goal.gacha * 100)}%`);
       const own = TUNE_KNOBS.filter((k) => k.zone === zone && k.path in fixed);
       if (own.length) log(`  вручную: ${own.map((k) => `${k.path} = ${fixed[k.path]}`).join(', ')}`);
-      let tProbe = tAt;
       let bestScore = Infinity;
-      let early: [number, number] | null = null, late: [number, number] | null = null;
       let best: { sets: Record<string, number>; cps: (Checkpoint | undefined)[] } | null = null;
       const t0 = start.length ? Math.min(...start.map((c) => c!.t)) : 0;
       /** Ranks fought before the kill in round 0 (the numbers as they were). */
@@ -144,13 +142,13 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
           + RANKS.reduce((a, rk) => { const want = T.loss?.[zone]?.[rk]; const l = mobL[rk]; return a + (want !== undefined && l !== undefined ? Math.abs(l - want) * 0.5 : want !== undefined && fought(rk) ? 0.5 : 0); }, 0) : 99;
         if (!c0Ranks.size) for (const rk of RANKS) if (mobD[rk] !== undefined) c0Ranks.add(rk);
         const cps = kills.length ? check.map((r) => r.cps[boss]).filter((c): c is Checkpoint => !!c) : [];
-        return { at, okAt, okGacha, share, kills, score, cps, mobsOk: okMobs && okLoss, ok: okAt && okFight && okGacha && okMobs && okLoss };
+        return { runs: check, at, fight, okAt, okGacha, share, kills, score, cps, mobsOk: okMobs && okLoss, ok: okAt && okFight && okGacha && okMobs && okLoss };
       };
       /** The bot plays to minute `tp` from the previous kill, the boss never tried. */
       const toMinute = (tp: number) => run(job(Array.from({ length: o.runs }, (_, i) => ({ ...from(i), stopTime: tp })), { bossWin: 2, until: tp + 900 }));
       /** The location's mobs from their fights in `toT`: HP by rank to the fight lengths, damage to the HP lost. True when
        * every rank was already within the tolerance (nothing changed). */
-      const tuneMobs = (toT: RunResult[]) => {
+      const tuneMobs = (toT: RunResult[], label = ` к ${goal.at} мин`, soften = true) => {
         let ok = true;
         const seen2: string[] = [];
         for (const rk of RANKS) {
@@ -161,8 +159,9 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
           if (!want && wantLoss === undefined) continue;
           const path = `ZONE_SCALE.${zone}.hp.${rk}`, dmgPath = `ZONE_SCALE.${zone}.dmg.${rk}`;
           // the location has this rank but the bot won no such fight before the minute: too hard for him then — softer
+          // (only when he played to the target minute: a check that killed the boss early may just have skipped them)
           if (!d) {
-            if (!seen.has(`${zone}/${rk}`)) continue;
+            if (!soften || !seen.has(`${zone}/${rk}`)) continue;
             ok = false;
             set(path, clamp(getPath(path) * 0.6, 0.05, 200));
             set(dmgPath, clamp(getPath(dmgPath) * 0.6, 0.05, 200));
@@ -178,7 +177,7 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
           // the edge: HP lost ≈ the mobs' damage × the fight's length, and the length follows the HP just set
           if (wantLoss !== undefined && loss !== undefined) set(dmgPath, clamp(getPath(dmgPath) * clamp(wantLoss / Math.max(0.01, loss * hpk), 0.25, 4) ** 0.7, 0.05, 200));
         }
-        log(`  мобы к ${(tProbe / 60).toFixed(1)} мин: ${seen2.join(' / ')}${ok ? ' — в допуске' : ''}`);
+        log(`  мобы${label}: ${seen2.join(' / ')}${ok ? ' — в допуске' : ''}`);
         return ok;
       };
       // round 0: the numbers as they are — already within the targets: the location is left alone; else they are the
@@ -189,45 +188,65 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
       let bestRound = 0;
       if (c0.ok) { rep.ok = true; rep.notes.push('уже в допуске — числа не тронуты'); }
       // the mobs first, on their own: the boss is then matched to a hero who grew among the final mobs
-      for (let k = 0, ok = c0.mobsOk; k < 4 && !rep.ok && !ok; k++) ok = tuneMobs(await toMinute(tAt));
+      let mobsMoved = false;
+      for (let k = 0, ok = c0.mobsOk; k < 4 && !rep.ok && !ok; k++) { ok = tuneMobs(await toMinute(tAt)); mobsMoved ||= !ok; }
+      // the boss: its threat (HP × damage — the hero has to outlast damage × a fight as long as the HP) sets the minute of
+      // the kill, more → later; it is searched by the kills themselves: a step by the miss until a threat that killed
+      // early and one that killed late bracket the target, then geometric bisection. The HP follows the fight length,
+      // the damage is the threat over it. (A hero matched at the target minute and a 50% win rate then killed minutes
+      // late — the bot loses some tries — and moving that minute moved both numbers by a noisy DPS: it never settled.)
+      const hpPath = `MOBS.${boss}.hp`, dmgPath = `MOBS.${boss}.dmg`;
+      const bossFixed = hpPath in fixed && dmgPath in fixed;
+      let lo: number | null = null, hi: number | null = null;
+      let last = c0;
       for (let it = 0; it < o.iters && !rep.ok; it++) {
         rep.iters = it + 1;
-        // 1. the hero at the probe minute (the mobs were set before the rounds, at the target minute: a round moves the
-        // probe minute, and the mobs matched to it would shift the hero's growth under the boss again)
-        const toT = await toMinute(tProbe);
-        // 2. the boss's HP: the hero at the probe minute takes `fight` s at his damage per second
-        const atT = toT.map((r) => r.cps.time).filter((c): c is Checkpoint => !!c);
-        if (!atT.length) { rep.notes.push('бот не дожил до целевой минуты'); break; }
-        const sim = { ...o.sim };
-        const probeAll = () => atT.map((c) => probeBoss(c, boss, sim));
-        const hp0 = getPath(`MOBS.${boss}.hp`);
-        const probes = probeAll();
-        // the fight's HP as fielded (× ZONE_TIER, + the Spring sister of the same def) scales with the def's hp
-        const dps = med(probes.map((p) => p.dps))!, total = probes[0].hp;
-        set(`MOBS.${boss}.hp`, hp0 * clamp((dps * goal.fight) / total, 0.05, 20));
-        // 3. its damage: bisection (geometric) to a 50% win rate at the probe minute (unless set by hand)
-        if (!(`MOBS.${boss}.dmg` in fixed)) {
-          let lo = getPath(`MOBS.${boss}.dmg`) / 16, hi = getPath(`MOBS.${boss}.dmg`) * 16;
-          for (let k = 0; k < 9; k++) {
-            const mid = Math.sqrt(lo * hi);
-            set(`MOBS.${boss}.dmg`, mid);
-            const rate = med(probeAll().map((p) => p.rate))!;
-            if (rate > 0.5) lo = mid; else hi = mid;
+        const hp = getPath(hpPath), dmg = getPath(dmgPath), threat = hp * dmg;
+        const far = !last.kills.length || last.at === undefined || Math.abs(last.at - tAt) > 0.3 * tAt;
+        if (it === 0 && (far || mobsMoved) && !bossFixed) {
+          // a first guess from scratch (the numbers are far off, or the mobs moved under them): the hero at the target
+          // minute takes `fight` s at his damage per second, and wins half the time
+          const atT = (await toMinute(tAt)).map((r) => r.cps.time).filter((c): c is Checkpoint => !!c);
+          if (!atT.length) { rep.notes.push('бот не дожил до целевой минуты'); break; }
+          const sim = { ...o.sim };
+          const probeAll = () => atT.map((c) => probeBoss(c, boss, sim));
+          const probes = probeAll();
+          // the fight's HP as fielded (× ZONE_TIER, + the Spring sister of the same def) scales with the def's hp
+          const dps = med(probes.map((p) => p.dps))!, total = probes[0].hp;
+          set(hpPath, hp * clamp((dps * goal.fight) / total, 0.05, 20));
+          if (!(dmgPath in fixed)) {
+            let a = dmg / 16, b = dmg * 16;
+            for (let k = 0; k < 9; k++) {
+              const mid = Math.sqrt(a * b);
+              set(dmgPath, mid);
+              if (med(probeAll().map((p) => p.rate))! > 0.5) a = mid; else b = mid;
+            }
+            set(dmgPath, Math.sqrt(a * b));
           }
-          set(`MOBS.${boss}.dmg`, Math.sqrt(lo * hi));
+        } else if (!last.mobsOk && last.okAt) {
+          // the minute is right: the mobs are matched once more, by the fights of that check (up to the kill — the hero
+          // grew among them as he will); they move the minute, so the threat's bracket starts over
+          tuneMobs(last.runs, ' по проверке', false);
+          lo = hi = null;
+        } else if (!bossFixed) {
+          // the last check brackets the threat: killed early → too weak, late (or never) → too strong
+          if (last.at !== undefined && last.at < tAt && !last.okAt) { lo = threat; if (hi !== null && hi <= lo) hi = null; }
+          if ((last.at === undefined || last.at > tAt) && !last.okAt) { hi = threat; if (lo !== null && lo >= hi) lo = null; }
+          const next = last.okAt ? threat
+            : lo !== null && hi !== null ? Math.sqrt(lo * hi)
+              : last.at === undefined ? threat * 0.5
+                : threat * clamp((tAt / last.at) ** 1.5, 0.5, 2);
+          // the fight's length follows the HP (the hero's DPS barely depends on it)
+          const hpNext = last.fight !== undefined && !(hpPath in fixed) && Math.abs(last.fight - goal.fight) > T.tol * goal.fight
+            ? hp * clamp(goal.fight / last.fight, 0.5, 2) ** 0.8 : hp;
+          if (dmgPath in fixed) set(hpPath, next / dmg);
+          else { set(hpPath, hpNext); set(dmgPath, next / getPath(hpPath)); }
         }
-        // 4. the check: the bot plays on to the kill
-        const c = await checkRound(`круг ${it + 1}`);
-        const { at, okAt, okGacha, share, kills } = c;
+        const c = await checkRound(`круг ${it + 1} (HP ${getPath(hpPath)}, урон ${getPath(dmgPath)})`);
+        last = c;
+        const { okGacha, share, kills } = c;
         if (c.score < bestScore) { bestScore = c.score; best = { sets: { ...sets }, cps: c.cps }; bestRound = it + 1; }
         if (c.ok) { rep.ok = true; break; }
-        // the boss is matched to the hero of the probe minute: killed late → match an earlier hero, early → a later one
-        // regula falsi on the probe minute: the last probe that killed early and the last that killed late bracket it
-        if (at !== undefined && !okAt) (at < tAt ? (early = [tProbe, at]) : (late = [tProbe, at]));
-        if (okAt) { /* the minute is right: keep matching the same hero */ }
-        else if (early && late) tProbe = early[0] + ((tAt - early[1]) * (late[0] - early[0])) / (late[1] - early[1] || 1);
-        else if (at !== undefined) tProbe = clamp(tProbe + (tAt - at) * 0.8, t0 + 60, tAt * 2);
-        else tProbe = Math.max(t0 + 60, tProbe - 0.25 * (tAt - t0));
         if (!okGacha && zone !== 'forest' && !CONFIG.GACHA.noTokens.includes(zone)) {
           if (Object.values(CONFIG.GACHA.token).every((v) => !v)) for (const [rk, v] of Object.entries(TOKEN_BASE)) set(`GACHA.token.${rk}`, v);
           const k = share > 0.005 ? clamp((goal.gacha / share) ** 1.5, 0.25, 4) : 4;
