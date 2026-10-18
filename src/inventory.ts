@@ -6,7 +6,7 @@ import {
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemGuard, itemLines, itemName, itemOrb, itemPassive, orbLine, slotOf, weaponBase, weaponDamage,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, fixedRarity, itemGuard, itemLines, itemName, itemOrb, itemPassive, orbLine, slotOf, weaponBase, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -466,8 +466,10 @@ export class Inventory {
     const theirs = cur ? Object.fromEntries(itemLines(cur)) : {};
     const cmp = (k: string, v: string) => {
       const o = theirs[k];
-      const nv = parseFloat(v.replace('+', ''));
-      const ov = o !== undefined ? parseFloat(String(o).replace('+', '')) : NaN;
+      // (a shield's block "−24%": its size counts, more is better)
+      const num = (x: string) => parseFloat(x.replace('+', '').replace('−', ''));
+      const nv = num(v);
+      const ov = o !== undefined ? num(String(o)) : NaN;
       const cls = Number.isNaN(nv) || Number.isNaN(ov) ? '' : nv > ov ? 'up' : nv < ov ? 'down' : '';
       return cur && o !== undefined && o !== v ? `<i>${o}</i><em>›</em><b class="${cls}">${v}</b>` : `<b>${v}</b>`;
     };
@@ -511,7 +513,7 @@ export class Inventory {
     const pa = CLASS_PASSIVE[it.def];
     if (pa) {
       const on = itemPassive(it);
-      ability += `<div class="ab-title">Пассивка: ${pa.name}</div><p>${on ? `${on.text[0].toUpperCase()}${on.text.slice(1)}. Сильнее на более высоком качестве.` : `Открывается с качества «${RARITY[CLASS_ITEM.passiveFrom].name}».`}</p>`;
+      ability += `<div class="ab-title">Пассивка: ${pa.name}</div><p>${on ? `${on.text[0].toUpperCase()}${on.text.slice(1)}.${fixedRarity(it.kind, it.def) === undefined ? ' Сильнее на более высоком качестве.' : ''}` : `Открывается с качества «${RARITY[CLASS_ITEM.passiveFrom].name}».`}</p>`;
     }
     const btn = (act: string, label: string, cls = '') => `<button class="btn ${cls}" data-act="${act}">${label}</button>`;
     let actions = '';
