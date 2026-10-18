@@ -245,7 +245,8 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
         const c = await checkRound(`круг ${it + 1} (HP ${getPath(hpPath)}, урон ${getPath(dmgPath)})`);
         last = c;
         const { okGacha, share, kills } = c;
-        if (c.score < bestScore) { bestScore = c.score; best = { sets: { ...sets }, cps: c.cps }; bestRound = it + 1; }
+        // a round within every target is taken even if its summed misses look worse (a rank it skipped counts there)
+        if (c.ok || c.score < bestScore) { bestScore = c.score; best = { sets: { ...sets }, cps: c.cps }; bestRound = it + 1; }
         if (c.ok) { rep.ok = true; break; }
         if (!okGacha && zone !== 'forest' && !CONFIG.GACHA.noTokens.includes(zone)) {
           if (Object.values(CONFIG.GACHA.token).every((v) => !v)) for (const [rk, v] of Object.entries(TOKEN_BASE)) set(`GACHA.token.${rk}`, v);

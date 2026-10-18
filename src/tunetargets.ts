@@ -40,6 +40,6 @@ export const DEFAULT_TARGETS: TuneTargets = {
     forest: fights(8, 20, 30), cemetery: fights(8, 20, 30), peaks: fights(9, 22, 32), hills: fights(9, 22, 32),
     grove: fights(10, 24, 35), swamp: fights(10, 24, 35), dunes: fights(10, 25, 36),
   },
-  // fights near the edge, the rarer the closer (assumption)
-  loss: Object.fromEntries((['forest', 'cemetery', 'peaks', 'hills', 'grove', 'swamp', 'dunes'] as ZoneId[]).map((z) => [z, fights(0.5, 0.7, 0.85)])),
+  // fights near the edge (assumption); the bot never takes a fight it expects to cost over 70% of HP
+  loss: Object.fromEntries((['forest', 'cemetery', 'peaks', 'hills', 'grove', 'swamp', 'dunes'] as ZoneId[]).map((z) => [z, fights(0.5, 0.7, 0.7)])),
 };
