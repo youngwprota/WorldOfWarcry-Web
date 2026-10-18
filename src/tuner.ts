@@ -126,19 +126,20 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
         // the location's fights up to the kill, rank by rank (ranks the bot did not fight there are not judged)
         const fl = check.flatMap((r) => r.out.fights.filter((f) => f.win && f.zone === zone && f.t > t0 && f.t <= (r.out.bossAt[boss] ?? Infinity)));
         const mobD = Object.fromEntries(RANKS.map((rk) => [rk, med(fl.filter((f) => f.rank === rk).map((f) => f.dur))])) as Record<FightRank, number | undefined>;
-        // a rank the bot fights in this location (the base runs) but not before the kill is off too: too hard for him then
+        // a rank the bot fights in this location (the base runs) but not before the kill costs a little in the score — not a
+        // miss: he may just have had the boss first (a full miss kept the forest at 16.7 min over a 10.4-min round)
         const skipped = (rk: FightRank) => seen.has(`${zone}/${rk}`);
-        const okMobs = RANKS.every((rk) => { const want = T.fights[zone]?.[rk]; const d = mobD[rk]; return !want || (d ? Math.abs(d - want) <= T.tol * want : !skipped(rk)); });
+        const okMobs = RANKS.every((rk) => { const want = T.fights[zone]?.[rk]; const d = mobD[rk]; return !want || !d || Math.abs(d - want) <= T.tol * want; });
         // HP lost per fight, a share of max HP (judged in points, like the gacha share)
         const mobL = Object.fromEntries(RANKS.map((rk) => [rk, med(fl.filter((f) => f.rank === rk).map((f) => f.taken / f.maxHp))])) as Record<FightRank, number | undefined>;
-        const okLoss = RANKS.every((rk) => { const want = T.loss?.[zone]?.[rk]; const l = mobL[rk]; return want === undefined || (l !== undefined ? Math.abs(l - want) <= T.tol : !skipped(rk)); });
+        const okLoss = RANKS.every((rk) => { const want = T.loss?.[zone]?.[rk]; const l = mobL[rk]; return want === undefined || l === undefined || Math.abs(l - want) <= T.tol; });
         log(`  ${label}: убит ${kills.length}/${check.length}, минута ${at === undefined ? '—' : (at / 60).toFixed(1)}, бой ${fight?.toFixed(0) ?? '—'} с, гача ${Math.round(share * 100)}%, мобы ${RANKS.map((rk) => mobD[rk]?.toFixed(0) ?? '—').join('/')} с, потеря HP ${RANKS.map((rk) => (mobL[rk] === undefined ? '—' : Math.round(mobL[rk]! * 100))).join('/')}%`);
         // how far off (relative misses summed; no kill is worst): the best round's numbers are kept
-        // a skipped rank (above) is not a hit: it is the worst miss
+        // a skipped rank (above): a small fixed cost
         const miss = (v: number | undefined, want: number) => (v === undefined ? 1 : Math.abs(v - want) / want);
         const score = kills.length ? miss(at, tAt) + miss(fight, goal.fight) + Math.abs(share - goal.gacha)
-          + RANKS.reduce((a, rk) => { const want = T.fights[zone]?.[rk]; return a + (want && mobD[rk] ? miss(mobD[rk], want) * 0.5 : want && skipped(rk) ? 0.5 : 0); }, 0)
-          + RANKS.reduce((a, rk) => { const want = T.loss?.[zone]?.[rk]; const l = mobL[rk]; return a + (want !== undefined && l !== undefined ? Math.abs(l - want) * 0.5 : want !== undefined && skipped(rk) ? 0.5 : 0); }, 0) : 99;
+          + RANKS.reduce((a, rk) => { const want = T.fights[zone]?.[rk]; return a + (want && mobD[rk] ? miss(mobD[rk], want) * 0.5 : want && skipped(rk) ? 0.15 : 0); }, 0)
+          + RANKS.reduce((a, rk) => { const want = T.loss?.[zone]?.[rk]; const l = mobL[rk]; return a + (want !== undefined && l !== undefined ? Math.abs(l - want) * 0.5 : want !== undefined && skipped(rk) ? 0.15 : 0); }, 0) : 99;
         const cps = kills.length ? check.map((r) => r.cps[boss]).filter((c): c is Checkpoint => !!c) : [];
         return { runs: check, at, fight, okAt, okGacha, share, kills, score, cps, mobsOk: okMobs && okLoss, ok: okAt && okFight && okGacha && okMobs && okLoss };
       };
@@ -146,6 +147,9 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
       const toMinute = (tp: number) => run(job(Array.from({ length: o.runs }, (_, i) => ({ ...from(i), stopTime: tp })), { bossWin: 2, until: tp + 900 }));
       /** The location's mobs from their fights in `toT`: HP by rank to the fight lengths, damage to the HP lost. True when
        * every rank was already within the tolerance (nothing changed). */
+      // softening a rank the bot never fought: twice at most (×0.36) — past that it is not their strength (the Peaks
+      // elites went to the 0.05 floor and still were not fought)
+      const softened = new Map<FightRank, number>();
       const tuneMobs = (toT: RunResult[], label = ` к ${goal.at} мин`, soften = true) => {
         let ok = true;
         const seen2: string[] = [];
@@ -159,7 +163,9 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
           // the location has this rank but the bot won no such fight before the minute: too hard for him then — softer
           // (only when he played to the target minute: a check that killed the boss early may just have skipped them)
           if (!d) {
-            if (!soften || !seen.has(`${zone}/${rk}`)) continue;
+            const n = softened.get(rk) ?? 0;
+            if (!soften || !seen.has(`${zone}/${rk}`) || n >= 2) continue;
+            softened.set(rk, n + 1);
             ok = false;
             set(path, clamp(getPath(path) * 0.6, 0.05, 200));
             set(dmgPath, clamp(getPath(dmgPath) * 0.6, 0.05, 200));
@@ -243,7 +249,7 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
         const c = await checkRound(`круг ${it + 1} (HP ${getPath(hpPath)}, урон ${getPath(dmgPath)})`);
         last = c;
         const { okGacha, share, kills } = c;
-        // a round within every target is taken even if its summed misses look worse (a rank it skipped counts there)
+        // a round within every target is taken even if its summed misses look worse
         if (c.ok || c.score < bestScore) { bestScore = c.score; best = { sets: { ...sets }, cps: c.cps }; bestRound = it + 1; }
         if (c.ok) { rep.ok = true; break; }
         if (!okGacha && zone !== 'forest' && !CONFIG.GACHA.noTokens.includes(zone)) {
