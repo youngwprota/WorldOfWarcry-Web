@@ -18,6 +18,9 @@ export interface TuneTargets {
   bosses: Record<string, BossTarget>;
   /** Mean fight length, s, by location and rank (a pack is one fight). */
   fights: Partial<Record<ZoneId, Partial<Record<FightRank, number>>>>;
+  /** Share of the hero's max HP lost in a won fight (0…1, median), by location and rank: how close to the edge.
+   * Missing (older JSON): the mobs' damage is not tuned. Off by at most `tol` × 100 points. */
+  loss?: Partial<Record<ZoneId, Partial<Record<FightRank, number>>>>;
 }
 
 const fights = (normal: number, elite: number, mini: number) => ({ normal, elite, mini });
@@ -37,4 +40,6 @@ export const DEFAULT_TARGETS: TuneTargets = {
     forest: fights(8, 20, 30), cemetery: fights(8, 20, 30), peaks: fights(9, 22, 32), hills: fights(9, 22, 32),
     grove: fights(10, 24, 35), swamp: fights(10, 24, 35), dunes: fights(10, 25, 36),
   },
+  // fights near the edge, the rarer the closer (assumption)
+  loss: Object.fromEntries((['forest', 'cemetery', 'peaks', 'hills', 'grove', 'swamp', 'dunes'] as ZoneId[]).map((z) => [z, fights(0.5, 0.7, 0.85)])),
 };

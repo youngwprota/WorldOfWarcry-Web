@@ -36,7 +36,7 @@ export const TUNE_KNOBS: Knob[] = [
   ...(['normal', 'elite', 'mini', 'boss'] as const).map((rk): Knob => ({ path: `GACHA.token.${rk}`, name: `шанс крутки: ${rk === 'boss' ? 'босс' : OF_RANK[rk]}`, zone: null })),
 ];
 
-export interface Metrics { at?: number; fight?: number; gacha?: number; fights: Partial<Record<FightRank, number>>; won: number }
+export interface Metrics { at?: number; fight?: number; gacha?: number; fights: Partial<Record<FightRank, number>>; loss: Partial<Record<FightRank, number>>; won: number }
 export interface ZoneReport {
   zone: ZoneId; boss: string; iters: number; ok: boolean;
   /** Before the tuning / after the whole chain (full sims from the start). */
@@ -69,8 +69,8 @@ const round = (v: number) => { const p = 10 ** Math.max(0, 2 - Math.floor(Math.l
 
 export function metricsOf(s: SimSummary, zone: ZoneId, boss: string): Metrics {
   const b = s.bosses.find((x) => x.id === boss);
-  const f = s.fightDur[zone] ?? {};
-  return { at: b?.p50 === undefined ? undefined : b.p50 / 60, fight: b?.dur, gacha: b?.gacha, fights: { normal: f.normal, elite: f.elite, mini: f.mini }, won: b?.won ?? 0 };
+  const f = s.fightDur[zone] ?? {}, l = s.fightLoss[zone] ?? {};
+  return { at: b?.p50 === undefined ? undefined : b.p50 / 60, fight: b?.dur, gacha: b?.gacha, fights: { normal: f.normal, elite: f.elite, mini: f.mini }, loss: { normal: l.normal, elite: l.elite, mini: l.mini }, won: b?.won ?? 0 };
 }
 
 export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Promise<TuneOut> {
@@ -116,6 +116,8 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
       let early: [number, number] | null = null, late: [number, number] | null = null;
       let best: { sets: Record<string, number>; cps: (Checkpoint | undefined)[] } | null = null;
       const t0 = start.length ? Math.min(...start.map((c) => c!.t)) : 0;
+      /** Ranks fought before the kill in round 0 (the numbers as they were). */
+      const c0Ranks = new Set<FightRank>();
       /** The check: the bot plays on to the kill with the numbers as they are now; how far off that is. */
       const checkRound = async (label: string) => {
         const check = await run(job(Array.from({ length: o.runs }, (_, i) => ({ ...from(i), stopAt: boss })), { until: tAt * 1.6 + 600 }));
@@ -129,13 +131,55 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
         const fl = check.flatMap((r) => r.out.fights.filter((f) => f.win && f.zone === zone && f.t > t0 && f.t <= (r.out.bossAt[boss] ?? Infinity)));
         const mobD = Object.fromEntries(RANKS.map((rk) => [rk, med(fl.filter((f) => f.rank === rk).map((f) => f.dur))])) as Record<FightRank, number | undefined>;
         const okMobs = RANKS.every((rk) => { const want = T.fights[zone]?.[rk]; const d = mobD[rk]; return !want || !d || Math.abs(d - want) <= T.tol * want; });
-        log(`  ${label}: убит ${kills.length}/${check.length}, минута ${at === undefined ? '—' : (at / 60).toFixed(1)}, бой ${fight?.toFixed(0) ?? '—'} с, гача ${Math.round(share * 100)}%, мобы ${RANKS.map((rk) => mobD[rk]?.toFixed(0) ?? '—').join('/')} с`);
+        // HP lost per fight, a share of max HP (judged in points, like the gacha share)
+        const mobL = Object.fromEntries(RANKS.map((rk) => [rk, med(fl.filter((f) => f.rank === rk).map((f) => f.taken / f.maxHp))])) as Record<FightRank, number | undefined>;
+        const okLoss = RANKS.every((rk) => { const want = T.loss?.[zone]?.[rk]; const l = mobL[rk]; return want === undefined || l === undefined || Math.abs(l - want) <= T.tol; });
+        log(`  ${label}: убит ${kills.length}/${check.length}, минута ${at === undefined ? '—' : (at / 60).toFixed(1)}, бой ${fight?.toFixed(0) ?? '—'} с, гача ${Math.round(share * 100)}%, мобы ${RANKS.map((rk) => mobD[rk]?.toFixed(0) ?? '—').join('/')} с, потеря HP ${RANKS.map((rk) => (mobL[rk] === undefined ? '—' : Math.round(mobL[rk]! * 100))).join('/')}%`);
         // how far off (relative misses summed; no kill is worst): the best round's numbers are kept
+        // a rank the bot fought here at the start but not in this round is not a hit: it is the worst miss
+        const fought = (rk: FightRank) => c0Ranks.has(rk);
         const miss = (v: number | undefined, want: number) => (v === undefined ? 1 : Math.abs(v - want) / want);
         const score = kills.length ? miss(at, tAt) + miss(fight, goal.fight) + Math.abs(share - goal.gacha)
-          + RANKS.reduce((a, rk) => { const want = T.fights[zone]?.[rk]; return a + (want && mobD[rk] ? miss(mobD[rk], want) * 0.5 : 0); }, 0) : 99;
+          + RANKS.reduce((a, rk) => { const want = T.fights[zone]?.[rk]; return a + (want && mobD[rk] ? miss(mobD[rk], want) * 0.5 : want && fought(rk) ? 0.5 : 0); }, 0)
+          + RANKS.reduce((a, rk) => { const want = T.loss?.[zone]?.[rk]; const l = mobL[rk]; return a + (want !== undefined && l !== undefined ? Math.abs(l - want) * 0.5 : want !== undefined && fought(rk) ? 0.5 : 0); }, 0) : 99;
+        if (!c0Ranks.size) for (const rk of RANKS) if (mobD[rk] !== undefined) c0Ranks.add(rk);
         const cps = kills.length ? check.map((r) => r.cps[boss]).filter((c): c is Checkpoint => !!c) : [];
-        return { at, okAt, okGacha, share, kills, score, cps, ok: okAt && okFight && okGacha && okMobs };
+        return { at, okAt, okGacha, share, kills, score, cps, mobsOk: okMobs && okLoss, ok: okAt && okFight && okGacha && okMobs && okLoss };
+      };
+      /** The bot plays to minute `tp` from the previous kill, the boss never tried. */
+      const toMinute = (tp: number) => run(job(Array.from({ length: o.runs }, (_, i) => ({ ...from(i), stopTime: tp })), { bossWin: 2, until: tp + 900 }));
+      /** The location's mobs from their fights in `toT`: HP by rank to the fight lengths, damage to the HP lost. True when
+       * every rank was already within the tolerance (nothing changed). */
+      const tuneMobs = (toT: RunResult[]) => {
+        let ok = true;
+        const seen2: string[] = [];
+        for (const rk of RANKS) {
+          const want = T.fights[zone]?.[rk], wantLoss = T.loss?.[zone]?.[rk];
+          const won = toT.flatMap((r) => r.out.fights.filter((f) => f.win && f.zone === zone && f.rank === rk && f.t > t0));
+          const d = med(won.map((f) => f.dur)), loss = med(won.map((f) => f.taken / f.maxHp));
+          seen2.push(`${d?.toFixed(0) ?? '—'} с ${loss === undefined ? '—' : Math.round(loss * 100)}%`);
+          if (!want && wantLoss === undefined) continue;
+          const path = `ZONE_SCALE.${zone}.hp.${rk}`, dmgPath = `ZONE_SCALE.${zone}.dmg.${rk}`;
+          // the location has this rank but the bot won no such fight before the minute: too hard for him then — softer
+          if (!d) {
+            if (!seen.has(`${zone}/${rk}`)) continue;
+            ok = false;
+            set(path, clamp(getPath(path) * 0.6, 0.05, 200));
+            set(dmgPath, clamp(getPath(dmgPath) * 0.6, 0.05, 200));
+            continue;
+          }
+          const inD = !want || Math.abs(d - want) <= T.tol * want;
+          const inL = wantLoss === undefined || loss === undefined || Math.abs(loss - wantLoss) <= T.tol;
+          if (inD && inL) continue;
+          ok = false;
+          // damped: the hero's growth depends on these fights too, a full step overshoots
+          const hpk = want && !inD && !(path in fixed) ? clamp(want / d, 0.2, 5) ** 0.6 : 1;
+          set(path, clamp(getPath(path) * hpk, 0.05, 200));
+          // the edge: HP lost ≈ the mobs' damage × the fight's length, and the length follows the HP just set
+          if (wantLoss !== undefined && loss !== undefined) set(dmgPath, clamp(getPath(dmgPath) * clamp(wantLoss / Math.max(0.01, loss * hpk), 0.25, 4) ** 0.7, 0.05, 200));
+        }
+        log(`  мобы к ${(tProbe / 60).toFixed(1)} мин: ${seen2.join(' / ')}${ok ? ' — в допуске' : ''}`);
+        return ok;
       };
       // round 0: the numbers as they are — already within the targets: the location is left alone; else they are the
       // first candidate, so a noisy round never ends worse than the start
@@ -144,25 +188,13 @@ export async function tune(targets: TuneTargets, run: Runner, o: TuneOpts): Prom
       best = { sets: { ...sets }, cps: c0.cps };
       let bestRound = 0;
       if (c0.ok) { rep.ok = true; rep.notes.push('уже в допуске — числа не тронуты'); }
+      // the mobs first, on their own: the boss is then matched to a hero who grew among the final mobs
+      for (let k = 0, ok = c0.mobsOk; k < 4 && !rep.ok && !ok; k++) ok = tuneMobs(await toMinute(tAt));
       for (let it = 0; it < o.iters && !rep.ok; it++) {
         rep.iters = it + 1;
-        // 1. the mobs: the location's fights up to the target minute, the boss never tried
-        const toT = await run(job(Array.from({ length: o.runs }, (_, i) => ({ ...from(i), stopTime: tProbe })), { bossWin: 2, until: tProbe + 900 }));
-        for (const rk of RANKS) {
-          const want = T.fights[zone]?.[rk];
-          const d = med(toT.flatMap((r) => r.out.fights.filter((f) => f.win && f.zone === zone && f.rank === rk && f.t > t0).map((f) => f.dur)));
-          if (!want) continue;
-          const path = `ZONE_SCALE.${zone}.hp.${rk}`;
-          // the location has this rank but the bot won no such fight before the minute: too hard for him then — softer
-          if (!d) {
-            if (!seen.has(`${zone}/${rk}`)) continue;
-            set(path, clamp(getPath(path) * 0.6, 0.05, 200));
-            set(`ZONE_SCALE.${zone}.dmg.${rk}`, clamp(getPath(`ZONE_SCALE.${zone}.dmg.${rk}`) * 0.6, 0.05, 200));
-            continue;
-          }
-          // damped: the hero's growth depends on these fights too, a full step overshoots
-          set(path, clamp(getPath(path) * clamp(want / d, 0.2, 5) ** 0.6, 0.05, 200));
-        }
+        // 1. the hero at the probe minute (the mobs were set before the rounds, at the target minute: a round moves the
+        // probe minute, and the mobs matched to it would shift the hero's growth under the boss again)
+        const toT = await toMinute(tProbe);
         // 2. the boss's HP: the hero at the probe minute takes `fight` s at his damage per second
         const atT = toT.map((r) => r.cps.time).filter((c): c is Checkpoint => !!c);
         if (!atT.length) { rep.notes.push('бот не дожил до целевой минуты'); break; }

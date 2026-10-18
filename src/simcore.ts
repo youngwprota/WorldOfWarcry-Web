@@ -1087,7 +1087,7 @@ function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string,
       const key = [...n].sort(([a], [b]) => (a < b ? -1 : 1)).map(([d, k]) => (k > 1 ? `${d}×${k}` : d)).join('+');
       const first = !out.fights.some((f) => f.def === key && f.depth === u.depth);
       const packInfo = group.length > 1 ? { def: key, pack: group.slice(1).map((m) => m.id) } : {};
-      out.fights.push({ def: key, depth: u.depth, t, first, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: st.maxHp, win: r.win, cls: h.cls, zone: u.zone, rank: topRank(group) });
+      out.fights.push({ def: key, depth: u.depth, t, first, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: stats(h).maxHp, win: r.win, cls: h.cls, zone: u.zone, rank: topRank(group) });
       out.classTime[h.cls] = (out.classTime[h.cls] ?? 0) + r.dur;
       if (!r.win) {
         event(u, t0, 'death', { taken: r.taken / st.maxHp, ...packInfo });
@@ -1300,6 +1300,8 @@ export interface SimSummary {
   runs: number; bosses: BossSum[]; pulls: Record<10 | 20 | 30, number | undefined>; deaths?: number; mobs: MobSum[];
   /** Median fight length, s, by location and top rank: won fights up to the location boss's first kill (the levelling there; a pack is one fight). */
   fightDur: Partial<Record<ZoneId, Partial<Record<MobRank | 'static', number>>>>;
+  /** Median share of max HP lost in a won fight, same keys. */
+  fightLoss: Partial<Record<ZoneId, Partial<Record<MobRank | 'static', number>>>>;
   /** Each location: median time it opened (runs that opened it). */
   zones: { zone: ZoneId; p50?: number; n: number }[];
   /** Share of all fighting time by class on the field (0…1). */
@@ -1334,9 +1336,11 @@ export function summarize(runs: RunOut[]): SimSummary {
   const cycle = { total: runs[0]?.cycle.total ?? 0, doneAt: pct(closed, 0.5), closed: closed.length };
   const zones = ZONE_IDS.map((zone) => { const at = runs.map((r) => r.openAt[zone]).filter((x): x is number => x !== undefined); return { zone, p50: pct(at, 0.5), n: at.length }; });
   const fightDur: SimSummary['fightDur'] = {};
-  const durs = new Map<string, number[]>();
+  const fightLoss: SimSummary['fightLoss'] = {};
+  const durs = new Map<string, number[]>(), losses = new Map<string, number[]>();
   const bossOf = new Map(BOSSES.map((b) => [b.boss!.zone, b.id]));
-  for (const r of runs) for (const f of r.fights) if (f.win && f.t <= (r.bossAt[bossOf.get(f.zone) ?? ''] ?? Infinity)) { const k = `${f.zone}|${f.rank}`; durs.set(k, [...(durs.get(k) ?? []), f.dur]); }
+  for (const r of runs) for (const f of r.fights) if (f.win && f.t <= (r.bossAt[bossOf.get(f.zone) ?? ''] ?? Infinity)) { const k = `${f.zone}|${f.rank}`; durs.set(k, [...(durs.get(k) ?? []), f.dur]); losses.set(k, [...(losses.get(k) ?? []), f.taken / f.maxHp]); }
   for (const [k, a] of durs) { const [z, rk] = k.split('|') as [ZoneId, MobRank | 'static']; (fightDur[z] ??= {})[rk] = pct(a, 0.5); }
-  return { runs: runs.length, bosses, zones, fightDur, pulls: { 10: pullsBy(10), 20: pullsBy(20), 30: pullsBy(30) }, deaths: pct(runs.map((r) => r.deaths), 0.5), mobs, classShare, cycle };
+  for (const [k, a] of losses) { const [z, rk] = k.split('|') as [ZoneId, MobRank | 'static']; (fightLoss[z] ??= {})[rk] = pct(a, 0.5); }
+  return { runs: runs.length, bosses, zones, fightDur, fightLoss, pulls: { 10: pullsBy(10), 20: pullsBy(20), 30: pullsBy(30) }, deaths: pct(runs.map((r) => r.deaths), 0.5), mobs, classShare, cycle };
 }
