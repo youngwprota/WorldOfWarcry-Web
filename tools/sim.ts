@@ -22,6 +22,7 @@ async function main() {
     runs: +arg('runs', String(D.runs)),
     until: +arg('until', String(D.until / 60)) * 60,
     dodge: +arg('dodge', String(D.dodge)),
+    aggro: !flag('no-aggro'),
     uptime: +arg('uptime', String(D.uptime)),
     combo: +arg('combo', String(D.combo)),
     bossWin: +arg('boss-win', String(D.bossWin)),
@@ -114,6 +115,10 @@ async function main() {
     for (const [z, goal] of Object.entries(T.fights)) {
       const f = sum.fightDur[z as keyof typeof sum.fightDur] ?? {};
       say(`${zoneName(z).padEnd(19)} ${(Object.entries(goal) as [FightRank, number][]).map(([rk, s]) => `${rk} ${f[rk]?.toFixed(0) ?? '—'} / ${s}${off(f[rk], s)}`).join('   ')}`);
+      // HP lost per fight, % of max: off by more than tol × 100 points
+      const l = sum.fightLoss[z as keyof typeof sum.fightLoss] ?? {};
+      const lg = T.loss?.[z as keyof typeof sum.fightLoss] ?? {};
+      if (Object.keys(lg).length) say(`${''.padEnd(19)} −HP% ${(Object.entries(lg) as [FightRank, number][]).map(([rk, w]) => `${rk} ${l[rk] === undefined ? '—' : Math.round(l[rk]! * 100)} / ${Math.round(w * 100)}${l[rk] === undefined || Math.abs(l[rk]! - w) > T.tol ? '!' : ' '}`).join('   ')}`);
     }
   }
   say(`Локации открыты (медиана, прогонов): ${sum.zones.filter((z) => z.n).map((z) => `${zoneName(z.zone)} ${mmss(z.p50).trim()} (${z.n}/${sum.runs})`).join(', ')}`);

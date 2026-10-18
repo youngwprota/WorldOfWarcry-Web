@@ -11,7 +11,7 @@ export type Job =
   | { kind: 'sim'; opts: Partial<SimOpts>; sets: [string, unknown][] }
   | { kind: 'bench'; sets: [string, unknown][] }
   | ({ kind: 'run' } & TuneJob)
-  | { kind: 'tune'; targets: TuneTargets; sim: Partial<SimOpts>; runs: number; iters: number; zones?: ZoneId[]; threads: number; sets: [string, unknown][] };
+  | { kind: 'tune'; targets: TuneTargets; sim: Partial<SimOpts>; runs: number; iters: number; zones?: ZoneId[]; fixed?: Record<string, number>; threads: number; sets: [string, unknown][] };
 export type JobMsg =
   | { kind: 'progress'; done: number; total: number }
   | { kind: 'log'; line: string }
@@ -66,7 +66,7 @@ self.onmessage = async (e: MessageEvent<Job>) => {
       const base = job.sets;
       const run = runner(job.threads);
       const out = await tune(job.targets, (j) => run({ ...j, sets: [...base, ...j.sets] }), {
-        sim: job.sim, runs: job.runs, iters: job.iters, zones: job.zones, log: (line) => post({ kind: 'log', line }),
+        sim: job.sim, runs: job.runs, iters: job.iters, zones: job.zones, fixed: job.fixed, log: (line) => post({ kind: 'log', line }),
       });
       post({ kind: 'tune', out, ms: performance.now() - t0 });
       return;

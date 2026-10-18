@@ -3,7 +3,7 @@
 // in a worker) both run it.
 import * as CONFIG from './config';
 import {
-  ATTACK_HIT, BREAKABLES, CEMETERY_BOARS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
+  ATTACK_HIT, BREAKABLES, CEMETERY_BOARS, FACTIONS, FOREST_TREES, GLOVES_BANDITS, GUARD_PACKS, HERO, LEASH, MID_SPAWNERS, MINI_SPAWNER, MINI_SPAWNER_OF, MOBS, ORBS,
   CEMETERY_AREAS, CEMETERY_PACKS, DUNES_SPAWNERS, GROVE_SPAWNERS, HILLS_BANNERS, HILLS_EXTRA, HILLS_LIONS, HILLS_PACKS, HILLS_SNAGS, LAND_ELITES, MINI_PAIR_OF, PEAKS_SPAWNERS,
   SPAWN_PRESETS, SWAMP_SPAWNERS, PETS, PROP_SPAWNERS, RESIST_MULT, SPAWNERS, STAVES, WEAPONS, ZONE_FOES, ZONE_TIER, depthMul, zoneScaleOf, mobImpact, packUnits, mobRank, zoneResist,
   tokenChance as zoneTokenChance,
@@ -34,10 +34,11 @@ export interface SimOpts {
   seed: number;
   keep: boolean; // never change weapons
   probes: number; // dice fights behind each win-rate estimate (boss tries, minute snapshots)
+  aggro: boolean; // hostile mobs near a fight's spot or the way to it join the fight (Game: idle mobs rush the hero within `aggro`)
 }
 const ZONE_IDS = CONFIG.ZONES.map((z) => z.id);
 export const DEFAULT_OPTS: SimOpts = {
-  faction: 'human', cls: 'party', weapon: '', off: '', runs: 10, until: 90 * 60, dodge: 0.6, uptime: 0.8, combo: 0.85, bossWin: 0.5, seed: 1, keep: false, probes: 12,
+  faction: 'human', cls: 'party', weapon: '', off: '', runs: 10, until: 90 * 60, dodge: 0.6, uptime: 0.8, combo: 0.85, bossWin: 0.5, seed: 1, keep: false, probes: 12, aggro: true,
 };
 let OPT: SimOpts = { ...DEFAULT_OPTS };
 
@@ -244,7 +245,19 @@ interface Unit {
   pack?: string;
   /** World picks the spot at random: the sim's is the same kind of spot, not the same one. */
   approx?: boolean;
+  /** A spawn slot's disposition is not hostile (a sparring camp, an ambush): it never rushes the hero by itself. */
+  calm?: boolean;
 }
+/**
+ * Aggro (Game.updateMobs): an idle hostile mob rushes the hero within its MobDef.aggro; it wanders up to 2.5 m round its
+ * spot, and the hero stands a pace off his target — on average a mob joins when its spot is within aggro + this of the
+ * target's. On the way the hero sees them standing and gives them a berth: only those whose aggro reaches 1.5 m past
+ * the line of his way join (the Peaks gate guards stand 4–6 m off the forest trail with aggro 5.2 — skirted). Those he
+ * cannot skirt chase him, but only as far as LEASH from home: he outruns them (5 m/s, mobs ~3.4) unless his target
+ * stands within it — the Ataman guards flank the only way to the cemetery and fought every passer-by (133% HP).
+ */
+const AGGRO_AT_SPOT = 2;
+const AGGRO_ON_WAY = -1.5;
 /**
  * The outer locations (World.buildOuterLands and its *Mobs): what stands there and in which packs, from the config
  * lists. Hand-picked spots are exact; World's random spreads are random walkable spots of the location here, its road
@@ -253,13 +266,13 @@ interface Unit {
 function buildLands(us: Unit[], packs: [number, number][]) {
   const r = layoutRng(61);
   type P = { x: number; z: number };
-  const one = (id: string, d: SpawnerDef, p: P, zone: ZoneId, pack?: string, approx = false) => us.push({
-    id, kind: d.unit, def: d.id, zone, spot: landSpot(p.x, p.z, zone), depth: 0, n: 0, respawnAt: 0, pack, approx: approx || undefined,
+  const one = (id: string, d: SpawnerDef, p: P, zone: ZoneId, pack?: string, approx = false, calm = false) => us.push({
+    id, kind: d.unit, def: d.id, zone, spot: landSpot(p.x, p.z, zone), depth: 0, n: 0, respawnAt: 0, pack, approx: approx || undefined, calm: calm || undefined,
     charges: d.charges ?? [d.unit === 'mob' ? MOBS[d.id].respawn : BREAKABLES[d.id].respawn],
   });
   const group = (id: string, p: CONFIG.PackDef, c: P, zone: ZoneId, approx = false) =>
     ringSpots(c.x, c.z, p.slots.length, 1.8).forEach((q, i) =>
-      one(`${id}:${i}`, { unit: 'mob', id: p.slots[i].id, charges: p.charges }, q, zone, p.link === 'social' ? id : undefined, approx));
+      one(`${id}:${i}`, { unit: 'mob', id: p.slots[i].id, charges: p.charges }, q, zone, p.link === 'social' ? id : undefined, approx, !!p.slots[i].behavior?.disposition && p.slots[i].behavior?.disposition !== 'hostile'));
   const pin = (x: number, z: number) => { packs.push([x, z]); return { x, z }; };
   const rnd = (zone: ZoneId) => emptyIn(zone, r, packs);
   /** `n` spots along road `k` of LAND_TRAILS, alternating sides `off` m off it, inside `zone` (else a random spot). */
@@ -479,12 +492,13 @@ function foeOf(u: Unit): Foe {
 
 /**
  * One fight against a foe or a social pack (all of them strike, the hero downs them one by one: plain mobs first,
- * the weakest first, a boss last). `mean`: no dice (rolls at their expected value, slams hit for their expected share)
+ * the weakest first, a boss last; a tree whose chop pulled mobs waits for them — chopped on first, a warlord at his back
+ * killed him 7 times of 8). `mean`: no dice (rolls at their expected value, slams hit for their expected share)
  * — the bot's quick estimate. Weapon mechanics hit the current target only: crowd effects are left out.
  */
 function fight(h: Hero, foes: Foe | Foe[], mean = false, limit = 400): FightOut {
   const st = stats(h);
-  const list = (Array.isArray(foes) ? [...foes] : [foes]).sort((a, b) => (a.def.boss ? 1 : 0) - (b.def.boss ? 1 : 0) || a.hp - b.hp);
+  const list = (Array.isArray(foes) ? [...foes] : [foes]).sort((a, b) => (a.def.boss ? 1 : 0) - (b.def.boss ? 1 : 0) || (a.def.static ? 1 : 0) - (b.def.static ? 1 : 0) || a.hp - b.hp);
   const bossFoe = list.find((f) => f.def.boss);
   const boss = bossFoe?.def.boss;
   const roll = () => (mean ? 1 : 0.9 + rand() * 0.2);
@@ -690,10 +704,9 @@ function lootItem(h: Hero, it: Item) {
 }
 const RANKS: MobRank[] = ['normal', 'elite', 'mini', 'boss'];
 /** The top rank of a fight's units; all static (trees, snags): 'static'. */
-const topRank = (g: Unit[]): MobRank | 'static' => {
-  const live = g.filter((u) => !MOBS[u.def].static);
-  return live.length ? RANKS[Math.max(...live.map((u) => RANKS.indexOf(mobRank(MOBS[u.def]))))] : 'static';
-};
+// a tree chopped with mobs that joined is still a chop (its length is the tree's HP): not a fight of their rank
+const topRank = (g: Unit[]): MobRank | 'static' =>
+  g.some((u) => MOBS[u.def].static) ? 'static' : RANKS[Math.max(...g.map((u) => RANKS.indexOf(mobRank(MOBS[u.def]))))];
 const dpsCache = new Map<string, number>();
 /**
  * Each class: the best weapon + class item it may use (party.ts classSlot) for each location, by DPS against the
@@ -761,7 +774,7 @@ export interface Snap {
 }
 export interface FightRec {
   def: string; depth: number; t: number; first: boolean; dur: number; swings: number; taken: number; maxHp: number; win: boolean; cls: HeroClass;
-  /** Where, and the top rank in the fight ('static': a tree or a snag, never strikes back). */
+  /** Where, and the top rank in the fight ('static': a tree or a snag was chopped, whoever joined). */
   zone: ZoneId; rank: MobRank | 'static';
 }
 /** What the bot did, for the map replay: a fight, a break, or a rest in the camp. */
@@ -876,6 +889,60 @@ function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string,
   /** What a pull of `u` fights: its pack (those standing), else it alone. */
   const groupOf = (u: Unit) => (u.pack ? packOf.get(u.pack)!.filter((x) => x.respawnAt <= t) : [u]);
   const foesOf = (g: Unit[]) => [...g.map(foeOf), ...g.flatMap(partnersOf)];
+  // aggro: hostile mobs by grid cell (their spots never move), who stands by each unit's spot (cached)
+  const CELL = 12;
+  const rushes = (x: Unit) => x.kind === 'mob' && !x.calm && !x.temp && !MOBS[x.def].static && !MOBS[x.def].boss && (MOBS[x.def].behavior?.disposition ?? 'hostile') === 'hostile';
+  const posU = new Map<Unit, { x: number; z: number }>();
+  const grid = new Map<string, Unit[]>();
+  const cellKey = (x: number, z: number) => `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`;
+  if (OPT.aggro) for (const x of units) if (rushes(x)) {
+    const p = posOf(x.spot);
+    posU.set(x, p);
+    const k = cellKey(p.x, p.z);
+    grid.set(k, [...(grid.get(k) ?? []), x]);
+  }
+  /** Hostile mobs whose aggro (+ `r`) reaches (x, z), into `out`. */
+  const rushAt = (x: number, z: number, r: number, out: Set<Unit>) => {
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const u of grid.get(`${cx + i},${cz + j}`) ?? []) {
+      const p = posU.get(u)!;
+      if (Math.hypot(p.x - x, p.z - z) < MOBS[u.def].aggro + r) out.add(u);
+    }
+  };
+  const nearSpot = new Map<Unit, Unit[]>();
+  const nearOf = (u: Unit) => {
+    let n = nearSpot.get(u);
+    if (!n) { const set = new Set<Unit>(); const p = posOf(u.spot); rushAt(p.x, p.z, AGGRO_AT_SPOT, set); set.delete(u); n = [...set]; nearSpot.set(u, n); }
+    return n;
+  };
+  /** `extra` standing now, with their own social packs, that are not in `g` yet: appended to it. */
+  const join = (g: Unit[], extra: Iterable<Unit>) => {
+    const has = new Set(g);
+    const out = [...g];
+    for (const x of extra) {
+      if (has.has(x) || x.respawnAt > t || !open.has(x.zone)) continue;
+      for (const y of groupOf(x)) if (!has.has(y)) { has.add(y); out.push(y); }
+    }
+    return out;
+  };
+  /** A fight with `g` where it stands: those by its spots join (the bot sees them standing there). */
+  const atSpot = (g: Unit[]) => (OPT.aggro && !isBoss(g) ? join(g, g.flatMap(nearOf)) : g);
+  /** …and those the way from `from` passes that follow him to the target (no warning: the bot did not weigh them). */
+  const onWay = (g: Unit[], from: Spot) => {
+    if (!OPT.aggro || isBoss(g)) return g;
+    const set = new Set<Unit>();
+    const pts = route(from, g[0].spot);
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 2));
+      for (let k = 0; k <= n; k++) rushAt(a.x + ((b.x - a.x) * k) / n, a.z + ((b.z - a.z) * k) / n, AGGRO_ON_WAY, set);
+    }
+    const to = posOf(g[0].spot);
+    for (const x of set) { const p = posU.get(x)!; if (Math.hypot(p.x - to.x, p.z - to.z) >= LEASH) set.delete(x); }
+    return join(g, set);
+  };
+  // the way to a target that pulled others is remembered: the bot weighs them in from then on (a player learns an ambush)
+  const ambush = new Map<Unit, Unit[]>();
+  const weighed = (u: Unit, g: Unit[]) => { const a = ambush.get(u); return a ? join(atSpot(g), a) : atSpot(g); };
   const isBoss = (g: Unit[]) => g.some((x) => !!MOBS[x.def].boss);
   const bossRate = (c: HeroClass, g: Unit[]) => { let w = 0; for (let i = 0; i < OPT.probes; i++) if (fight(full(c, g[0].zone), foesOf(g)).win) w++; return w / OPT.probes; };
   /** The bot's estimate of the fight, by the best class for it: a boss by win rate, a mob by a safe and quick win. */
@@ -1030,8 +1097,9 @@ function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string,
       for (const u of units) {
         if (u.respawnAt > t || !open.has(u.zone)) continue;
         let dur = 0, e: Est | null = null;
-        const g = groupOf(u);
-        if (g[0] !== u) continue; // a pack is weighed once, by its first member standing
+        const g0 = groupOf(u);
+        if (g0[0] !== u) continue; // a pack is weighed once, by its first member standing
+        const g = u.kind === 'mob' ? weighed(u, g0) : g0;
         if (u.kind === 'mob') {
           e = estimate(g);
           if (isBoss(g) ? (e.rate ?? 0) < bossMin : !e.win || e.taken > 0.7 * st.maxHp) continue;
@@ -1062,7 +1130,9 @@ function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string,
       continue;
     }
     const u = best;
-    const group = u.kind === 'mob' ? groupOf(u) : [u];
+    const seen = u.kind === 'mob' ? weighed(u, groupOf(u)) : [u];
+    const group = u.kind === 'mob' ? onWay(seen, h.spot) : seen;
+    if (group.length > seen.length) ambush.set(u, [...(ambush.get(u) ?? []), ...group.slice(seen.length)]);
     // a player sends the class that does best and swaps to the weapons the location is weak to
     wear(h, bestEst?.cls ?? h.cls, u.zone);
     h.hp = Math.min(h.hp, stats(h).maxHp);
@@ -1089,7 +1159,7 @@ function run(seed: number, ctl: RunCtl = {}): { out: RunOut; cps: Record<string,
       const key = [...n].sort(([a], [b]) => (a < b ? -1 : 1)).map(([d, k]) => (k > 1 ? `${d}×${k}` : d)).join('+');
       const first = !out.fights.some((f) => f.def === key && f.depth === u.depth);
       const packInfo = group.length > 1 ? { def: key, pack: group.slice(1).map((m) => m.id) } : {};
-      out.fights.push({ def: key, depth: u.depth, t, first, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: st.maxHp, win: r.win, cls: h.cls, zone: u.zone, rank: topRank(group) });
+      out.fights.push({ def: key, depth: u.depth, t, first, dur: r.dur, swings: r.swings, taken: r.taken, maxHp: stats(h).maxHp, win: r.win, cls: h.cls, zone: u.zone, rank: topRank(group) });
       out.classTime[h.cls] = (out.classTime[h.cls] ?? 0) + r.dur;
       if (!r.win) {
         event(u, t0, 'death', { taken: r.taken / st.maxHp, ...packInfo });
@@ -1302,6 +1372,8 @@ export interface SimSummary {
   runs: number; bosses: BossSum[]; pulls: Record<10 | 20 | 30, number | undefined>; deaths?: number; mobs: MobSum[];
   /** Median fight length, s, by location and top rank: won fights up to the location boss's first kill (the levelling there; a pack is one fight). */
   fightDur: Partial<Record<ZoneId, Partial<Record<MobRank | 'static', number>>>>;
+  /** Median share of max HP lost in a won fight, same keys. */
+  fightLoss: Partial<Record<ZoneId, Partial<Record<MobRank | 'static', number>>>>;
   /** Each location: median time it opened (runs that opened it). */
   zones: { zone: ZoneId; p50?: number; n: number }[];
   /** Share of all fighting time by class on the field (0…1). */
@@ -1336,9 +1408,11 @@ export function summarize(runs: RunOut[]): SimSummary {
   const cycle = { total: runs[0]?.cycle.total ?? 0, doneAt: pct(closed, 0.5), closed: closed.length };
   const zones = ZONE_IDS.map((zone) => { const at = runs.map((r) => r.openAt[zone]).filter((x): x is number => x !== undefined); return { zone, p50: pct(at, 0.5), n: at.length }; });
   const fightDur: SimSummary['fightDur'] = {};
-  const durs = new Map<string, number[]>();
+  const fightLoss: SimSummary['fightLoss'] = {};
+  const durs = new Map<string, number[]>(), losses = new Map<string, number[]>();
   const bossOf = new Map(BOSSES.map((b) => [b.boss!.zone, b.id]));
-  for (const r of runs) for (const f of r.fights) if (f.win && f.t <= (r.bossAt[bossOf.get(f.zone) ?? ''] ?? Infinity)) { const k = `${f.zone}|${f.rank}`; durs.set(k, [...(durs.get(k) ?? []), f.dur]); }
+  for (const r of runs) for (const f of r.fights) if (f.win && f.t <= (r.bossAt[bossOf.get(f.zone) ?? ''] ?? Infinity)) { const k = `${f.zone}|${f.rank}`; durs.set(k, [...(durs.get(k) ?? []), f.dur]); losses.set(k, [...(losses.get(k) ?? []), f.taken / f.maxHp]); }
   for (const [k, a] of durs) { const [z, rk] = k.split('|') as [ZoneId, MobRank | 'static']; (fightDur[z] ??= {})[rk] = pct(a, 0.5); }
-  return { runs: runs.length, bosses, zones, fightDur, pulls: { 10: pullsBy(10), 20: pullsBy(20), 30: pullsBy(30) }, deaths: pct(runs.map((r) => r.deaths), 0.5), mobs, classShare, cycle };
+  for (const [k, a] of losses) { const [z, rk] = k.split('|') as [ZoneId, MobRank | 'static']; (fightLoss[z] ??= {})[rk] = pct(a, 0.5); }
+  return { runs: runs.length, bosses, zones, fightDur, fightLoss, pulls: { 10: pullsBy(10), 20: pullsBy(20), 30: pullsBy(30) }, deaths: pct(runs.map((r) => r.deaths), 0.5), mobs, classShare, cycle };
 }

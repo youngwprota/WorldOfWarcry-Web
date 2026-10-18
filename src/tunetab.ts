@@ -1,9 +1,9 @@
 // balance.html → «Цели»: the tuner's targets (src/tunetargets.ts, kept in localStorage, JSON in/out), a tuning run in a
 // worker (the whole src/tuner.ts there, its runs in nested workers), the table «цель / было / стало», charts and the
 // picked numbers: as the page's what-if edits, or written into src/config.ts by the dev server (vite.config.ts).
-import { MOBS, ZONES, type ZoneId } from './config';
+import { MOBS, TUNE_MANUAL, ZONES, type ZoneId } from './config';
 import { DEFAULT_OPTS, type SimOpts } from './simcore';
-import { CHAIN, type Metrics, type TuneOut } from './tuner';
+import { CHAIN, getPath, TUNE_KNOBS, type Metrics, type TuneOut } from './tuner';
 import { DEFAULT_TARGETS, type FightRank, type TuneTargets } from './tunetargets';
 import type { Job, JobMsg } from './balanceworker';
 
@@ -19,7 +19,7 @@ export interface TuneCtx {
   opts: () => SimOpts;
 }
 
-const KEY = { targets: 'warcry-balance-targets', tune: 'warcry-balance-tune' };
+const KEY = { targets: 'warcry-balance-targets', tune: 'warcry-balance-tune', locks: 'warcry-balance-locks' };
 const store = {
   get<T>(k: string, d: T): T { try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : d; } catch { return d; } },
   set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } },
@@ -36,20 +36,34 @@ const HINT = {
   normal: 'Средняя длина боя с обычным мобом этой локации (пачка — один бой), с: отсюда HP мобов',
   elite: 'Средняя длина боя с элиткой этой локации, с',
   mini: 'Средняя длина боя с мини-боссом этой локации, с',
+  loss: 'Сколько HP (% от максимума) герой теряет за победный бой с этим рангом: 90 — на грани, 30 — легко. Отсюда урон мобов. Пусто — урон не подбирается',
   pick: 'Подбирать числа этой локации. Снято — её числа не меняются, но бот всё равно проходит её по цепочке',
 } as const;
 const th = (label: string, hint: string, cls = '') => `<th class="${cls}" title="${hint}"><span class="hint">${label}</span></th>`;
 const rankTh = (r: FightRank) => th(`${RANK_NAME[r]}, с`, HINT[r]);
+const lossTh = (r: FightRank) => th(`${RANK_NAME[r]}, −HP%`, `${RANK_NAME[r]}: ${HINT.loss}`);
 const zoneName = (id: string) => ZONES.find((z) => z.id === id)?.name ?? id;
 const $ = <T extends HTMLElement>(sel: string, root: ParentNode) => root.querySelector(sel) as T;
 
 let targets: TuneTargets = store.get(KEY.targets, structuredClone(DEFAULT_TARGETS));
+// targets saved before the HP-loss goal: take its defaults
+targets.loss ??= structuredClone(DEFAULT_TARGETS.loss);
 let run = store.get(KEY.tune, { runs: 8, iters: 6, zones: CHAIN.map((c) => c.zone) as ZoneId[] });
+/** Hand-set knobs (path → number): the tuner keeps them. Default: TUNE_MANUAL of config.ts with its numbers. */
+const configLocks = () => Object.fromEntries(TUNE_MANUAL.map((p) => [p, getPath(p)])) as Record<string, number>;
+let locks: Record<string, number> = Object.fromEntries(Object.entries(store.get(KEY.locks, configLocks())).filter(([p]) => TUNE_KNOBS.some((k) => k.path === p)));
+let knobsOpen = false;
 let result: { out: TuneOut; ms: number } | null = null;
 let log: string[] = [];
 let busy = false;
 
 const saveTargets = () => store.set(KEY.targets, targets);
+const saveLocks = () => store.set(KEY.locks, locks);
+/** POST to the dev server: the picked numbers and the whole list of hand-set knobs into the `<tuned>` block. */
+async function writeConfig(sets: Record<string, number>, manual: Record<string, number>) {
+  const r = await fetch('/__tune-write', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sets, manual }) });
+  if (!r.ok) throw new Error(await r.text());
+}
 
 export function renderTune(root: HTMLElement, c: TuneCtx) {
   const { esc } = c;
@@ -58,16 +72,33 @@ export function renderTune(root: HTMLElement, c: TuneCtx) {
     <div class="panel">
       <p class="muted" style="margin:0 0 10px">Цели баланса: когда (минута от начала) и за сколько секунд падает каждый босс, какая доля мощи героя
         от гача-предметов в этот момент, сколько длятся бои с мобами по локациям. «Подобрать» гоняет бота по цепочке локаций и подбирает
-        HP и урон мобов и боссов (ZONE_SCALE, MOBS) и шанс круток (GACHA.token), начиная с правок вкладки «Конфиг».</p>
+        HP и урон мобов и боссов (ZONE_SCALE, MOBS) и шанс круток (GACHA.token), начиная с правок вкладки «Конфиг». «−HP%» — насколько
+        бой на грани: сколько HP герой теряет за бой; минута босса при этом держится своей целью.</p>
       <div class="scroll" style="max-height:none">
-        <table><tr>${th('босс', HINT.boss, 'l')}${th('локация', HINT.zone, 'l')}${th('минута', HINT.at)}${th('бой, с', HINT.fight)}${th('гача, %', HINT.gacha)}${RANKS.map(rankTh).join('')}${th('подбирать', HINT.pick)}</tr>
-        ${CHAIN.map(({ zone, boss }) => { const b = targets.bosses[boss]; const f = targets.fights[zone] ?? {}; return `<tr>
+        <table><tr>${th('босс', HINT.boss, 'l')}${th('локация', HINT.zone, 'l')}${th('минута', HINT.at)}${th('бой, с', HINT.fight)}${th('гача, %', HINT.gacha)}${RANKS.map(rankTh).join('')}${RANKS.map(lossTh).join('')}${th('подбирать', HINT.pick)}</tr>
+        ${CHAIN.map(({ zone, boss }) => { const b = targets.bosses[boss]; const f = targets.fights[zone] ?? {}; const l = targets.loss?.[zone] ?? {}; return `<tr>
           <td class="l">${esc(MOBS[boss].name)}</td><td class="l">${esc(zoneName(zone))}</td>
           <td>${num(`bosses.${boss}.at`, b?.at, 1)}</td><td>${num(`bosses.${boss}.fight`, b?.fight, 5)}</td><td>${num(`bosses.${boss}.gacha%`, b ? Math.round(b.gacha * 100) : undefined, 1)}</td>
           ${RANKS.map((r) => `<td>${num(`fights.${zone}.${r}`, f[r], 1)}</td>`).join('')}
+          ${RANKS.map((r) => `<td>${num(`loss.${zone}.${r}`, l[r] === undefined ? undefined : Math.round(l[r]! * 100), 5)}</td>`).join('')}
           <td><input type="checkbox" data-z="${zone}" ${run.zones.includes(zone) ? 'checked' : ''}></td></tr>`; }).join('')}
         </table>
       </div>
+      <details id="knobs" ${knobsOpen ? 'open' : ''}><summary>Статы подбора (вручную: <span id="nlocks">${Object.keys(locks).length}</span>)</summary>
+        <p class="muted" style="margin:0 0 6px">Галка «авто» — число подбирается. Снята — подбор его не трогает, стоит число из поля. В config.ts ручные помечены TUNE_MANUAL.</p>
+        <div class="scroll" style="max-height:none"><table>
+        ${[...CHAIN.map((x) => x.zone), null].map((z) => `<tr><th class="l" colspan="3" style="color:var(--fg)">${esc(z ? zoneName(z) : 'Общие')}</th></tr>
+          ${TUNE_KNOBS.filter((k) => k.zone === z).map((k) => { const hand = k.path in locks; return `<tr>
+            <td class="l" title="${esc(k.path)}">${esc(k.name)}</td>
+            <td><label><input type="checkbox" data-k="${esc(k.path)}" ${hand ? '' : 'checked'}> авто</label></td>
+            <td><span class="muted" ${hand ? 'hidden' : ''}>${getPath(k.path)}</span><input type="number" data-kv="${esc(k.path)}" step="any" value="${hand ? locks[k.path] : getPath(k.path)}" style="width:90px" ${hand ? '' : 'hidden'}></td></tr>`; }).join('')}`).join('')}
+        </table></div>
+        <div class="row" style="margin-top:6px">
+          <button class="btn" id="kreset" title="Ручные — как помечены в config.ts (TUNE_MANUAL), с его числами">Как в конфиге</button>
+          ${import.meta.env.DEV ? '<button class="btn" id="kwrite" title="Записать ручные числа и метки в блок // <tuned> src/config.ts без подбора (только npm run dev)">Записать ручные в config.ts</button>' : ''}
+          <span class="muted" id="kstatus"></span>
+        </div>
+      </details>
       <div class="form" style="margin-top:12px">
         <label class="f" title="Допустимый промах: 0.1 = ±10% (доля гачи — ±10 пунктов)">Допуск<input type="number" id="tol" step="0.01" value="${targets.tol}"></label>
         <label class="f" title="Сколько прогонов бота (разные seed) на каждую проверку: больше — точнее, но дольше">Прогонов<input type="number" id="runs" step="1" value="${run.runs}"></label>
@@ -93,8 +124,9 @@ export function renderTune(root: HTMLElement, c: TuneCtx) {
       const b = (targets.bosses[id] ??= { at: 0, fight: 0, gacha: 0 });
       if (v !== undefined) (key === 'gacha%' ? (b.gacha = v / 100) : (b[key as 'at' | 'fight'] = v));
     } else {
-      const f = (targets.fights[id as ZoneId] ??= {});
-      if (v === undefined) delete f[key as FightRank]; else f[key as FightRank] = v;
+      // fights: seconds; loss: % in the field, a share in the targets
+      const f = group === 'loss' ? ((targets.loss ??= {})[id as ZoneId] ??= {}) : (targets.fights[id as ZoneId] ??= {});
+      if (v === undefined) delete f[key as FightRank]; else f[key as FightRank] = group === 'loss' ? v / 100 : v;
     }
     saveTargets();
     $<HTMLTextAreaElement>('#json', root).value = JSON.stringify(targets, null, 2);
@@ -104,6 +136,24 @@ export function renderTune(root: HTMLElement, c: TuneCtx) {
     run.zones = el.checked ? [...new Set([...run.zones, z])] : run.zones.filter((x) => x !== z);
     store.set(KEY.tune, run);
   }));
+  $('#knobs', root).addEventListener('toggle', (e) => { knobsOpen = (e.target as HTMLDetailsElement).open; });
+  root.querySelectorAll<HTMLInputElement>('[data-k]').forEach((el) => el.addEventListener('change', () => {
+    const p = el.dataset.k!;
+    const td = el.closest('tr')!.lastElementChild!;
+    const span = td.querySelector('span')!, inp = td.querySelector('input')!;
+    if (el.checked) delete locks[p]; else locks[p] = +inp.value;
+    span.hidden = !el.checked; inp.hidden = el.checked;
+    $('#nlocks', root).textContent = String(Object.keys(locks).length);
+    saveLocks();
+  }));
+  root.querySelectorAll<HTMLInputElement>('[data-kv]').forEach((el) => el.addEventListener('change', () => {
+    if (el.value !== '' && Number.isFinite(+el.value)) { locks[el.dataset.kv!] = +el.value; saveLocks(); }
+  }));
+  $('#kreset', root).addEventListener('click', () => { locks = configLocks(); saveLocks(); renderTune(root, c); });
+  $('#kwrite', root)?.addEventListener('click', async () => {
+    const st = $('#kstatus', root);
+    try { await writeConfig({}, locks); st.textContent = 'записано — страница перезагрузится'; } catch (err) { st.textContent = `ошибка: ${(err as Error).message}`; }
+  });
   $('#tol', root).addEventListener('change', (e) => { targets.tol = +(e.target as HTMLInputElement).value; saveTargets(); });
   $('#runs', root).addEventListener('change', (e) => { run.runs = Math.max(1, +(e.target as HTMLInputElement).value); store.set(KEY.tune, run); });
   $('#iters', root).addEventListener('change', (e) => { run.iters = Math.max(1, +(e.target as HTMLInputElement).value); store.set(KEY.tune, run); });
@@ -129,7 +179,7 @@ async function start(root: HTMLElement, c: TuneCtx) {
   ($('#log', root).parentElement as HTMLDetailsElement).open = true;
   const o = c.opts();
   const job: Job = {
-    kind: 'tune', targets, runs: run.runs, iters: run.iters, zones: run.zones, sets: c.sets(),
+    kind: 'tune', targets, runs: run.runs, iters: run.iters, zones: run.zones, sets: c.sets(), fixed: { ...locks },
     sim: { faction: o.faction, cls: o.cls, weapon: o.weapon, off: o.off, dodge: o.dodge, uptime: o.uptime, combo: o.combo, seed: o.seed ?? DEFAULT_OPTS.seed },
     threads: Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 8)),
   };
@@ -150,7 +200,7 @@ async function start(root: HTMLElement, c: TuneCtx) {
 
 function renderOut(out: HTMLElement, c: TuneCtx) {
   const { esc } = c;
-  const { reports, sets, was } = result!.out;
+  const { reports, sets, was, fixed } = result!.out;
   const tol = targets.tol;
   /** A number against its goal: green within the tolerance, red outside. */
   const cell = (v: number | undefined, want: number | undefined, d = 0, rel = true) => {
@@ -160,27 +210,29 @@ function renderOut(out: HTMLElement, c: TuneCtx) {
     return `<td class="${ok ? 'ok' : 'no'}">${v.toFixed(d)}</td>`;
   };
   const row = (label: string, m: Metrics | undefined, zone: ZoneId, boss: string) => {
-    const g = targets.bosses[boss], f = targets.fights[zone] ?? {};
-    return `<tr><td class="l muted">${label}</td>${cell(m?.at, g.at, 1)}${cell(m?.fight, g.fight)}${cell(m?.gacha === undefined ? undefined : m.gacha * 100, g.gacha * 100, 0, false)}${RANKS.map((r) => cell(m?.fights[r], f[r])).join('')}</tr>`;
+    const g = targets.bosses[boss], f = targets.fights[zone] ?? {}, l = targets.loss?.[zone] ?? {};
+    const pc = (v: number | undefined) => (v === undefined ? undefined : v * 100);
+    return `<tr><td class="l muted">${label}</td>${cell(m?.at, g.at, 1)}${cell(m?.fight, g.fight)}${cell(pc(m?.gacha), g.gacha * 100, 0, false)}${RANKS.map((r) => cell(m?.fights[r], f[r])).join('')}${RANKS.map((r) => cell(pc(m?.loss?.[r]), pc(l[r]), 0, false)).join('')}</tr>`;
   };
   out.innerHTML = `
     <h2>Итог: цель / было / стало</h2>
     <div class="scroll" style="max-height:none"><table>
-      <tr><th class="l"></th>${th('минута', HINT.at)}${th('бой, с', HINT.fight)}${th('гача, %', HINT.gacha)}${RANKS.map(rankTh).join('')}</tr>
-      ${reports.map((r) => { const g = targets.bosses[r.boss], f = targets.fights[r.zone] ?? {}; return `
-        <tr><th class="l" colspan="7" style="color:var(--fg)">${r.ok ? '<span class="ok">✓</span>' : '<span class="no">✗</span>'} ${esc(MOBS[r.boss].name)} · ${esc(zoneName(r.zone))} · кругов ${r.iters}
+      <tr><th class="l"></th>${th('минута', HINT.at)}${th('бой, с', HINT.fight)}${th('гача, %', HINT.gacha)}${RANKS.map(rankTh).join('')}${RANKS.map(lossTh).join('')}</tr>
+      ${reports.map((r) => { const g = targets.bosses[r.boss], f = targets.fights[r.zone] ?? {}, l = targets.loss?.[r.zone] ?? {}; return `
+        <tr><th class="l" colspan="10" style="color:var(--fg)">${r.ok ? '<span class="ok">✓</span>' : '<span class="no">✗</span>'} ${esc(MOBS[r.boss].name)} · ${esc(zoneName(r.zone))} · кругов ${r.iters}
           ${r.notes.map((n) => `<div class="muted" style="font-weight:400">${esc(n)}</div>`).join('')}</th></tr>
-        <tr><td class="l muted">цель</td><td>${g.at}</td><td>${g.fight}</td><td>${Math.round(g.gacha * 100)}</td>${RANKS.map((rk) => `<td>${f[rk] ?? '—'}</td>`).join('')}</tr>
+        <tr><td class="l muted">цель</td><td>${g.at}</td><td>${g.fight}</td><td>${Math.round(g.gacha * 100)}</td>${RANKS.map((rk) => `<td>${f[rk] ?? '—'}</td>`).join('')}${RANKS.map((rk) => `<td>${l[rk] === undefined ? '—' : Math.round(l[rk]! * 100)}</td>`).join('')}</tr>
         ${row('было', r.before, r.zone, r.boss)}${row('стало', r.after, r.zone, r.boss)}`; }).join('')}
     </table></div>
     <div class="charts" id="tcharts" style="margin-top:12px"></div>
     <h2>Подобранные числа</h2>
     <div class="panel">
       <table><tr>${th('поле', 'Путь числа в src/config.ts: ZONE_SCALE.<локация>.hp/dmg.<ранг> — множитель HP/урона мобов ранга, .token — множитель шанса крутки, MOBS.<босс>.hp/dmg — числа босса', 'l')}${th('было', 'Значение в конфиге до подбора')}${th('стало', 'Подобранное значение')}</tr>
-        ${Object.entries(sets).map(([p, v]) => `<tr><td class="l mono">${esc(p)}</td><td>${was[p]}</td><td>${v}</td></tr>`).join('')}</table>
+        ${Object.entries(sets).map(([p, v]) => `<tr><td class="l mono">${esc(p)}</td><td>${was[p]}</td><td>${v}</td></tr>`).join('')}
+        ${Object.entries(fixed ?? {}).map(([p, v]) => `<tr><td class="l mono">${esc(p)}</td><td>${v}</td><td class="muted">${v} вручную</td></tr>`).join('')}</table>
       <div class="row" style="margin-top:10px">
         <button class="btn" id="apply" title="Добавить в правки вкладки «Конфиг» — «Сим» покажет их рядом с конфигом без правок">В правки страницы</button>
-        ${import.meta.env.DEV ? '<button class="btn primary" id="write" title="Переписать блок // <tuned> в конце src/config.ts (только npm run dev)">Записать в config.ts</button>' : '<span class="muted">запись в config.ts — только из npm run dev</span>'}
+        ${import.meta.env.DEV ? '<button class="btn primary" id="write" title="Переписать блок // <tuned> в конце src/config.ts: подобранные числа и ручные (с меткой TUNE_MANUAL) (только npm run dev)">Записать в config.ts</button>' : '<span class="muted">запись в config.ts — только из npm run dev</span>'}
         <span class="muted" id="wstatus"></span>
       </div>
     </div>`;
@@ -199,13 +251,13 @@ function renderOut(out: HTMLElement, c: TuneCtx) {
   three('Бой с боссом, с', (r) => targets.bosses[r.boss].fight, (x) => x?.fight);
   three('Доля мощи от гачи', (r) => targets.bosses[r.boss].gacha, (x) => x?.gacha, (v) => `${Math.round(v * 100)}%`);
   three('Бой с мобом, с', (r) => targets.fights[r.zone]?.normal ?? 0, (x) => x?.fights.normal);
+  three('Потеря HP за бой с элиткой', (r) => targets.loss?.[r.zone]?.elite ?? 0, (x) => x?.loss?.elite, (v) => `${Math.round(v * 100)}%`);
 
-  $('#apply', out).addEventListener('click', () => { c.addSets(sets); $('#wstatus', out).textContent = 'добавлено в правки'; });
+  $('#apply', out).addEventListener('click', () => { c.addSets({ ...fixed, ...sets }); $('#wstatus', out).textContent = 'добавлено в правки'; });
   $('#write', out)?.addEventListener('click', async () => {
     const st = $('#wstatus', out);
     try {
-      const r = await fetch('/__tune-write', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(sets) });
-      if (!r.ok) throw new Error(await r.text());
+      await writeConfig(sets, fixed ?? {});
       st.textContent = 'записано в src/config.ts — страница перезагрузится с новыми числами';
     } catch (err) { st.textContent = `ошибка: ${(err as Error).message}`; }
   });
