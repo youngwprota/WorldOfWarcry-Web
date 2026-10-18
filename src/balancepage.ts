@@ -110,7 +110,8 @@ function render() {
 }
 
 // ---------- charts (inline SVG) ----------
-interface Series { label: string; color: string; pts: [number, number][]; band?: [number, number, number][]; dash?: boolean; faint?: boolean }
+/** `dots`: a marker on every point (sparse series: one point draws no line); a dashed series gets a ring. */
+interface Series { label: string; color: string; pts: [number, number][]; band?: [number, number, number][]; dash?: boolean; faint?: boolean; dots?: boolean }
 interface ChartOpts { xMax: number; yMax?: number; yFmt?: (v: number) => string; marks?: { x: number; label: string; color: string }[]; xLabel?: (x: number) => string }
 const W = 420, H = 190, ML = 42, MR = 10, MT = 10, MB = 22;
 /** A round axis top: 4 grid steps, each 1 / 2 / 2.5 / 5 × 10ⁿ. */
@@ -153,6 +154,9 @@ function chart(title: string, series: Series[], o: ChartOpts): HTMLElement {
       g += `<polyline points="${s.pts.map(([x, y]) => `${X(x)},${Y(y)}`).join(' ')}" fill="none" stroke="${s.color}" stroke-width="${s.faint ? 1.5 : 2}"
         opacity="${s.faint ? 0.45 : 1}" ${s.dash ? 'stroke-dasharray="5 4"' : ''} stroke-linejoin="round"/>`;
     }
+    if (s.dots) for (const [x, y] of s.pts) g += s.dash
+      ? `<circle cx="${X(x)}" cy="${Y(y)}" r="5" fill="none" stroke="${s.color}" stroke-width="1.5"/>`
+      : `<circle cx="${X(x)}" cy="${Y(y)}" r="3.5" fill="${s.color}" opacity="${s.faint ? 0.7 : 1}"/>`;
   }
   g += `<line class="guide" x1="0" x2="0" y1="${MT}" y2="${H - MB}" stroke="#ecebe6" stroke-width="1" opacity="0"/>`;
   const legend = series.map((s) => `<span><i class="${s.dash ? 'dash' : ''}" style="background:${s.color};color:${s.color};opacity:${s.faint ? 0.5 : 1}"></i>${esc(s.label)}</span>`).join('');

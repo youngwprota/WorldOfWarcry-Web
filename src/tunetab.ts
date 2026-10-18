@@ -7,7 +7,7 @@ import { CHAIN, type Metrics, type TuneOut } from './tuner';
 import { DEFAULT_TARGETS, type FightRank, type TuneTargets } from './tunetargets';
 import type { Job, JobMsg } from './balanceworker';
 
-interface Series { label: string; color: string; pts: [number, number][]; dash?: boolean; faint?: boolean }
+interface Series { label: string; color: string; pts: [number, number][]; dash?: boolean; faint?: boolean; dots?: boolean }
 /** What the page lends this tab (no import back into balancepage.ts: it is the entry). */
 export interface TuneCtx {
   esc: (s: unknown) => string;
@@ -191,9 +191,9 @@ function renderOut(out: HTMLElement, c: TuneCtx) {
   const pts = (f: (r: (typeof reports)[number]) => number | undefined) => reports.flatMap((r) => { const v = f(r); return v === undefined ? [] : [[targets.bosses[r.boss].at, v] as [number, number]]; });
   const three = (title: string, goal: (r: (typeof reports)[number]) => number, m: (x: Metrics | undefined) => number | undefined, yFmt?: (v: number) => string) =>
     box.append(c.chart(title, [
-      { label: 'цель', color: '#ecebe6', pts: pts(goal), dash: true },
-      { label: 'было', color: '#a5a093', pts: pts((r) => m(r.before)), faint: true },
-      { label: 'стало', color: '#e0a050', pts: pts((r) => m(r.after)) },
+      { label: 'цель', color: '#ecebe6', pts: pts(goal), dash: true, dots: true },
+      { label: 'было', color: '#a5a093', pts: pts((r) => m(r.before)), faint: true, dots: true },
+      { label: 'стало', color: '#e0a050', pts: pts((r) => m(r.after)), dots: true },
     ], { xMax, yFmt, xLabel: (x) => `${x} мин` }));
   three('Минута убийства босса', (r) => targets.bosses[r.boss].at, (x) => x?.at);
   three('Бой с боссом, с', (r) => targets.bosses[r.boss].fight, (x) => x?.fight);
