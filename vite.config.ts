@@ -14,10 +14,11 @@ const tuneWrite = (): Plugin => ({
       req.on('data', (c) => (body += c));
       req.on('end', () => {
         try {
-          const sets = JSON.parse(body) as Record<string, number>;
-          for (const [p, v] of Object.entries(sets)) if (!/^[\w.]+$/.test(p) || typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`плохая правка ${p}`);
+          // { sets, manual }: the picked numbers and the whole list of hand-set knobs
+          const { sets = {}, manual } = JSON.parse(body) as { sets?: Record<string, number>; manual?: Record<string, number> };
+          for (const [p, v] of [...Object.entries(sets), ...Object.entries(manual ?? {})]) if (!/^[\w.]+$/.test(p) || typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`плохая правка ${p}`);
           const file = resolve(__dirname, 'src/config.ts');
-          writeFileSync(file, writeTuned(readFileSync(file, 'utf8'), sets));
+          writeFileSync(file, writeTuned(readFileSync(file, 'utf8'), sets, manual));
           res.end('ok');
         } catch (err) { res.statusCode = 400; res.end(err instanceof Error ? err.message : String(err)); }
       });

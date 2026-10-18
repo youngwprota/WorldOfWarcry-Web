@@ -1641,6 +1641,8 @@ export const HIT_FREEZE = 0.15;
 export const KILL_FX = { knockMul: 2, maxKnock: 5, shake: 0.31, blood: 14 };
 
 // Numbers picked by the balance tuner (npm run tune -- --write / balance.html → «Цели»): rewritten as a whole, delete to undo.
+/** Tuner knobs set by hand (balance.html → «Цели» → «Статы подбора»): the tuner keeps their numbers; filled by the block below. */
+export const TUNE_MANUAL: string[] = [];
 // <tuned>
 GACHA.token.boss = 1;
 GACHA.token.elite = 0.05;

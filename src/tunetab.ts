@@ -204,7 +204,7 @@ function renderOut(out: HTMLElement, c: TuneCtx) {
   $('#write', out)?.addEventListener('click', async () => {
     const st = $('#wstatus', out);
     try {
-      const r = await fetch('/__tune-write', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(sets) });
+      const r = await fetch('/__tune-write', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sets }) });
       if (!r.ok) throw new Error(await r.text());
       st.textContent = 'записано в src/config.ts — страница перезагрузится с новыми числами';
     } catch (err) { st.textContent = `ошибка: ${(err as Error).message}`; }
