@@ -107,7 +107,7 @@ export class Mob extends Unit {
     const scale = def.scale * mul.scale;
     this.ch = def.static ? new StaticBody(model, scale, def.tint === undefined ? undefined : new THREE.Color(def.tint),
       def.crown === undefined ? undefined : new THREE.Color(def.crown))
-      : def.creature ? new Creature(model, scale, def.hide) : new Character(model, weapon, scale, def.skin);
+      : def.creature ? new Creature(model, scale, def.hide) : new Character(model, weapon, scale, def.skin, true);
     this.dmg = def.dmg * mul.dmg;
     this.ch.position.copy(spawn);
     this.ch.facing = Math.random() * Math.PI * 2;

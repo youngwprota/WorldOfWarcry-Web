@@ -27,7 +27,7 @@ import { classPreview } from './looks';
 import { registerMocks } from './mocks';
 import { startArtWave, startLoadingFx } from './loadfx';
 import { Post } from './post';
-import { PerfHud } from './perfhud';
+import { PerfHud, prof } from './perfhud';
 
 const ui = new UI();
 // the loading art comes alive: its background sways, sparks fly
@@ -339,10 +339,12 @@ function run() {
     game.viewH = renderer.domElement.height;
     perf.begin();
     game.update(dt);
+    prof.start();
     if (!game.offscreen) {
       if (post) post.render(game.scene, game.camera);
       else renderer.render(game.scene, game.camera);
     }
+    prof.lap(0);
     perf.end();
   });
 }

@@ -56,6 +56,17 @@ const SUN_LIGHT = 3.3;
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
+/**
+ * Puts a screen-space UI element over projected point `p` (NDC); `at` keeps the last spot (to 0.1 px: sub-pixel, so
+ * moving bars stay smooth), so a standing camera writes nothing (every transform write restyles the element).
+ */
+function placeBar(el: HTMLElement, at: THREE.Vector2, p: THREE.Vector3, w: number, h: number, dy: string) {
+  const x = Math.round((p.x * 0.5 + 0.5) * w * 10) / 10;
+  const y = Math.round((-p.y * 0.5 + 0.5) * h * 10) / 10;
+  if (x === at.x && y === at.y) return;
+  at.set(x, y);
+  el.style.transform = `translate(${x}px, ${y}px) translate(-50%, ${dy})`;
+}
 const fxA = new THREE.Vector3();
 const fxB = new THREE.Vector3();
 const camProj = new THREE.Matrix4();
@@ -63,6 +74,18 @@ const camFrustum = new THREE.Frustum();
 const cullSphere = new THREE.Sphere();
 /** Extra metres around a mob's body when testing it against the camera view: the matrices are from the previous frame. */
 const CULL_PAD = 1.5;
+/** Shadow box fitted to the view: tallest receivers seen on screen (tree crowns), m, and a margin for the soft edge. */
+const SHADOW_TOP = 6;
+const SHADOW_PAD = 2;
+/** The old fixed shadow box (shadow camera space, m): the fitted one stays inside it. Sizes are multiples of SHADOW_STEP. */
+const SHADOW_BOX = { left: -26, right: 26, bottom: -26, top: 32 };
+const SHADOW_STEP = 2;
+const sunLs = new THREE.Vector3();
+const SCREEN_CORNERS = [-1, -1, 1, -1, 1, 1, -1, 1];
+const SHADOW_LEVELS = [0, SHADOW_TOP];
+const toLight = new THREE.Matrix4();
+const viewRay = new THREE.Vector3();
+const viewHit = new THREE.Vector3();
 const sparMates: Mob[] = [];
 const isSparring = (o: Mob | null | undefined) => !!o && o.alive && o.state === 'idle' && o.behavior.idle === 'spar';
 /** RARITY colours as numbers (particles). */
@@ -181,7 +204,7 @@ export class Game {
   private puffs: FogPuffs;
   /** Pollen, wisps, snow, fireflies… in the air round the hero (src/ambient.ts). */
   private ambient = new Ambient();
-  /** Dunes sandstorm: sand sheets + haze (src/sandstorm.ts). */
+  /** Zone storms: dunes sandstorm, Snow Pass blizzard (src/sandstorm.ts). */
   private sandstorm = new Sandstorm();
   /** Drawing-buffer height in pixels (set by main.ts; ambient point sizes). */
   viewH = 1600;
@@ -229,7 +252,7 @@ export class Game {
   offscreen = false;
   private moveDir = new THREE.Vector3();
   /** Player HP floating above the hero's head. */
-  private heroBar!: { el: HTMLDivElement; fill: HTMLDivElement; text: HTMLSpanElement };
+  private heroBar!: { el: HTMLDivElement; fill: HTMLDivElement; text: HTMLSpanElement; at: THREE.Vector2; fillK: number };
 
   private labels: HTMLElement;
 
@@ -245,7 +268,7 @@ export class Game {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera;
-    sc.left = -26; sc.right = 26; sc.top = 32; sc.bottom = -26; sc.near = 1; sc.far = 90;
+    sc.left = SHADOW_BOX.left; sc.right = SHADOW_BOX.right; sc.top = SHADOW_BOX.top; sc.bottom = SHADOW_BOX.bottom; sc.near = 1; sc.far = 90;
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.03;
     this.scene.add(this.hemi, this.sun, this.sun.target);
@@ -313,7 +336,7 @@ export class Game {
     hb.className = 'herohp';
     hb.innerHTML = '<div class="fill"></div><span></span>';
     labels.appendChild(hb);
-    this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, text: hb.querySelector('span')! };
+    this.heroBar = { el: hb, fill: hb.querySelector('.fill')!, text: hb.querySelector('span')!, at: new THREE.Vector2(NaN, NaN), fillK: -1 };
     this.particles = new Particles(this.scene);
     this.glows = new Glows(this.scene);
     this.pickups = new Pickups(this.scene, this.camera);
@@ -329,7 +352,7 @@ export class Game {
     this.waves = new Shockwaves(this.scene);
     this.spells = new Spells(this.scene);
     this.syncPet();
-    this.puffs = new FogPuffs(this.scene);
+    this.puffs = new FogPuffs(this.scene, this.camera);
     this.scene.add(this.ambient.points);
     this.scene.add(this.sandstorm.group);
     // (no camp NPC by the gate for now: src/npc.ts CampNpc is kept for later)
@@ -633,7 +656,7 @@ export class Game {
     for (const a of this.arenas.values()) a.update(dt, this.time);
     this.world.update(dt, this.time, this.hero.position);
     this.ambient.update(this.time, this.hero.position, this.viewH);
-    this.sandstorm.update(this.time, this.hero.position, this.ambient.storm, this.lowGfx);
+    this.sandstorm.update(this.time, this.hero.position, this.ambient.storm, this.ambient.stormLook, this.lowGfx);
     this.render(dt);
     this.saveT += dt;
     if (this.saveT > 5) { this.saveT = 0; this.persist(); }
@@ -689,20 +712,64 @@ export class Game {
     this.hemi.groundColor.copy(this.env.hemiGround);
     this.hemi.intensity = HEMI_LIGHT * this.env.light;
     this.sun.intensity = SUN_LIGHT * this.env.light;
+    this.fitShadow();
     const { w, h } = this.ui.size();
     this.fx.update(dt, w, h);
     // hero HP bar above the head
     v1.copy(hp).setY(2.45 * this.heroScale).project(this.camera);
     const hb = this.heroBar;
-    hb.el.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
+    placeBar(hb.el, hb.at, v1, w, h, '-100%');
     hb.el.classList.toggle('dead', this.dead);
-    hb.fill.style.width = `${(this.hp / this.maxHp) * 100}%`;
-    hb.text.textContent = fmtK(Math.ceil(this.hp));
+    const heroFill = this.hp / this.maxHp;
+    if (hb.fillK !== heroFill) { hb.fillK = heroFill; hb.fill.style.width = `${heroFill * 100}%`; }
+    const heroText = fmtK(Math.ceil(this.hp));
+    if (hb.text.textContent !== heroText) hb.text.textContent = heroText;
     hb.el.classList.toggle('low', this.hp < this.maxHp * 0.3);
     this.updateMobBars(w, h);
     this.hudT -= dt;
     if (this.hudT <= 0) { this.hudT = 0.1; this.refreshHud(false); }
     this.ui.minimap(this.hero.position, this.hero.facing, this.mapDots(45), this.world, this.mapMarks(45));
+  }
+
+  /**
+   * Fits the sun's orthographic shadow box to the ground the camera sees (between y 0 and SHADOW_TOP). A caster outside
+   * the view that shades a visible point lies on the same sun ray, so it projects inside the box too: nothing on screen
+   * loses a shadow, and everything off screen stays out of the shadow pass.
+   */
+  private fitShadow() {
+    const cam = this.camera;
+    const sc = this.sun.shadow.camera;
+    cam.updateMatrixWorld();
+    // the shadow camera looks from the sun at its target; a rotation, so the inverse is the transpose. The box is worked
+    // out in world-anchored light space (no translation), so its texel grid stays put while the sun follows the camera
+    toLight.lookAt(this.sun.position, this.sun.target.position, sc.up).transpose();
+    sunLs.copy(this.sun.position).applyMatrix4(toLight);
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let i = 0; i < SCREEN_CORNERS.length; i += 2) {
+      viewRay.set(SCREEN_CORNERS[i], SCREEN_CORNERS[i + 1], 0.5).unproject(cam).sub(cam.position).normalize();
+      for (const h of SHADOW_LEVELS) {
+        // (a camera below the level hits it at the camera itself, never behind it)
+        const t = viewRay.y < -1e-3 ? Math.min(Math.max(0, (h - cam.position.y) / viewRay.y), cam.far) : cam.far;
+        viewHit.copy(cam.position).addScaledVector(viewRay, t).applyMatrix4(toLight);
+        x0 = Math.min(x0, viewHit.x); x1 = Math.max(x1, viewHit.x);
+        y0 = Math.min(y0, viewHit.y); y1 = Math.max(y1, viewHit.y);
+      }
+    }
+    // never bigger than the old fixed box (so never coarser): a ray to the horizon would stretch it over the whole map
+    const B = SHADOW_BOX;
+    x0 = Math.max(x0 - SHADOW_PAD, sunLs.x + B.left); x1 = Math.min(x1 + SHADOW_PAD, sunLs.x + B.right);
+    y0 = Math.max(y0 - SHADOW_PAD, sunLs.y + B.bottom); y1 = Math.min(y1 + SHADOW_PAD, sunLs.y + B.top);
+    // size in SHADOW_STEP steps (a texel changes only when it steps), edges on whole texels: no shimmer while walking
+    const map = this.sun.shadow.mapSize;
+    const w = Math.max(1, Math.ceil((x1 - x0) / SHADOW_STEP - 1e-6)) * SHADOW_STEP;
+    const h = Math.max(1, Math.ceil((y1 - y0) / SHADOW_STEP - 1e-6)) * SHADOW_STEP;
+    const tx = w / map.x, ty = h / map.y;
+    const left = Math.floor(x0 / tx) * tx - sunLs.x;
+    const bottom = Math.floor(y0 / ty) * ty - sunLs.y;
+    if (sc.left === left && sc.right === left + w && sc.bottom === bottom && sc.top === bottom + h) return;
+    sc.left = left; sc.right = left + w;
+    sc.bottom = bottom; sc.top = bottom + h;
+    sc.updateProjectionMatrix();
   }
 
   private updateHero(dt: number) {
@@ -858,11 +925,11 @@ export class Game {
     }
     if (h.launch >= 0) {
       h.launch -= dt;
-      if (h.launch < 0 && w.staff && t) { h.bolt = this.spells.bolt(this.castPoint(v1), t.pos, h.flight, STAVES[w.staff].bolt); h.aim = t; }
+      if (h.launch < 0 && w.staff && t) { h.bolt = this.spells.bolt(this.castPoint(v1), t.pos, h.flight, STAVES[w.staff].bolt); h.shot = h.bolt.shot; h.aim = t; }
     }
     // the mob left the staff's reach: the bolt fizzles and the hit is lost
     if (h.bolt && h.impact >= 0 && !this.inStrike(h.aim!, w.range)) {
-      this.spells.drop(h.bolt);
+      this.spells.drop(h.bolt, h.shot);
       h.impact = -1;
     }
     if (h.impact >= 0) {
@@ -1593,6 +1660,8 @@ export class Game {
       // Sleep far away mobs (GDD 5: "мобы дальше радиуса активности спят").
       m.awake = dHero < 40;
       m.ch.root.visible = m.state !== 'dead' ? dHero < 34 : m.ch.root.visible && dHero < 34;
+      // three.js walks the bone tree of hidden objects too: a far mob's model leaves the scene, the mob itself stays
+      if (dHero < 34) { if (!m.ch.root.parent) this.scene.add(m.ch.root); } else if (m.ch.root.parent) m.ch.root.removeFromParent();
       if (m.state === 'dead') {
         this.arenas.get(m)?.set(false);
         m.deadT += dt;
@@ -2409,36 +2478,42 @@ export class Game {
 
   private updateMobBars(w: number, h: number) {
     const hp = this.hero.position;
-    const explored = (p: THREE.Vector3) => this.world.fog.isExplored(p.x, p.z);
+    const fog = this.world.fog;
     for (const u of this.units) {
       // HP bar + weakness icons + reward over living units near the hero.
-      const show = u.alive && u.visible && u.pos.distanceTo(hp) < u.barRange && explored(u.pos);
+      const show = u.alive && u.visible && u.pos.distanceTo(hp) < u.barRange && fog.isExplored(u.pos.x, u.pos.z);
       if (!show) { if (u.uiEl.classList.contains('show')) u.uiEl.classList.remove('show'); }
       else {
         v1.copy(u.pos).setY(u.barY).project(this.camera);
         u.uiEl.classList.add('show');
         u.uiEl.classList.toggle('hurt', u.hp < u.maxHp);
-        u.uiEl.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -100%)`;
-        u.hpFill.style.width = `${Math.max(0, u.hp / u.maxHp) * 100}%`;
+        placeBar(u.uiEl, u.barAt, v1, w, h, '-100%');
+        const fill = Math.max(0, u.hp / u.maxHp);
+        if (u.barFill !== fill) { u.barFill = fill; u.hpFill.style.width = `${fill * 100}%`; }
         if (u.hpText) {
           // every unit has the same bar: current HP only
           const t = fmtK(Math.ceil(u.hp));
           if (u.hpText.textContent !== t) u.hpText.textContent = t;
         }
-        if (u instanceof Mob && u.def.boss) (u.uiEl.querySelector('.bname') as HTMLElement).style.color = this.bossColor(u);
+        if (u instanceof Mob && u.def.boss) {
+          const c = this.bossColor(u);
+          if (u.barColor !== c) { u.barColor = c; (u.uiEl.querySelector('.bname') as HTMLElement).style.color = c; }
+        }
       }
       // Respawn loader at the spawn point (for a mob, once the corpse has gone).
       // a spawn shows one loader, at its centre, once all of it is down
       const at = u.spawner?.at ?? u.spawn;
       const dead = !u.alive && u.loaderReady && u.respawnAt < Infinity && (!u.spawner || u.spawner.leader === u)
-        && at.distanceTo(hp) < 30 && explored(at);
+        && at.distanceTo(hp) < 30 && fog.isExplored(at.x, at.z);
       if (!dead) { if (u.respawnEl.classList.contains('show')) u.respawnEl.classList.remove('show'); continue; }
       v1.copy(at).setY(0.5).project(this.camera);
       if (Math.abs(v1.x) > 1.1 || Math.abs(v1.y) > 1.1) { u.respawnEl.classList.remove('show'); continue; }
       const left = u.respawnAt - this.time;
       u.respawnEl.classList.add('show');
-      u.respawnEl.style.transform = `translate(${(v1.x * 0.5 + 0.5) * w}px, ${(-v1.y * 0.5 + 0.5) * h}px) translate(-50%, -50%)`;
-      u.respawnEl.style.setProperty('--p', `${Math.min(1, Math.max(0, 1 - left / (u.respawnTotal || 1))) * 360}deg`);
+      placeBar(u.respawnEl, u.loaderAt, v1, w, h, '-50%');
+      // a custom property restyles the whole loader: write it only when the ring moves by a degree
+      const deg = Math.round(Math.min(1, Math.max(0, 1 - left / (u.respawnTotal || 1))) * 360);
+      if (u.loaderDeg !== deg) { u.loaderDeg = deg; u.respawnEl.style.setProperty('--p', `${deg}deg`); }
       u.setRespawnText(left);
       if (u.spawner) setChargeBars(u.respawnEl, u.chargesUsed, u.spawner.def.charges.length);
     }
@@ -3086,11 +3161,11 @@ interface Hand {
   i: 0 | 1; atkCd: number; impact: number; impactAt: number; combo: number; lastSwing: number;
   /** Staff: seconds until the bolt leaves the staff (< 0 = none pending), and its flight time. */
   launch: number; flight: number;
-  /** Staff: the bolt in flight and the mob it flies at. */
-  bolt: Bolt | null; aim: Unit | null;
+  /** Staff: the bolt in flight (`shot`: its launch, see Spells.drop) and the mob it flies at. */
+  bolt: Bolt | null; shot: number; aim: Unit | null;
 }
 function newHand(i: 0 | 1): Hand {
-  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, launch: -1, flight: 0, bolt: null, aim: null };
+  return { i, atkCd: 0, impact: -1, impactAt: 0.3, combo: 0, lastSwing: -99, launch: -1, flight: 0, bolt: null, shot: 0, aim: null };
 }
 
 /** How a blow landed: a crit, dodged, or plain (''). */

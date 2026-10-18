@@ -1,9 +1,12 @@
 // Post-processing for the game view. The frame is rendered into a multisampled HDR target, then one composite pass
 // adds a soft glow round what is brighter than white (fire, magic, runes, water glints), a split-tone grade (cool
 // shade, warm light), a soft highlight shoulder and a light vignette. The glow comes from one blurred
-// quarter-resolution copy, so it is four cheap passes in all. The picture itself is never blurred or hazed over.
+// quarter-resolution copy (two blur rounds), so it is six cheap passes in all. The picture itself is never blurred or hazed over.
 // Off on low graphics (main.ts renders straight to the screen then).
 import * as THREE from 'three';
+
+/** Tap spacing (quarter-res texels) of each blur round. */
+const BLUR_STEPS = [1.6, 2.6];
 
 const QUAD_VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
 
@@ -122,14 +125,16 @@ export class Post {
     this.down.uniforms.tSrc.value = this.main.texture;
     this.down.uniforms.uTexel.value.set(1 / this.main.width, 1 / this.main.height);
     this.pass(this.down, this.qa);
-    const tx = 1.6 / this.qa.width;
-    const ty = 1.6 / this.qa.height;
-    this.blur.uniforms.tSrc.value = this.qa.texture;
-    this.blur.uniforms.uDir.value.set(tx, 0);
-    this.pass(this.blur, this.qb);
-    this.blur.uniforms.tSrc.value = this.qb.texture;
-    this.blur.uniforms.uDir.value.set(0, ty);
-    this.pass(this.blur, this.qa);
+    // two blur rounds, the second wider: one narrow round leaves a small hot spot as the square of its quarter-res
+    // texels (a hand gem glowed as a square); the stacked gaussians round it into a soft halo
+    for (const k of BLUR_STEPS) {
+      this.blur.uniforms.tSrc.value = this.qa.texture;
+      this.blur.uniforms.uDir.value.set(k / this.qa.width, 0);
+      this.pass(this.blur, this.qb);
+      this.blur.uniforms.tSrc.value = this.qb.texture;
+      this.blur.uniforms.uDir.value.set(0, k / this.qa.height);
+      this.pass(this.blur, this.qa);
+    }
     const u = this.comp.uniforms;
     u.tMain.value = this.main.texture;
     u.tBlur.value = this.qa.texture;

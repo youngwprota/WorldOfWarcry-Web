@@ -57,7 +57,7 @@ export class CampNpc {
     this.def = DEFS[faction];
     // inside the camp under the left gate banner (left of the walking direction: (dirZ, -dirX))
     this.pos.set(exit.x - exit.dirX * 3.8 + exit.dirZ * 3.6, 0, exit.z - exit.dirZ * 3.8 - exit.dirX * 3.6);
-    this.ch = new Character(this.def.model[0], this.def.model[1], 1.15 * 1.5);
+    this.ch = new Character(this.def.model[0], this.def.model[1], 1.15 * 1.5, undefined, true);
     this.ch.position.copy(this.pos);
     this.ch.facing = Math.atan2(exit.dirX, exit.dirZ);
     scene.add(this.ch.root);

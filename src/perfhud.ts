@@ -9,6 +9,23 @@ const GRAPH_W = 120;
 const GRAPH_H = 30;
 const GRAPH_MAX_MS = 66.7;
 
+/** Frame parts timed with prof.lap() (main.ts: the renderer). */
+const PARTS = ['Render'];
+
+/** Per-part CPU timer, filled only while the overlay is on. */
+export const prof = {
+  on: false,
+  t: 0,
+  ms: new Float64Array(PARTS.length),
+  start() { if (this.on) this.t = performance.now(); },
+  lap(i: number) {
+    if (!this.on) return;
+    const now = performance.now();
+    this.ms[i] += now - this.t;
+    this.t = now;
+  },
+};
+
 const grade = (v: number, warn: number, bad: number) => (v > bad ? 'bad' : v > warn ? 'warn' : '');
 
 export class PerfHud {
@@ -31,6 +48,7 @@ export class PerfHud {
   private gpuMs = 0;
   private gpuN = 0;
   private calls = 0;
+  private shadowCalls = 0;
   private winStart = 0;
 
   constructor(private renderer: THREE.WebGLRenderer) {
@@ -42,6 +60,7 @@ export class PerfHud {
     this.el.append(this.stats, this.graph);
     this.gl = renderer.getContext() as WebGL2RenderingContext;
     this.ext = this.gl.getExtension('EXT_disjoint_timer_query_webgl2') as TimerExt | null;
+    this.countShadowCalls();
   }
 
   get on() { return !this.el.classList.contains('hidden'); }
@@ -55,7 +74,9 @@ export class PerfHud {
     this.el.classList.toggle('hidden', !on);
     // post-processing renders several passes per frame: count draw calls for the whole frame
     this.renderer.info.autoReset = !on;
-    this.last = this.winStart = 0;
+    prof.on = on;
+    prof.ms.fill(0);
+    this.last = this.winStart = this.shadowCalls = 0;
     this.history.fill(0);
   }
 
@@ -110,6 +131,18 @@ export class PerfHud {
     c.fillRect(0, Math.round(y(33.4)), GRAPH_W, 1);
   }
 
+  /** The shadow pass runs inside renderer.render: wrap it to count its draw calls separately. */
+  private countShadowCalls() {
+    const sm = this.renderer.shadowMap;
+    const render = sm.render;
+    const info = this.renderer.info.render;
+    sm.render = (...args) => {
+      const before = info.calls;
+      render.apply(sm, args);
+      this.shadowCalls += info.calls - before;
+    };
+  }
+
   private readQueries(ext: TimerExt) {
     const gl = this.gl;
     const disjoint = gl.getParameter(ext.GPU_DISJOINT_EXT);
@@ -128,13 +161,21 @@ export class PerfHud {
     const gpuLoad = this.gpuN ? Math.min(100, (this.gpuMs / this.gpuN / ft) * 100) : NaN;
     const gpu = this.gpuN ? `${gpuLoad.toFixed(0)}% (${(this.gpuMs / this.gpuN).toFixed(1)} ms)` : 'n/a';
     const calls = Math.round(this.calls / this.frames);
-    this.stats.innerHTML =
+    const shadow = Math.round(this.shadowCalls / this.frames);
+    let html =
       `<span>FPS</span><b class="${grade(-fps, -25, -15)}">${fps.toFixed(0)}</b>` +
       `<span>Frame Time</span><b class="${grade(ft, 16.7, 33.4)}">${ft.toFixed(1)} ms</b>` +
       `<span>CPU Load</span><b class="${grade(cpuLoad, 60, 85)}">${cpuLoad.toFixed(0)}% (${cpu.toFixed(1)} ms)</b>` +
       `<span>GPU Load</span><b class="${grade(gpuLoad, 75, 90)}">${gpu}</b>` +
-      `<span>Draw Calls</span><b class="${grade(calls, 150, 300)}">${calls}</b>`;
-    this.frames = this.frameMs = this.cpuMs = this.gpuMs = this.gpuN = this.calls = 0;
+      `<span>Draw Calls</span><b class="${grade(calls, 150, 300)}">${calls}</b>` +
+      `<span class="part">· shadow pass</span><b>${shadow}</b>`;
+    for (let i = 0; i < PARTS.length; i++) {
+      const ms = prof.ms[i] / this.frames;
+      html += `<span class="part">· ${PARTS[i]}</span><b class="${grade(ms, 4, 10)}">${ms.toFixed(1)} ms</b>`;
+    }
+    this.stats.innerHTML = html;
+    prof.ms.fill(0);
+    this.frames = this.frameMs = this.cpuMs = this.gpuMs = this.gpuN = this.calls = this.shadowCalls = 0;
     this.winStart = now;
   }
 }
