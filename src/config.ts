@@ -105,8 +105,6 @@ export interface WeaponDef {
   pet?: string;
   /** Model per rarity (RARITY index), GLB props with their own materials (src/assets.ts loadProps); over `model`. */
   tiers?: string[];
-  /** The item exists only at this rarity (RARITY index): the mage's orbs. */
-  rarity?: number;
 }
 
 /** Share of the gun's pellets that hit a lone target on average (the fan's edges miss): for DPS and the simulator. */
@@ -190,27 +188,27 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   orb_vigor: {
     id: 'orb_vigor', name: 'Благословление бодрости', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_vigor', orc: 'orb_vigor' }, icon: '💚', orb: { regen: 0.3 }, rarity: 1,
+    anim: 'SwordAttack', model: { human: 'orb_vigor', orc: 'orb_vigor' }, icon: '💚', orb: { regen: 0.3 },
   },
   orb_fury: {
     id: 'orb_fury', name: 'Яростный клич', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_glass', orc: 'orb_glass' }, icon: '🎲', orb: { power: 0.1 }, rarity: 0,
+    anim: 'SwordAttack', model: { human: 'orb_glass', orc: 'orb_glass' }, icon: '🎲', orb: { power: 0.1 },
   },
   orb_swift: {
     id: 'orb_swift', name: 'Сфера ветра', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_swift', orc: 'orb_swift' }, icon: '💨', orb: { speed: 0.05 }, rarity: 2,
+    anim: 'SwordAttack', model: { human: 'orb_swift', orc: 'orb_swift' }, icon: '💨', orb: { speed: 0.05 },
   },
   orb_ward: {
     id: 'orb_ward', name: 'Сфера оберега', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_ward', orc: 'orb_ward' }, icon: '💠', orb: { defense: 0.2 }, rarity: 3,
+    anim: 'SwordAttack', model: { human: 'orb_ward', orc: 'orb_ward' }, icon: '💠', orb: { defense: 0.2 },
   },
   orb_fortune: {
     id: 'orb_fortune', name: 'Сфера удачи', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_fortune', orc: 'orb_fortune' }, icon: '🪙', orb: { pull: 0.01 }, rarity: 4,
+    anim: 'SwordAttack', model: { human: 'orb_fortune', orc: 'orb_fortune' }, icon: '🪙', orb: { pull: 0.01 },
   },
   orb_demon: {
     id: 'orb_demon', name: 'Сфера демона', type: 'magic', dmgMul: 0, aps: 0, shape: 'arc', arc: 0, range: 0,
-    anim: 'SwordAttack', model: { human: 'orb_demon', orc: 'orb_demon' }, icon: '😈', orb: { critDmg: [0.11, 0.66] }, rarity: 5,
+    anim: 'SwordAttack', model: { human: 'orb_demon', orc: 'orb_demon' }, icon: '😈', orb: { critDmg: [0.11, 0.66] },
   },
 };
 
@@ -287,8 +285,7 @@ for (const p of Object.values(PETS)) {
  */
 export const CLASS_ITEM = { passiveFrom: 3, maxReduce: 0.6, maxCounter: 0.9 };
 /**
- * Passive of a class item by its def: `v` = value at «Эпическое», «Легендарное», «Мифическое» (an orb has one quality,
- * it takes its own column). `desc` shows it with `{v}` (a percent when `pct`). Numbers are placeholders until balance.
+ * Passive of a class item by its def: `v` = value at «Эпическое», «Легендарное», «Мифическое». `desc` shows it with `{v}` (a percent when `pct`). Numbers are placeholders until balance.
  */
 export interface PassiveDef { name: string; desc: string; v: [number, number, number]; pct?: boolean }
 export const CLASS_PASSIVE: Record<string, PassiveDef> = {
@@ -304,6 +301,12 @@ export const CLASS_PASSIVE: Record<string, PassiveDef> = {
   wolf: { name: 'Рвать', desc: 'второй укус: {v}', v: [0.2, 0.3, 0.4], pct: true },
   // share of the bite's damage that heals the hero
   bone_boar: { name: 'Похищение жизни', desc: '{v} урона укуса в HP', v: [0.1, 0.15, 0.2], pct: true },
+  // a hero's blow deals double damage with chance v
+  orb_fury: { name: 'Неистовство', desc: 'двойной урон удара: {v}', v: [0.1, 0.15, 0.2], pct: true },
+  // HP regen × (1 + v) while HP is under ORB_LOW_HP
+  orb_vigor: { name: 'Второе дыхание', desc: 'реген +{v} при HP ниже 30%', v: [1, 1.5, 2], pct: true },
+  // extra dodge chance, added to the hero's dodge
+  orb_swift: { name: 'Попутный ветер', desc: '+{v} к уклонению', v: [0.05, 0.08, 0.12], pct: true },
   // fully absorbs one blow every v s
   orb_ward: { name: 'Барьер', desc: 'гасит удар раз в {v} с', v: [8, 6, 4] },
   // chance each stat orb of a kill comes twice
@@ -311,6 +314,8 @@ export const CLASS_PASSIVE: Record<string, PassiveDef> = {
   // the hero's crits heal by a share of their damage
   orb_demon: { name: 'Жажда', desc: 'крит лечит на {v} урона', v: [0.04, 0.06, 0.08], pct: true },
 };
+/** Share of max HP under which the vigor orb's second wind works (CLASS_PASSIVE.orb_vigor). */
+export const ORB_LOW_HP = 0.3;
 /** Stun of the boar's ram (CLASS_PASSIVE.boar), s. */
 export const PET_STUN = 0.9;
 
@@ -1570,8 +1575,6 @@ export const GACHA = {
   /** Locations whose kills never give a pull (bosses there too): the first one is beaten on the forest's own drops alone. */
   noTokens: ['forest'] as ZoneId[],
   banner: { kind: 'armor' as const, def: 'ring_blood', name: 'Кольцо Короля-лича', subtitle: 'Пьёт кровь врагов и отдаёт её хозяину' },
-  /** Orbs (one quality each) a non-legendary gacha tier gives, by RARITY index: Fury / Vigor + Wind / Ward. */
-  orbs: [[0], [1, 2], [3]] as number[][],
   /** Hammer blows per pull; the rarity colour can climb after each, legendary only on the last one. */
   strikes: 5,
   /** Reveal timing, seconds: delay between hammer blows, then the final flash. */

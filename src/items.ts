@@ -334,11 +334,8 @@ export function orbLine(o: NonNullable<WeaponDef['orb']>): [string, string] {
   return ['Урон', `+${pc(o.power ?? 0)}`];
 }
 
-/** The only rarity a weapon exists at (WeaponDef.rarity: the mage's orbs), or undefined. */
-export const fixedRarity = (kind: ItemKind, def: string) => (kind === 'weapon' ? WEAPONS[def]?.rarity : undefined);
-
 export function makeItem(kind: ItemKind, def: string, rarity: number, lvl: number): Item {
-  return { uid: newUid(), kind, def, rarity: fixedRarity(kind, def) ?? rarity, sharpen: 0, lvl };
+  return { uid: newUid(), kind, def, rarity, sharpen: 0, lvl };
 }
 
 /** The item a mob's `drop` describes (one copy). */
@@ -372,5 +369,5 @@ export function normalizeItem(it: Partial<Item> & { def: string }): Item {
   const pet = /^pet_(\w+)$/.exec(it.def);
   const def = /^[a-z]+_arms$/.test(it.def) ? 'gloves_power' : old ? `plate_${old[2]}` : pet && PETS[pet[1]] ? pet[1] : RENAMED[it.def] ?? it.def;
   const kind = it.kind ?? 'weapon';
-  return { uid: it.uid ?? newUid(), kind, def, rarity: fixedRarity(kind, def) ?? it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
+  return { uid: it.uid ?? newUid(), kind, def, rarity: it.rarity ?? 0, sharpen: it.sharpen ?? 0, lvl: it.lvl ?? 1, ...(it.name ? { name: it.name } : {}) };
 }

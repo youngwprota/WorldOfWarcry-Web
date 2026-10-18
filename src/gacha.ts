@@ -1,6 +1,6 @@
 // Gacha forge logic (docs/features/ludka, docs/features/gacha-gear): rarity roll with a hard pity; a legendary is
 // always the banner item. Only gloves, rings, amulets and the class items (shields, pets, orbs) come from here.
-import { GACHA, WEAPONS } from './config';
+import { GACHA } from './config';
 import { ARMOR, GACHA_GEAR, makeItem, type Item } from './items';
 import { CLASSES, CLASS_IDS } from './party';
 
@@ -23,9 +23,7 @@ function poolItem(tier: number, lvl: number): Item {
   const rarity = GACHA.tiers[tier];
   const slot = pick(['arms', 'ring', 'amulet', 'class'] as const);
   if (slot !== 'class') return makeItem('armor', pick(GACHA_GEAR.filter((d) => ARMOR[d].slot === slot)), rarity, lvl);
-  // class items: orbs exist at one quality each, so a tier gives only its own orbs (GACHA.orbs)
-  const defs = CLASSES[pick(CLASS_IDS)].off.filter((d) => WEAPONS[d].rarity === undefined || GACHA.orbs[tier].includes(WEAPONS[d].rarity!));
-  return defs.length ? makeItem('weapon', pick(defs), rarity, lvl) : poolItem(tier, lvl);
+  return makeItem('weapon', pick(CLASSES[pick(CLASS_IDS)].off), rarity, lvl);
 }
 
 /** One pull. `pity` = pulls since the last legendary; returns the new value. */

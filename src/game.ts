@@ -5,13 +5,13 @@ import { Creature } from './creature';
 import { BOSS_KITS, BOSS_PARTNERS } from './bosses';
 import type { BossHost, BossKit } from './bosses/kit';
 import {
-  ATTACK_HIT, FACTIONS, PETS, PET_STUN, tokenChance, zoneScaleOf, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
+  ATTACK_HIT, FACTIONS, ORB_LOW_HP, PETS, PET_STUN, tokenChance, zoneScaleOf, type PetDef, ZONE_TIER, HERO, VIEW, HIT_FREEZE, KILL_FX, LEASH, MOB_REGEN_DELAY, MOBS, ORBS, depthMul, mobImpact, RARITY, RESIST_MULT, STAFF_BOLT_SPEED, STAVES, WEAPONS,
   SPAWN_PRESETS, type SpawnPreset, type SpawnPresetId, mobRank, zoneResist, ZONE_FOES, ZONE_SUN, type DamageType, type ResistTier, type ItemDrop, type MobDef, type OrbKind, type StaffElement, type BossAnim, type BossDef, type SoulsDef, type StatId, type WeaponDef, type ZoneDef, type ZoneId, isPctStat,
 } from './config';
 import { ArenaFog, DROP_TINT, FloatingText, FogPuffs, Particles, Pickups, Shockwaves, Spells, StatAuras, Telegraphs, type Bolt } from './fx';
 import { Glows, SunLight, type GlowOpts } from './vfx';
 import {
-  ARMOR, BAG_SIZE, CLASS_SET, armorTrim, copyGain, dropAny, dropIconId, dropItem, fixedRarity, rollDrop, itemClass, itemGuard, itemIcon, itemModel, itemName, itemOrb, passiveOf, sameItem, weaponDamage,
+  ARMOR, BAG_SIZE, CLASS_SET, armorTrim, copyGain, dropAny, dropIconId, dropItem, rollDrop, itemClass, itemGuard, itemIcon, itemModel, itemName, itemOrb, passiveOf, sameItem, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { Input } from './input';
@@ -782,6 +782,8 @@ export class Game {
 
     // regen; much faster in the camp
     let rate = this.regen; // HP per second
+    // the vigor orb's second wind (CLASS_PASSIVE.orb_vigor): faster regen at low HP
+    if (this.hp < this.maxHp * ORB_LOW_HP) rate *= 1 + passiveOf(this.save.weapons[1], 'orb_vigor');
     if (inCamp(p.x, p.z)) rate += (HERO.campRegen / 100) * this.maxHp;
     this.hp = Math.min(this.maxHp, this.hp + rate * dt);
 
@@ -880,7 +882,9 @@ export class Game {
     const crit = Math.random() < s.crit;
     const roll = this.orb?.critDmg;
     const critMul = s.critMul + (roll ? roll[0] + Math.random() * (roll[1] - roll[0]) : 0);
-    const dmg = this.itemDamage(it) * RESIST_MULT[tier] * mult * (crit ? critMul : 1) * (0.9 + Math.random() * 0.2);
+    // the fury orb's frenzy (CLASS_PASSIVE.orb_fury): a double blow
+    const frenzy = Math.random() < passiveOf(this.save.weapons[1], 'orb_fury') ? 2 : 1;
+    const dmg = this.itemDamage(it) * RESIST_MULT[tier] * mult * frenzy * (crit ? critMul : 1) * (0.9 + Math.random() * 0.2);
     // the demon orb's thirst (CLASS_PASSIVE.orb_demon): a crit heals
     const thirst = crit ? passiveOf(this.save.weapons[1], 'orb_demon') : 0;
     if (thirst) this.hp = Math.min(this.maxHp, this.hp + dmg * thirst);
@@ -2299,8 +2303,8 @@ export class Game {
     const s = this.stats;
     const barY = 2.45 * this.heroScale;
     const lift = this.heroBar.el.offsetHeight + 14;
-    // dodge: any blow, boss specials too
-    if (!dot && !exact && Math.random() < s.dodge) {
+    // dodge: any blow, boss specials too (+ the wind orb's tailwind, CLASS_PASSIVE.orb_swift)
+    if (!dot && !exact && Math.random() < s.dodge + passiveOf(this.save.weapons[1], 'orb_swift')) {
       this.fx.spawn(v1.copy(this.hero.position).setY(barY), 'Уклон', 'hurt', 0.6, { color: '#9fe8ff', lift });
       return;
     }
@@ -2806,7 +2810,6 @@ export class Game {
     for (const [kind, defs] of [['weapon', Object.keys(WEAPONS).filter((w) => weaponClass(w))], ['armor', Object.keys(ARMOR)]] as const) {
       for (const def of defs) {
         for (let rarity = 0; rarity < 6; rarity++) {
-          if ((fixedRarity(kind, def) ?? rarity) !== rarity) continue;
           const it = dropItem({ kind, def, rarity });
           if (own.some((x) => sameItem(x, it))) continue;
           this.save.bag.push(it);

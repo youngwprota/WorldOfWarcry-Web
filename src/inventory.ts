@@ -6,7 +6,7 @@ import {
 } from './config';
 import { armorMul, statBreakdown } from './balance';
 import {
-  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, fixedRarity, itemGuard, itemLines, itemName, itemOrb, itemPassive, orbLine, slotOf, weaponBase, weaponDamage,
+  ARMOR, ARMOR_SLOTS, BAG_SIZE, EQUIP_BAR, SLOT_NAME, cellHtml, itemGuard, itemLines, itemName, itemOrb, itemPassive, orbLine, slotOf, weaponBase, weaponDamage,
   type ArmorSlot, type Item, type VisualPart,
 } from './items';
 import { sfx } from './audio';
@@ -513,7 +513,7 @@ export class Inventory {
     const pa = CLASS_PASSIVE[it.def];
     if (pa) {
       const on = itemPassive(it);
-      ability += `<div class="ab-title">Пассивка: ${pa.name}</div><p>${on ? `${on.text[0].toUpperCase()}${on.text.slice(1)}.${fixedRarity(it.kind, it.def) === undefined ? ' Сильнее на более высоком качестве.' : ''}` : `Открывается с качества «${RARITY[CLASS_ITEM.passiveFrom].name}».`}</p>`;
+      ability += `<div class="ab-title">Пассивка: ${pa.name}</div><p>${on ? `${on.text[0].toUpperCase()}${on.text.slice(1)}. Сильнее на более высоком качестве.` : `Открывается с качества «${RARITY[CLASS_ITEM.passiveFrom].name}».`}</p>`;
     }
     const btn = (act: string, label: string, cls = '') => `<button class="btn ${cls}" data-act="${act}">${label}</button>`;
     let actions = '';
