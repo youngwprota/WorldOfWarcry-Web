@@ -243,6 +243,7 @@ export class Game {
   private hp: number;
   private target: Unit | null = null;
   private dead = false;
+  get heroDead() { return this.dead; }
   private deadT = 0;
   private zone: ZoneDef | null = null;
   private shake = 0;
@@ -1811,7 +1812,7 @@ export class Game {
               }
               m.ch.facing = turn(m.ch.facing, Math.atan2(hp.x - m.pos.x, hp.z - m.pos.z), dt * 8);
               m.atkCd -= dt;
-              if (dHero < reach && m.atkCd <= 0 && m.impact < 0) {
+              if (dHero < reach && m.atkCd <= 0 && m.impact < 0 && !m.holdFire) {
                 const period = 1 / def.aps;
                 const impactAt = mobImpact(m.ch.hitTime(def.anim), period);
                 // the next swing waits for this clip to finish

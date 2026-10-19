@@ -145,8 +145,8 @@ export class SiegeHud {
     this.miniEl.style.left = `${(quitRight + comboLeft) / 2 - this.miniEl.offsetWidth / 2}px`;
   }
 
-  confirmLeave(yes: () => void): void {
-    this.ui.confirm('Сдаться?', 'Осада будет прервана. Награда — за тех, кого уже победил.', yes, () => {});
+  confirmLeave(yes: () => void, no: () => void): void {
+    this.ui.confirm('Сдаться?', 'Осада будет прервана. Награда — за тех, кого уже победил.', yes, no);
   }
 
   timer(s: number | null): void {

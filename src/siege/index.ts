@@ -98,7 +98,10 @@ export function installSiege(h: SiegeHost): void {
       director.bind(g);
 
       const inv = r.inv = new Inventory(ui, g);
-      ui.onBag = ui.onArmor = g.onOpenCharacter = g.onOpenBag = () => { input.reset(); inv.open(); };
+      // the run stands still while the bag is open
+      const closeBag = inv.close.bind(inv);
+      inv.close = () => { closeBag(); if (!r.finished) g.paused = false; };
+      ui.onBag = ui.onArmor = g.onOpenCharacter = g.onOpenBag = () => { input.reset(); g.paused = true; inv.open(); };
       ui.onMap = g.onOpenMap = () => ui.toast('Карта недоступна в осаде');
       ui.onGacha = g.onOpenGacha = () => {};
       addEventListener('keydown', r.keys);
@@ -129,6 +132,10 @@ export function installSiege(h: SiegeHost): void {
 
   hud.onButton = () => {
     if (!run) enter();
-    else if (!run.finished) hud.confirmLeave(() => finish(false));
+    else if (!run.finished) {
+      const r = run;
+      r.g!.paused = true;
+      hud.confirmLeave(() => finish(false), () => { if (!r.finished) r.g!.paused = false; });
+    }
   };
 }

@@ -46,6 +46,8 @@ export class Mob extends Unit {
   debug = false;
   /** Leash override (a mode's mobs: Infinity); null = LEASH, a boss's 16. */
   leash: number | null = null;
+  /** A mode keeps this unit from starting an attack (siege archers out of the camera's view). */
+  holdFire = false;
   removed = false;
   /** Seconds left of the "crawling out of the ground" intro; untargetable meanwhile. */
   rise = 0;
