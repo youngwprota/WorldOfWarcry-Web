@@ -191,6 +191,12 @@ export class Glows {
     g.attributes.size.needsUpdate = true;
     g.attributes.alpha.needsUpdate = true;
   }
+
+  dispose() {
+    this.points.removeFromParent();
+    this.points.geometry.dispose();
+    (this.points.material as THREE.Material).dispose();
+  }
 }
 
 interface Ray { mesh: THREE.Mesh; phase: number; speed: number; off: THREE.Vector2; width: number }
@@ -242,5 +248,13 @@ export class SunLight {
       const s = 0.5 - 0.5 * Math.cos(r.phase * Math.PI * 2);
       (r.mesh.material as THREE.ShaderMaterial).uniforms.uA.value = s * s * 0.07 * this.strength;
     }
+  }
+
+  dispose() {
+    this.group.removeFromParent();
+    // one plane geometry shared by the three rays; the template material was never drawn
+    this.rays[0]?.mesh.geometry.dispose();
+    for (const r of this.rays) (r.mesh.material as THREE.Material).dispose();
+    this.rays.length = 0;
   }
 }

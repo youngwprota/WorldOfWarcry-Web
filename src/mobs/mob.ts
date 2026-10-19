@@ -42,8 +42,12 @@ export class Mob extends Unit {
   radius: number;
   /** Spawned by a prop (grave): no respawn, removed after death. */
   temp = false;
-  /** Debug preset pack: no rewards, kills, drops or fight log; not counted by the riser cap, skipped by the timer reset. */
+  /** Debug preset pack or a mode's own spawn: no rewards, kills, drops or fight log; not counted by the riser cap, skipped by the timer reset. */
   debug = false;
+  /** Leash override (a mode's mobs: Infinity); null = LEASH, a boss's 16. */
+  leash: number | null = null;
+  /** A mode keeps this unit from starting an attack (siege archers out of the camera's view). */
+  holdFire = false;
   removed = false;
   /** Seconds left of the "crawling out of the ground" intro; untargetable meanwhile. */
   rise = 0;

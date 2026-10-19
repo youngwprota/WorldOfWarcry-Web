@@ -8,7 +8,7 @@ import { CLASS_DAMAGE_ICON, fmtK, hasIcon, icon, iconImage, resistIcons, rewardC
 import { STAT_ICON, art, hasPng, mini, tintedArt, whiteArt } from './art';
 import type { MobDef } from './config';
 import { sfx } from './audio';
-import type { World } from './world';
+import type { GameWorld } from './gameworld';
 import { CLASSES, CLASS_IDS, type HeroClass } from './party';
 import type { Wearer } from './looks';
 
@@ -777,7 +777,7 @@ export class UI {
   }
 
   // ---------- minimap ----------
-  minimap(hero: THREE.Vector3, facing: number, units: THREE.Vector3[], world: World, marks: MapMark[]) {
+  minimap(hero: THREE.Vector3, facing: number, units: THREE.Vector3[], world: GameWorld, marks: MapMark[]) {
     const g = this.mm;
     const S = 220;
     // the backing store follows the on-screen size (HUD scale, expanded map) × the pixel ratio, so nothing is
@@ -812,7 +812,7 @@ export class UI {
     g.restore();
   }
 
-  private bakeMinimapBg(hero: THREE.Vector3, world: World, px: number, S: number, scale: number) {
+  private bakeMinimapBg(hero: THREE.Vector3, world: GameWorld, px: number, S: number, scale: number) {
     const b = this.mmBg;
     const at = this.mmBgAt;
     const now = performance.now();

@@ -32,6 +32,7 @@ export class PerfHud {
   private el = document.createElement('div');
   private stats = document.createElement('div');
   private graph = document.createElement('canvas');
+  private fps = document.createElement('div');
   private ctx = this.graph.getContext('2d')!;
   private history = new Float32Array(GRAPH_W);
   private head = 0;
@@ -50,28 +51,32 @@ export class PerfHud {
   private calls = 0;
   private shadowCalls = 0;
   private winStart = 0;
+  private full = false;
 
   constructor(private renderer: THREE.WebGLRenderer) {
     this.el.id = 'perfhud';
-    this.el.className = 'hidden';
+    this.el.className = 'brief';
     this.stats.className = 'perf-stats';
+    this.fps.className = 'perf-stats perf-fps';
     this.graph.width = GRAPH_W;
     this.graph.height = GRAPH_H;
-    this.el.append(this.stats, this.graph);
+    this.el.append(this.stats, this.graph, this.fps);
     this.gl = renderer.getContext() as WebGL2RenderingContext;
     this.ext = this.gl.getExtension('EXT_disjoint_timer_query_webgl2') as TimerExt | null;
     this.countShadowCalls();
   }
 
-  get on() { return !this.el.classList.contains('hidden'); }
+  /** The full overlay; FPS alone is always shown. */
+  get on() { return this.full; }
 
-  /** Shown unless the player turned it off (remembered between sessions). */
-  get saved() { try { return localStorage.getItem(KEY) !== '0'; } catch { return true; } }
+  /** The full overlay was left open (remembered between sessions). */
+  get saved() { try { return localStorage.getItem(KEY) === '1'; } catch { return false; } }
 
-  toggle(on = !this.on) {
+  toggle(on = !this.full) {
     if (!this.el.isConnected) document.getElementById('equipbar')?.appendChild(this.el);
     try { localStorage.setItem(KEY, on ? '1' : '0'); } catch { /* private mode */ }
-    this.el.classList.toggle('hidden', !on);
+    this.full = on;
+    this.el.classList.toggle('brief', !on);
     // post-processing renders several passes per frame: count draw calls for the whole frame
     this.renderer.info.autoReset = !on;
     prof.on = on;
@@ -81,8 +86,8 @@ export class PerfHud {
   }
 
   begin() {
-    if (!this.on) return;
     this.t0 = performance.now();
+    if (!this.full) return;
     this.renderer.info.reset();
     if (this.ext) this.readQueries(this.ext);
     if (this.ext && !this.query) {
@@ -92,7 +97,6 @@ export class PerfHud {
   }
 
   end() {
-    if (!this.on) return;
     const now = performance.now();
     if (this.ext && this.query) {
       this.gl.endQuery(this.ext.TIME_ELAPSED_EXT);
@@ -105,9 +109,11 @@ export class PerfHud {
       const dt = now - this.last;
       this.frameMs += dt;
       this.frames++;
-      this.history[this.head] = dt;
-      this.head = (this.head + 1) % GRAPH_W;
-      this.drawGraph();
+      if (this.full) {
+        this.history[this.head] = dt;
+        this.head = (this.head + 1) % GRAPH_W;
+        this.drawGraph();
+      }
     } else this.winStart = now;
     this.last = now;
     if (this.frames && now - this.winStart >= REFRESH * 1000) this.flush(now);
@@ -162,8 +168,13 @@ export class PerfHud {
     const gpu = this.gpuN ? `${gpuLoad.toFixed(0)}% (${(this.gpuMs / this.gpuN).toFixed(1)} ms)` : 'n/a';
     const calls = Math.round(this.calls / this.frames);
     const shadow = Math.round(this.shadowCalls / this.frames);
+    this.fps.innerHTML = `<span>FPS</span><b class="${grade(-fps, -25, -15)}">${fps.toFixed(0)}</b>`;
+    if (!this.full) {
+      this.frames = this.frameMs = this.cpuMs = this.calls = this.shadowCalls = 0;
+      this.winStart = now;
+      return;
+    }
     let html =
-      `<span>FPS</span><b class="${grade(-fps, -25, -15)}">${fps.toFixed(0)}</b>` +
       `<span>Frame Time</span><b class="${grade(ft, 16.7, 33.4)}">${ft.toFixed(1)} ms</b>` +
       `<span>CPU Load</span><b class="${grade(cpuLoad, 60, 85)}">${cpuLoad.toFixed(0)}% (${cpu.toFixed(1)} ms)</b>` +
       `<span>GPU Load</span><b class="${grade(gpuLoad, 75, 90)}">${gpu}</b>` +

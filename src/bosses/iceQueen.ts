@@ -68,6 +68,8 @@ function softDiscTexture() {
  */
 const iceKit = (cfg: IceCfg): BossKitFactory => (host, boss) => {
   const at = new THREE.Vector3();
+  // the blow circle's centre: `at` is reused by the snow and frost puffs while it winds up
+  const blowAt = new THREE.Vector3();
   let radius = cfg.zoneR;
   let blowCd = 1;
   let winding = false;
@@ -206,9 +208,9 @@ const iceKit = (cfg: IceCfg): BossKitFactory => (host, boss) => {
     if (tag !== gen || boss.state === 'dead') return;
     winding = false;
     const hp = host.heroPos();
-    const dx = hp.x - at.x;
-    const dz = hp.z - at.z;
-    at.y = 0.2;
+    const dx = hp.x - blowAt.x;
+    const dz = hp.z - blowAt.z;
+    at.copy(blowAt).setY(0.2);
     host.particles.burst(at, FROST, 16, 0.2, 8, 0.8);
     host.waves.add(at, cfg.blowR, FROST, 0.45);
     host.puffs.cloud(at, cfg.blowR * 0.8, SNOW, 8, 1.2);
@@ -270,8 +272,8 @@ const iceKit = (cfg: IceCfg): BossKitFactory => (host, boss) => {
       winding = true;
       windT = BLOW_DELAY;
       gatherT = 0;
-      at.set(bp.x, 0, bp.z);
-      host.telegraphs.add(at, cfg.blowR, BLOW_DELAY, onBlow, gen);
+      blowAt.set(bp.x, 0, bp.z);
+      host.telegraphs.add(blowAt, cfg.blowR, BLOW_DELAY, onBlow, gen);
       boss.animNext = BLOW_ANIM;
       boss.animDelay = Math.max(0, BLOW_DELAY - ATTACK_HIT[BLOW_ANIM]);
       host.bark(boss, phase2 ? 'Замри!' : 'Холод...');
