@@ -145,4 +145,11 @@ export class Sandstorm {
     this.sheet.position.x = Math.round(hero.x);
     this.sheet.position.z = Math.round(hero.z);
   }
+
+  /** The noise texture (ATMOS.noise) is module-level shared and stays. */
+  dispose() {
+    this.group.removeFromParent();
+    this.sheet.geometry.dispose();
+    (this.sheet.material as THREE.Material).dispose();
+  }
 }

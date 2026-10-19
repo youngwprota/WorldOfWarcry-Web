@@ -202,6 +202,7 @@ export class Trail {
   }
 
   dispose() {
+    this.mesh.removeFromParent();
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
   }

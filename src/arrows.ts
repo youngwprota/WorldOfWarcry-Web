@@ -86,6 +86,13 @@ export class Arrows {
     this.list.length = 0;
   }
 
+  /** Pooled arrows share their geometry and materials with the asset sources, so only the scene links go. */
+  dispose() {
+    this.clear();
+    for (const pool of this.free.values()) for (const o of pool) o.removeFromParent();
+    this.free.clear();
+  }
+
   private release(f: Flight) {
     f.obj.removeFromParent();
     let pool = this.free.get(f.key);

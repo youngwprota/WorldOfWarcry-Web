@@ -122,7 +122,12 @@ function detailTexture() {
 
 export type { Pond } from './water';
 
-const DIRT = '#cfae80';
+/** A square piece of the world the ground layers, grass and mist cover (the island: MAP_BOX). */
+export interface MapBox { x: number; z: number; size: number }
+
+export const DIRT = '#cfae80';
+const MEADOW = 0xa6d45a;
+const SHADE = 0x2f7a46;
 const CEM_DIRT = '#a49cc8';
 
 /** How thick grass grows per location (0..1); the shader thins it further with noise. */
@@ -185,8 +190,8 @@ export function bakeGroundMaps(ponds: Pond[]) {
   const shore = new Uint8Array(N * N * 4);
   const zoneCols = ZONES.map((z) => [new THREE.Color(z.ground), new THREE.Color(z.ground2)]);
   const zoneGrass = ZONE_IDS.map((id) => GRASS_OF[id]);
-  const meadow = new THREE.Color(0xa6d45a);
-  const shade = new THREE.Color(0x2f7a46);
+  const meadow = new THREE.Color(MEADOW);
+  const shade = new THREE.Color(SHADE);
   const cemPatch = new THREE.Color(0x5a5494);
   const arenaStone = new THREE.Color(0x3e3a5c);
   const dirt = new THREE.Color(DIRT);
@@ -336,6 +341,59 @@ export function bakeGroundMaps(ponds: Pond[]) {
 }
 
 /**
+ * The ground of one flat zone over `box` (a mode's own map): the same colour and grass-density rules as bakeGroundMaps
+ * for that zone, no ocean, no height. `ground` (size px) is the colour picture, `grass` (512 px) the GroundLayers input.
+ */
+export function bakeZoneGround(box: MapBox, id: ZoneId, size = 2048) {
+  const N = 512;
+  const k = box.size / N;
+  const zone = ZONES[ZONE_INDEX[id]];
+  const lo = new THREE.Color(zone.ground);
+  const hi = new THREE.Color(zone.ground2);
+  const meadow = new THREE.Color(MEADOW);
+  const shade = new THREE.Color(SHADE);
+  const c = new THREE.Color();
+  const srgb = { r: 0, g: 0, b: 0 };
+  const mk = () => {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = N;
+    return cv;
+  };
+  const base = mk();
+  const grass = mk();
+  const bctx = base.getContext('2d')!;
+  const gctx = grass.getContext('2d')!;
+  const img = bctx.createImageData(N, N);
+  const gimg = gctx.createImageData(N, N);
+  const h = Math.round(((0 - HEIGHT_LO) / HEIGHT_K) * 255);
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const x = box.x + (i + 0.5) * k;
+      const z = box.z + (j + 0.5) * k;
+      const n1 = fbm(x * 0.08, z * 0.08);
+      const n2 = fbm(x * 0.25 + 5, z * 0.25 - 3, 3);
+      c.copy(lo).lerp(hi, smooth(0.35, 0.7, n1));
+      if (id === 'forest') c.lerp(meadow, smooth(0.62, 0.8, n2) * 0.4).lerp(shade, smooth(0.42, 0.22, n1) * 0.35);
+      c.offsetHSL(0, 0, (n2 - 0.5) * 0.06);
+      const o = (j * N + i) * 4;
+      c.getRGB(srgb, THREE.SRGBColorSpace);
+      img.data[o] = srgb.r * 255; img.data[o + 1] = srgb.g * 255; img.data[o + 2] = srgb.b * 255; img.data[o + 3] = 255;
+      gimg.data[o] = Math.min(1, GRASS_OF[id] * (0.55 + 0.45 * smooth(0.3, 0.75, n2 * 0.6 + n1 * 0.4))) * 255;
+      gimg.data[o + 1] = h;
+      gimg.data[o + 3] = 255;
+    }
+  }
+  bctx.putImageData(img, 0, 0);
+  gctx.putImageData(gimg, 0, 0);
+  const ground = document.createElement('canvas');
+  ground.width = ground.height = size;
+  const g = ground.getContext('2d')!;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(base, 0, 0, size, size);
+  return { ground, grass };
+}
+
+/**
  * The trail: a darker worn rim, a soft wide underlay, a solid core and ragged speckles along the edges. Each layer is
  * stroked for every trail at once (one path per colour), so at a junction one trail's rim never lands on the other's
  * core and overlapping translucent strokes never double up.
@@ -404,6 +462,21 @@ function traceLine(g: CanvasRenderingContext2D, line: [number, number][], X: (x:
   }
 }
 
+/** The worn-path layers (rim / underlay / core) over all `lines` at once; also the siege road. */
+export function drawRoads(g: CanvasRenderingContext2D, lines: [number, number][][], X: (x: number) => number, Z: (z: number) => number, ppm: number, width: number, rimOnly = false) {
+  g.lineCap = g.lineJoin = 'round';
+  const layers: [number, number, string][] = rimOnly ? [[width * 1.7, 0.18, '#5a4630']] : [[width * 1.35, 0.25, DIRT], [width, 0.85, DIRT]];
+  for (const [wm, alpha, col] of layers) {
+    g.globalAlpha = alpha;
+    g.strokeStyle = col;
+    g.lineWidth = wm * ppm;
+    g.beginPath();
+    for (const line of lines) traceLine(g, line, X, Z);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+}
+
 /**
  * Worn paths through the other locations: a soft underlay and a core, like the trail without the speckles; each
  * layer is one path over all of them, so their junctions blend. `rimOnly`: just their darker worn rim (drawn before
@@ -412,17 +485,8 @@ function traceLine(g: CanvasRenderingContext2D, line: [number, number][], X: (x:
 function drawLandTrails(g: CanvasRenderingContext2D, ppm: number, width: number, rimOnly = false) {
   const X = (x: number) => (x - MAP_BOX.x) * ppm;
   const Z = (z: number) => (z - MAP_BOX.z) * ppm;
-  g.lineCap = g.lineJoin = 'round';
-  const layers: [number, number, string][] = rimOnly ? [[width * 1.7, 0.18, '#5a4630']] : [[width * 1.35, 0.25, DIRT], [width, 0.85, DIRT]];
-  for (const [wm, alpha, col] of layers) {
-    g.globalAlpha = alpha;
-    g.strokeStyle = col;
-    g.lineWidth = wm * ppm;
-    g.beginPath();
-    for (const line of LAND_TRAILS) traceLine(g, line, X, Z);
-    g.stroke();
-  }
-  if (rimOnly) { g.globalAlpha = 1; return; }
+  drawRoads(g, LAND_TRAILS, X, Z, ppm, width, rimOnly);
+  if (rimOnly) return;
   // the abandoned path fades out piece by piece past the Snow Pass gate
   g.strokeStyle = CEM_DIRT;
   g.lineCap = 'butt';
@@ -448,9 +512,11 @@ export class GroundLayers {
   readonly texture: THREE.DataTexture;
   private grass: CanvasRenderingContext2D;
   private ao: CanvasRenderingContext2D;
-  private ppm = GroundLayers.SIZE / MAP_BOX.size;
+  private ppm: number;
 
-  constructor(grassBase: HTMLCanvasElement) {
+  /** `box`: the area it covers (default the island); `trails`: pre-clear the island's trails (a mode's own map has none). */
+  constructor(grassBase: HTMLCanvasElement, private box: MapBox = MAP_BOX, trails = true) {
+    this.ppm = GroundLayers.SIZE / box.size;
     const S = GroundLayers.SIZE;
     const mk = () => {
       const c = document.createElement('canvas');
@@ -465,12 +531,12 @@ export class GroundLayers {
     this.ao.fillRect(0, 0, S, S);
     // no grass on the trails: multiply red away, keep the height in green
     const g = this.grass;
-    const X = (x: number) => (x - MAP_BOX.x) * this.ppm;
-    const Z = (z: number) => (z - MAP_BOX.z) * this.ppm;
+    const X = (x: number) => (x - box.x) * this.ppm;
+    const Z = (z: number) => (z - box.z) * this.ppm;
     g.globalCompositeOperation = 'multiply';
     g.lineCap = g.lineJoin = 'round';
     g.strokeStyle = 'rgb(0,255,255)';
-    for (const [wm, alpha] of [[PATH_W * 2.1, 0.45], [PATH_W * 1.45, 1]]) {
+    for (const [wm, alpha] of trails ? [[PATH_W * 2.1, 0.45], [PATH_W * 1.45, 1]] : []) {
       g.globalAlpha = alpha;
       g.lineWidth = wm * this.ppm;
       g.beginPath();
@@ -487,8 +553,8 @@ export class GroundLayers {
 
   /** A soft contact shadow round (x, z): `r` metres out, `k` = darkness at the centre (0..1). */
   occlude(x: number, z: number, r: number, k: number) {
-    const px = (x - MAP_BOX.x) * this.ppm;
-    const pz = (z - MAP_BOX.z) * this.ppm;
+    const px = (x - this.box.x) * this.ppm;
+    const pz = (z - this.box.z) * this.ppm;
     const pr = Math.max(1.5, r * this.ppm);
     const g = this.ao;
     const gr = g.createRadialGradient(px, pz, 0, px, pz, pr);
@@ -501,8 +567,8 @@ export class GroundLayers {
 
   /** No grass within `r` metres of (x, z) (a building, a rock), fading out over the last third. */
   clear(x: number, z: number, r: number) {
-    const px = (x - MAP_BOX.x) * this.ppm;
-    const pz = (z - MAP_BOX.z) * this.ppm;
+    const px = (x - this.box.x) * this.ppm;
+    const pz = (z - this.box.z) * this.ppm;
     const pr = Math.max(1, r * this.ppm);
     const g = this.grass;
     const gr = g.createRadialGradient(px, pz, 0, px, pz, pr);
@@ -526,6 +592,11 @@ export class GroundLayers {
       out[i * 4 + 3] = gd[i * 4 + 2];
     }
     this.texture.needsUpdate = true;
+  }
+
+  dispose() {
+    this.texture.dispose();
+    this.grass.canvas.width = this.grass.canvas.height = this.ao.canvas.width = this.ao.canvas.height = 0;
   }
 }
 
@@ -557,7 +628,18 @@ export function zoneTexture() {
   return t;
 }
 
-const mapBox = () => new THREE.Vector4(MAP_BOX.x, MAP_BOX.z, MAP_BOX.size, MAP_BOX.size);
+/** zoneTexture() for a single zone everywhere (one texel): the mist of a mode's own map. */
+export function flatZoneTexture(id: ZoneId) {
+  const z = ZONES[ZONE_INDEX[id]];
+  const c = new THREE.Color(z.mistColor).multiplyScalar(ZONE_LIGHT[id] ?? 1);
+  const t = new THREE.DataTexture(new Uint8Array([c.r * 255, c.g * 255, c.b * 255, z.mist * 255]), 1, 1, THREE.RGBAFormat);
+  t.magFilter = t.minFilter = THREE.LinearFilter;
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  t.needsUpdate = true;
+  return t;
+}
+
+const mapBox = (box: MapBox = MAP_BOX) => new THREE.Vector4(box.x, box.z, box.size, box.size);
 
 /** Broad painterly variation shared by the ground and the grass on it: cool darker hollows, warm sunlit patches. */
 const GROUND_TINT = /* glsl */ `
@@ -575,14 +657,20 @@ export function groundColorTexture(groundCanvas: HTMLCanvasElement) {
   return t;
 }
 
-export function buildGround(colorMap: THREE.Texture, layers: GroundLayers): THREE.Mesh {
-  const seg = 150;
-  const geo = new THREE.PlaneGeometry(MAP_BOX.size, MAP_BOX.size, seg, seg).rotateX(-Math.PI / 2);
-  geo.translate(MAP_BOX.x + MAP_BOX.size / 2, 0, MAP_BOX.z + MAP_BOX.size / 2);
-  const pos = geo.getAttribute('position');
-  for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
-  geo.computeVertexNormals();
-  const detail = detailTexture();
+/** The detail tile is shared by every ground (never disposed, like ATMOS.noise). */
+let detailTex: THREE.DataTexture | null = null;
+
+/** `box` / `flat`: a mode's own map is a flat plane (no island heights). */
+export function buildGround(colorMap: THREE.Texture, layers: GroundLayers, box: MapBox = MAP_BOX, flat = false): THREE.Mesh {
+  const seg = flat ? 1 : 150;
+  const geo = new THREE.PlaneGeometry(box.size, box.size, seg, seg).rotateX(-Math.PI / 2);
+  geo.translate(box.x + box.size / 2, 0, box.z + box.size / 2);
+  if (!flat) {
+    const pos = geo.getAttribute('position');
+    for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
+    geo.computeVertexNormals();
+  }
+  const detail = (detailTex ??= detailTexture());
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   // Baked colours are looked up by world position, then painted over: strokes, patches, contact shadows, clouds.
   mat.onBeforeCompile = (sh) => {
@@ -590,7 +678,7 @@ export function buildGround(colorMap: THREE.Texture, layers: GroundLayers): THRE
     sh.uniforms.uColorMap = { value: colorMap };
     sh.uniforms.uLayers = { value: layers.texture };
     sh.uniforms.uDetail = { value: detail };
-    sh.uniforms.uMapBox = { value: mapBox() };
+    sh.uniforms.uMapBox = { value: mapBox(box) };
     sh.vertexShader = 'uniform vec4 uMapBox;\nvarying vec2 vIslandUv;\nvarying vec3 vGw;\n' + sh.vertexShader.replace(
       '#include <begin_vertex>',
       '#include <begin_vertex>\n vec4 gw4 = modelMatrix * vec4(transformed, 1.0); vGw = gw4.xyz; vIslandUv = (gw4.xz - uMapBox.xy) / uMapBox.zw;',
@@ -640,7 +728,7 @@ const GRASS_AHEAD = 6;
  * how high is the ground, how shaded) and takes its colour from the baked ground under it, so it always matches
  * the zone it stands in. Blades sway in the wind and bend away from the hero.
  */
-export function buildGrassField(colorMap: THREE.Texture, layers: GroundLayers, count = 9000) {
+export function buildGrassField(colorMap: THREE.Texture, layers: GroundLayers, count = 9000, box: MapBox = MAP_BOX) {
   const r = prng(99);
   // one tuft: seven blades of mixed height scattered round a small centre, leaning one way more than the others;
   // normals point up so blades shade like the ground
@@ -672,7 +760,7 @@ export function buildGrassField(colorMap: THREE.Texture, layers: GroundLayers, c
     atmosUniforms(sh);
     Object.assign(sh.uniforms, {
       uCenter, uHero, uTile: { value: GRASS_TILE }, uLayers: { value: layers.texture }, uColorMap: { value: colorMap },
-      uBox: { value: mapBox() }, uHLo: { value: HEIGHT_LO }, uHK: { value: HEIGHT_K },
+      uBox: { value: mapBox(box) }, uHLo: { value: HEIGHT_LO }, uHK: { value: HEIGHT_K },
     });
     sh.vertexShader = ATMOS_GLSL + GROUND_TINT + /* glsl */ `
       uniform vec2 uCenter; uniform vec2 uTile; uniform vec3 uHero; uniform sampler2D uLayers; uniform sampler2D uColorMap;
@@ -754,24 +842,25 @@ export function buildGrassField(colorMap: THREE.Texture, layers: GroundLayers, c
  * each its own tint, a few missing, whole stones dropping out along the ragged edge.
  * `c`: centre and radius of the square, `to`: the end of the road (the gate).
  */
-export function buildCobbles(c: { x: number; z: number; r: number }, to: { x: number; z: number }) {
-  const minX = Math.min(c.x - c.r, to.x) - 2;
-  const maxX = Math.max(c.x + c.r, to.x) + 2;
-  const minZ = Math.min(c.z - c.r, to.z) - 2;
-  const maxZ = Math.max(c.z + c.r, to.z) + 2;
+export function buildCobbles(c: { x: number; z: number; r: number }, to: { x: number; z: number }, rect?: { x0: number; x1: number; z0: number; z1: number }) {
+  const minX = Math.min(c.x - c.r, to.x, rect?.x0 ?? Infinity) - 2;
+  const maxX = Math.max(c.x + c.r, to.x, rect?.x1 ?? -Infinity) + 2;
+  const minZ = Math.min(c.z - c.r, to.z, rect?.z0 ?? Infinity) - 2;
+  const maxZ = Math.max(c.z + c.r, to.z, rect?.z1 ?? -Infinity) + 2;
   const geo = new THREE.PlaneGeometry(maxX - minX, maxZ - minZ).rotateX(-Math.PI / 2).translate((minX + maxX) / 2, 0.015, (minZ + maxZ) / 2);
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, polygonOffset: true, polygonOffsetFactor: -2 });
   mat.onBeforeCompile = (sh) => {
     atmosUniforms(sh);
     Object.assign(sh.uniforms, {
       uC: { value: new THREE.Vector3(c.x, c.z, c.r) }, uTo: { value: new THREE.Vector2(to.x, to.z) },
+      uRect: { value: rect ? new THREE.Vector4(rect.x0, rect.z0, rect.x1, rect.z1) : new THREE.Vector4(1e5, 1e5, -1e5, -1e5) },
     });
     sh.vertexShader = 'varying vec3 vCw;\n' + sh.vertexShader.replace(
       '#include <begin_vertex>',
       '#include <begin_vertex>\n vCw = (modelMatrix * vec4(transformed, 1.0)).xyz;',
     );
     sh.fragmentShader = ATMOS_GLSL + /* glsl */ `
-      uniform vec3 uC; uniform vec2 uTo; varying vec3 vCw;
+      uniform vec3 uC; uniform vec2 uTo; uniform vec4 uRect; varying vec3 vCw;
       vec2 cHash2(vec2 p) { p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3))); return fract(sin(p) * 43758.5453); }
       float cHash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 15731.743); }
       // nearest stone: x = distance to its centre, y = distance to the mortar (F2 - F1), zw = the stone's cell
@@ -803,7 +892,9 @@ export function buildCobbles(c: { x: number; z: number; r: number }, to: { x: nu
       float wob = (texture2D(uAtmosNoise, centre * 0.11).g - 0.5) * 2.2;
       float inSq = uC.z + wob - length(centre - uC.xy);
       float inRoad = 0.95 + wob * 0.35 - cRoad(centre);
-      float keep = max(inSq, inRoad);
+      // an optional paved rectangle (x0, z0, x1, z1): distance inside its nearest edge
+      float inRect = min(min(centre.x - uRect.x, uRect.z - centre.x), min(centre.y - uRect.y, uRect.w - centre.y)) + wob;
+      float keep = max(max(inSq, inRoad), inRect);
       if (keep < 0.0 || h < 0.035 || (keep < 1.2 && h < 0.3)) discard;
       float mortar = smoothstep(0.025, 0.07, v.y);
       if (mortar < 0.02) discard;
@@ -890,7 +981,7 @@ export function buildRitual(x: number, z: number, r: number, time: { value: numb
  * Ground mist: large layers with drifting fbm noise. Density follows the zone weights
  * (almost none in camp, light in the forest, thick in the cemetery) and fades out over the sea.
  */
-export function buildMist(time: { value: number }, zoneTex: THREE.Texture) {
+export function buildMist(time: { value: number }, zoneTex: THREE.Texture, box: MapBox = MAP_BOX) {
   const group = new THREE.Group();
   const make = (y: number, scale: number, alpha: number, speed: number) => {
     const mat = new THREE.ShaderMaterial({
@@ -898,7 +989,7 @@ export function buildMist(time: { value: number }, zoneTex: THREE.Texture) {
       depthWrite: false,
       uniforms: {
         uTime: time, uScale: { value: scale }, uAlpha: { value: alpha }, uSpeed: { value: speed },
-        uZone: { value: zoneTex }, uBox: { value: mapBox() },
+        uZone: { value: zoneTex }, uBox: { value: mapBox(box) },
         uCam: { value: new THREE.Vector3() },
       },
       vertexShader: 'varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
@@ -921,8 +1012,8 @@ export function buildMist(time: { value: number }, zoneTex: THREE.Texture) {
           gl_FragColor = vec4(col, a);
         }`,
     });
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(MAP_BOX.size, MAP_BOX.size).rotateX(-Math.PI / 2), mat);
-    m.position.set(MAP_BOX.x + MAP_BOX.size / 2, y, MAP_BOX.z + MAP_BOX.size / 2);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(box.size, box.size).rotateX(-Math.PI / 2), mat);
+    m.position.set(box.x + box.size / 2, y, box.z + box.size / 2);
     m.renderOrder = 5;
     group.add(m);
     return mat;

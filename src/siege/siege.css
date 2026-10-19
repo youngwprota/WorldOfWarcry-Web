@@ -1,0 +1,93 @@
+/* Siege mode HUD. Only transform and opacity ever animate. */
+
+/* entry button: the forge/bag look (bare art icon, no plate), one slot above the forge;
+   +8px because the anvil art starts low in its box, so the plain slot step looks wider than forge-to-bag */
+#btn-siege { position: absolute; right: 14px; top: calc(50% - 31.5px - 2 * (63px + 14px) + 8px); width: 63px; height: 63px; background: none; border: 0; box-shadow: none; }
+#btn-siege .svgi { width: 54px; height: 54px; margin-top: -8px; filter: drop-shadow(0 3px 0 var(--ink)); }
+#btn-siege span { white-space: nowrap; }
+#btn-siege.run { display: none; }
+/* surrender: the settings plate, right under the settings button, only during a run */
+#btn-siege-quit { display: none; }
+#btn-siege-quit.run { display: flex; }
+
+#app.in-siege #btn-gacha, #app.in-siege #zone-foes, #app.in-siege #debug, #app.in-siege #clear { display: none !important; }
+
+#siege-hud { position: absolute; inset: 0; pointer-events: none; display: none; }
+#siege-hud.on { display: block; }
+
+/* timer pill, top centre */
+.sg-timer { position: absolute; left: 50%; top: calc(12px + env(safe-area-inset-top)); transform: translateX(-50%); min-width: 132px; padding: 4px 16px 6px; border: 2.7px solid #000; border-radius: 18px; text-align: center; background: var(--gloss), var(--wood-deep); box-shadow: inset 0 -5px 0 #0003, 0 4px 0 #0005; }
+.sg-timer small { display: block; min-height: 12px; font-size: 11px; font-weight: 900; line-height: 12px; letter-spacing: 0.4px; text-transform: uppercase; color: var(--cream); text-shadow: var(--stroke-s); }
+.sg-timer .sg-row { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.sg-timer b { font-size: 30px; font-weight: 900; line-height: 32px; color: #fff; font-variant-numeric: tabular-nums; text-shadow: var(--stroke), 0 3px 0 var(--ink); }
+.sg-timer.idle b { opacity: 0.6; }
+.sg-timer .sg-glow { position: absolute; inset: -3px; border-radius: 20px; box-shadow: 0 0 14px 2px #ff3b3b, inset 0 0 12px #ff3b3b; opacity: 0; }
+.sg-timer.low b { color: #ff7d7d; }
+.sg-timer.low .sg-glow { animation: sg-low 0.8s ease-in-out infinite alternate; }
+@keyframes sg-low { from { opacity: 0.15; } to { opacity: 0.95; } }
+
+/* mini-boss counter chip, above the combo */
+.sg-mini { position: absolute; left: 80px; top: calc(var(--row, 107px) - 15px); display: flex; align-items: center; gap: 4px; padding: 2px 10px 2px 6px; border: 2.7px solid #000; border-radius: 14px; background: var(--gloss), linear-gradient(#ffb04a, #e0661a); box-shadow: inset 0 -4px 0 #0003, 0 3px 0 #0005; transform-origin: 50% 50%; }
+.sg-mini b { font-size: 18px; font-weight: 900; line-height: 22px; color: #fff; text-shadow: var(--stroke-s); font-variant-numeric: tabular-nums; }
+
+/* kill counter, top centre; its number is centred on the surrender row (hud.ts alignRow) */
+#siege-combo { --c: #fff; position: absolute; left: 50%; top: calc(var(--row, 107px) - 37px); margin-left: -62px; width: 124px; text-align: center; opacity: 0; transition: opacity 0.2s; }
+#siege-combo.on { opacity: 1; }
+#siege-combo.t1 { --c: #ffe14a; }
+#siege-combo.t2 { --c: #ff9a2e; }
+#siege-combo.t3 { --c: #ff4a3a; }
+#siege-combo.t4 { --c: #d68bff; }
+.sc-num { position: relative; font-size: 70px; font-weight: 900; line-height: 74px; color: var(--c); font-variant-numeric: tabular-nums; text-shadow: var(--stroke), 0 5px 0 var(--ink); will-change: transform; }
+#siege-combo.t4 .sc-num { font-size: 60px; }
+.sc-cap { margin-top: -2px; font-size: 13px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; color: #fff; text-shadow: var(--stroke-s); }
+.sc-ring { position: absolute; left: 50%; top: -7px; width: 90px; height: 90px; margin-left: -45px; border-radius: 50%; border: 6px solid var(--c); opacity: 0; }
+.sc-aura { position: absolute; left: 50%; top: -37px; width: 150px; height: 150px; margin-left: -75px; border-radius: 50%; opacity: 0; transition: opacity 0.3s; background: radial-gradient(circle, var(--c) 0%, transparent 62%); }
+#siege-combo:is(.t2, .t3) .sc-aura { opacity: 0.3; }
+#siege-combo.t4 .sc-aura { opacity: 0.6; background: conic-gradient(#c98bff00, #c98bffcc, #ff6ad500 40%, #8a3de8cc 65%, #c98bff00); -webkit-mask-image: radial-gradient(circle, #000 25%, transparent 66%); mask-image: radial-gradient(circle, #000 25%, transparent 66%); animation: sg-spin 2.4s linear infinite; }
+@keyframes sg-spin { to { transform: rotate(360deg); } }
+.sc-chain { position: absolute; right: -4px; top: -6px; padding: 1px 8px; border: 2.5px solid var(--ink); border-radius: 10px; background: linear-gradient(#ffb04a, #e0661a); font-size: 18px; font-weight: 900; line-height: 22px; color: #fff; text-shadow: var(--stroke-s); transform: rotate(8deg); opacity: 0; transition: opacity 0.15s; }
+.sc-chain.on { opacity: 1; }
+
+/* banners */
+.sg-ann, .sg-mile { position: absolute; left: 0; right: 0; text-align: center; opacity: 0; }
+.sg-ann { top: 22%; padding: 0 20px; font-size: 28px; font-weight: 900; text-transform: uppercase; color: #fff; text-shadow: var(--stroke), 0 4px 0 var(--ink); }
+.sg-ann.mini { color: #ffa23a; text-shadow: var(--stroke), 0 4px 0 var(--ink), 0 0 22px #ff7a1a; }
+.sg-ann.wave { color: #ffe14a; }
+.sg-ann.gate { color: #ffe14a; font-size: 36px; text-shadow: var(--stroke), 0 5px 0 var(--ink), 0 0 26px #ffb21a; }
+.sg-mile { --c: #fff; top: 31%; }
+.sg-mile.t1 { --c: #ffe14a; }
+.sg-mile.t2 { --c: #ff9a2e; }
+.sg-mile.t3 { --c: #ff4a3a; }
+.sg-mile.t4 { --c: #d68bff; }
+.sg-mile b { position: relative; font-size: 44px; font-weight: 900; color: var(--c); text-shadow: var(--stroke), 0 5px 0 var(--ink), 0 0 26px var(--c); }
+.sg-rays { position: absolute; left: 50%; top: 50%; width: 400px; height: 400px; margin: -200px 0 0 -200px; border-radius: 50%; opacity: 0; background: repeating-conic-gradient(var(--c) 0 6deg, transparent 6deg 20deg); -webkit-mask-image: radial-gradient(circle, #000 5%, transparent 68%); mask-image: radial-gradient(circle, #000 5%, transparent 68%); }
+
+/* results */
+.sg-res h2 { font-size: 28px; }
+.sg-res.win h2 { color: #c8ff7a; }
+.sg-res.lose h2 { color: #ff9a9a; }
+.sg-pct { display: flex; align-items: baseline; justify-content: center; gap: 2px; margin: 6px 0 2px; font-weight: 900; color: #ffe14a; text-shadow: var(--stroke), 0 5px 0 var(--ink); }
+.sg-pct b { font-size: 76px; line-height: 80px; font-variant-numeric: tabular-nums; }
+.sg-pct i { font-style: normal; font-size: 32px; }
+.sg-meter { position: relative; height: 20px; margin: 4px 6px 12px; border: 3px solid var(--ink); border-radius: 12px; background: linear-gradient(#2a1a10, #4a3020); box-shadow: inset 0 3px 0 #0006, 0 3px 0 var(--ink); overflow: hidden; }
+.sg-meter i { position: absolute; inset: 0; border-radius: 0 9px 9px 0; background: linear-gradient(#ffe56a, #ffa412); transform-origin: 0 50%; transform: scaleX(0); }
+.sg-meter u { position: absolute; top: 3px; bottom: 3px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: #0000004d; }
+.sg-stats { display: flex; gap: 8px; }
+.sg-stats span { flex: 1; padding: 6px 4px; border-radius: 12px; background: var(--wood-deep); box-shadow: inset 0 3px 0 #0005; font-size: 11px; font-weight: 900; text-transform: uppercase; color: var(--cream); }
+.sg-stats b { display: block; font-size: 20px; line-height: 24px; color: #fff; text-shadow: var(--stroke-s); font-variant-numeric: tabular-nums; }
+.sg-reward { margin-top: 12px; }
+.sg-reward small { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 900; letter-spacing: 1px; text-transform: uppercase; color: var(--cream); }
+.sg-loots { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; min-height: 60px; }
+.sg-loots em { font-size: 13px; font-weight: 700; font-style: normal; color: var(--cream); }
+.sg-loot, .sg-pull { opacity: 0; animation: sg-loot 0.4s cubic-bezier(0.3, 1.6, 0.5, 1) forwards; }
+.sg-pull { display: inline-flex; align-items: center; gap: 2px; padding: 4px 10px 4px 6px; border: 3px solid var(--ink); border-radius: 14px; background: var(--wood-deep); box-shadow: inset 0 3px 0 #0005; }
+.sg-pull b { font-size: 22px; color: #fff; text-shadow: var(--stroke-s); }
+.sg-loot .cell { pointer-events: none; }
+@keyframes sg-loot { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* locked until the mage is open: follows the party's own lock state, so no game hook is needed */
+#btn-siege .sg-lock { position: absolute; right: 2px; bottom: 14px; width: 26px; height: 26px; margin: 0; filter: drop-shadow(0 2px 0 var(--ink)); display: none; }
+#hud:has(#party [data-cls="mage"].locked) #btn-siege .svgi:not(.sg-lock) { filter: grayscale(1) brightness(0.6) drop-shadow(0 3px 0 var(--ink)); }
+#hud:has(#party [data-cls="mage"].locked) #btn-siege span { opacity: 0.7; }
+#hud:has(#party [data-cls="mage"].locked) #btn-siege .sg-lock { display: block; }
+#hud:has(#party [data-cls="mage"].locked) #btn-siege:active { transform: none; }

@@ -25,6 +25,7 @@ import { Arrows, type ArrowTarget } from './arrows';
 import { PET_SEEK, Pet } from './pet';
 import { GATE, GATES, ISLAND, SPAWN, inCamp, lineSpots, pathAt, progressAt, ringSpots, walkable } from './island';
 import { BREAKABLES, World, makeBreakable, type BreakableDef, type Obstacle, type SpawnGroup, type SpawnPoint } from './world';
+import type { GameMode, GameWorld } from './gameworld';
 import { MARK_COLOR, Unit, setChargeBars, unitBar } from './mobs/unit';
 import { Mob } from './mobs/mob';
 import { Spawn } from './mobs/spawn';
@@ -165,7 +166,7 @@ class Prop extends Unit {
 export class Game {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
-  world: World;
+  world: GameWorld;
   hero: Character;
   private hemi: THREE.HemisphereLight;
   private sun: THREE.DirectionalLight;
@@ -257,7 +258,7 @@ export class Game {
 
   private labels: HTMLElement;
 
-  constructor(public save: SaveData, private input: Input, public ui: UI, labels: HTMLElement) {
+  constructor(public save: SaveData, private input: Input, public ui: UI, labels: HTMLElement, private readonly mode: GameMode | null = null) {
     this.labels = labels;
     this.camera = new THREE.PerspectiveCamera(VIEW.fov, 9 / 16, 0.5, 90);
     this.scene.fog = new THREE.FogExp2(0xbfe0f5, 0.015);
@@ -274,7 +275,7 @@ export class Game {
     this.sun.shadow.normalBias = 0.03;
     this.scene.add(this.hemi, this.sun, this.sun.target);
 
-    this.world = new World(save.faction);
+    this.world = mode?.world ?? new World(save.faction);
     this.scene.add(this.world.group);
     for (const id of save.gates ?? []) this.world.openGate(id, true);
     if (save.gatesOpen) this.world.openAllGates(true);
@@ -286,8 +287,9 @@ export class Game {
     this.hero.root.scale.setScalar(this.heroScale);
     this.dressHero();
     this.hero.setHighlight(true);
-    this.hero.position.set(SPAWN.x, 0, SPAWN.z);
-    this.hero.facing = Math.PI;
+    const start = mode?.start ?? { x: SPAWN.x, z: SPAWN.z, facing: Math.PI };
+    this.hero.position.set(start.x, 0, start.z);
+    this.hero.facing = start.facing;
     this.scene.add(this.hero.root);
     this.heroMark = { pos: this.hero.position, radius: HERO.radius, hittable: true };
     for (const t of this.trails) this.scene.add(t.mesh);
@@ -355,6 +357,7 @@ export class Game {
     this.syncPet();
     this.puffs = new FogPuffs(this.scene, this.camera);
     this.scene.add(this.ambient.points);
+    this.ambient.fixed = mode?.ambient ?? null;
     this.scene.add(this.sandstorm.group);
     // (no camp NPC by the gate for now: src/npc.ts CampNpc is kept for later)
     this.camPos.copy(this.hero.position);
@@ -386,6 +389,32 @@ export class Game {
     this.units.push(u);
     if (u instanceof Mob) { this.mobs.push(u); this.scene.add(u.ch.root); }
     else if (u instanceof Prop) { this.props.push(u); this.scene.add(u.obj); }
+  }
+
+  /**
+   * A mode's mobs (src/siege): stats as given (no zone tier, resists, depth or tuner), temp, quiet (Mob.debug), no leash.
+   * One social Spawn per call; `pack` continues an earlier call's Spawn (a horde spawned over several frames).
+   */
+  spawnExtra(defs: readonly MobDef[], at: readonly { x: number; z: number }[],
+    o: { chase: boolean; behavior?: SpawnPoint['behavior']; pack?: Spawn }): { pack: Spawn; mobs: Mob[] } {
+    const pack = o.pack ?? new Spawn({
+      id: `extra:${this.time}`, charges: [0], link: 'social', x: at[0].x, z: at[0].z, zone: this.world.zoneAt(at[0].x, at[0].z).id,
+    });
+    const mobs: Mob[] = [];
+    for (let i = 0; i < defs.length; i++) {
+      const m = new Mob(defs[i], new THREE.Vector3(at[i].x, 0, at[i].z), this.faction, this.labels, undefined, o.behavior, []);
+      m.ch.root.scale.setScalar(this.mobScale);
+      m.temp = true;
+      m.debug = true;
+      m.leash = Infinity;
+      if (o.chase) m.state = 'chase';
+      pack.units.push(m);
+      m.spawner = pack;
+      this.addUnit(m);
+      this.spawnFx(m);
+      mobs.push(m);
+    }
+    return { pack, mobs };
   }
 
   // ---------- hero stats ----------
@@ -630,7 +659,7 @@ export class Game {
     this.time += dt;
     const played = this.save.playTime ?? 0;
     this.save.playTime = played + dt;
-    if (Math.floor(this.save.playTime / 60) > Math.floor(played / 60)) this.snapshot();
+    if (!this.mode && Math.floor(this.save.playTime / 60) > Math.floor(played / 60)) this.snapshot();
     if (this.cut) this.updateCut(dt);
     else {
       if (this.input.pressed('KeyI') || this.input.pressed('KeyC')) { this.onOpenCharacter(); return; }
@@ -645,6 +674,7 @@ export class Game {
     this.updatePet(dt);
     this.updateProps(dt);
     this.updateRespawns();
+    this.mode?.tick(dt);
     this.telegraphs.update(dt);
     this.particles.update(dt);
     this.arrows.update(dt);
@@ -779,7 +809,7 @@ export class Game {
       this.deadT += dt;
       ch.update(dt, false);
       // no death window: once the death clip has played, straight back to the camp
-      if (this.deadT > 1.6) this.respawnInCamp();
+      if (this.deadT > 1.6) { if (this.mode) this.mode.heroDied(); else this.respawnInCamp(); }
       return;
     }
     const [ix, iy] = this.cut ? [0, 0] : this.input.vector;
@@ -849,7 +879,7 @@ export class Game {
     for (const h of this.hands) this.updateHand(h, dt);
 
     // regen; much faster in the camp
-    let rate = this.regen; // HP per second
+    let rate = this.regen * (this.mode?.regenMul?.() ?? 1); // HP per second
     // the vigor orb's second wind (CLASS_PASSIVE.orb_vigor): faster regen at low HP
     if (this.hp < this.maxHp * ORB_LOW_HP) rate *= 1 + passiveOf(this.save.weapons[1], 'orb_vigor');
     if (inCamp(p.x, p.z)) rate += (HERO.campRegen / 100) * this.maxHp;
@@ -1736,7 +1766,7 @@ export class Game {
         const dSpawn = m.pos.distanceTo(m.spawn);
         // a pack is leashed to its centre, so it gives up together
         const home = m.spawner?.at ?? m.spawn;
-        const leash = def.boss ? 16 : LEASH;
+        const leash = m.leash ?? (def.boss ? 16 : LEASH);
         const sees = b.disposition === 'hostile' && dHero < def.aggro;
         if (m.state === 'idle') {
           if (!this.dead && !heroInCamp && (sees || m.spawner?.pulls(m))) m.state = 'chase';
@@ -2742,6 +2772,39 @@ export class Game {
     this.ambient.points.visible = !low;
   }
 
+  dispose() {
+    for (const m of this.mobs) if (!m.removed) this.removeMob(m);
+    this.hero.dispose();
+    this.pet?.dispose();
+    this.particles.dispose();
+    this.pickups.dispose();
+    this.heroBar.el.remove();
+    for (const p of this.props) {
+      p.obj.removeFromParent();
+      p.uiEl.remove();
+      p.respawnEl.remove();
+      // makeBreakable: child 0 holds per-instance material clones; the blob shadow after it shares one material.
+      p.obj.children[0]?.traverse(disposeMeshMaterial);
+    }
+    this.telegraphs.dispose();
+    this.arrows.dispose();
+    this.fx.dispose();
+    this.glows.dispose();
+    this.auras.dispose();
+    this.sunFx.dispose();
+    this.waves.dispose();
+    this.spells.dispose();
+    this.puffs.dispose();
+    for (const a of this.arenas.values()) a.dispose();
+    this.arenas.clear();
+    this.ambient.dispose();
+    this.sandstorm.dispose();
+    for (const t of this.trails) t.dispose();
+    this.scene.remove(this.hemi, this.sun, this.sun.target);
+    this.sun.shadow.dispose();
+    this.world.dispose?.();
+  }
+
   // ---------- debug menu (src/debug.ts) ----------
   /** Debug: the hero cannot die (HP stops at 1). */
   god = false;
@@ -3090,6 +3153,7 @@ export class Game {
   }
 
   persist() {
+    if (this.mode) return;
     if (this.world.fog.dirty) this.save.fog = this.world.fog.serialize();
     writeSave(this.save);
   }
@@ -3198,3 +3262,8 @@ function newHand(i: 0 | 1): Hand {
 
 /** How a blow landed: a crit, dodged, or plain (''). */
 type HitFx = '' | 'crit' | 'miss';
+
+function disposeMeshMaterial(o: THREE.Object3D) {
+  const mesh = o as THREE.Mesh;
+  if (mesh.isMesh) (mesh.material as THREE.Material).dispose();
+}

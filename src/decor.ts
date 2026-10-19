@@ -98,15 +98,32 @@ const FLOWER_DENSITY: Partial<Record<ZoneId, number>> = { forest: 1, grove: 0.8,
 const MUSHROOM_CAPS = [0xd8452f, 0xc8402a, 0xb07a48, 0xe8d0a0, 0xa86038];
 const LEAF_COLS: Partial<Record<ZoneId, number[]>> = { grove: [0xd8662a, 0xe8a030, 0xb8442a, 0xf0c050, 0xc87a28], forest: [0xb89a40, 0xa88438, 0x8e9a3a] };
 
+/** Where the clutter may grow: the island by default; a mode's own map passes its own rules (src/siege/world.ts). */
+export interface DecorArea {
+  box: { x: number; z: number; size: number };
+  zoneAt(x: number, z: number): ZoneId;
+  walkable(x: number, z: number, pad: number): boolean;
+  /** Metres to the nearest trail, in the island's terms (PATH_W / 2 = the trail's edge). */
+  trailDist(x: number, z: number): number;
+  inCamp(x: number, z: number, pad: number): boolean;
+  height(x: number, z: number): number;
+  /** Multiplies every count (the island = 1); search tries follow the box area. */
+  density: number;
+}
+
+const ISLAND_AREA: DecorArea = { box: MAP_BOX, zoneAt: zoneIdAt, walkable, trailDist: pathDist, inCamp, height: heightAt, density: 1 };
+
 /**
  * Builds the clutter and returns its meshes. `free(x, z, pad)`: room on the walkable ground (no obstacle within pad);
  * `trees`: trunk spots (mushrooms and ferns grow round them).
  */
-export function buildDecor(free: (x: number, z: number, pad: number) => boolean, trees: [number, number][], seed = 13) {
+export function buildDecor(free: (x: number, z: number, pad: number) => boolean, trees: [number, number][], seed = 13, area: DecorArea = ISLAND_AREA) {
   const r = prng(seed);
+  const { box, zoneAt, walkable, trailDist: pathDist, inCamp, height } = area;
+  const areaK = (box.size / MAP_BOX.size) ** 2;
   const out: THREE.Object3D[] = [];
   const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
-  const rand = () => ({ x: MAP_BOX.x + r() * MAP_BOX.size, z: MAP_BOX.z + r() * MAP_BOX.size });
+  const rand = () => ({ x: box.x + r() * box.size, z: box.z + r() * box.size });
   const nearTree = (d0: number, d1: number) => {
     const [tx, tz] = pick(trees);
     const a = r() * Math.PI * 2;
@@ -116,6 +133,8 @@ export function buildDecor(free: (x: number, z: number, pad: number) => boolean,
   const offTrail = (x: number, z: number, d = PATH_W * 0.5 + 0.5) => pathDist(x, z) > d;
   const collect = (n: number, tries: number, gen: () => { x: number; z: number }, make: (x: number, z: number) => Bit | null) => {
     const bits: Bit[] = [];
+    n = Math.round(n * area.density);
+    if (area !== ISLAND_AREA) tries = Math.round(tries * areaK);
     for (let i = 0; i < tries && bits.length < n; i++) {
       const p = gen();
       const b = make(p.x, p.z);
@@ -126,7 +145,7 @@ export function buildDecor(free: (x: number, z: number, pad: number) => boolean,
 
   // pebbles: half of them line the trail edges, the rest anywhere on open ground (and the beaches)
   const pebble = (x: number, z: number): Bit | null => {
-    const cols = ZONE_PEBBLES[zoneIdAt(x, z)];
+    const cols = ZONE_PEBBLES[zoneAt(x, z)];
     if (!cols || !free(x, z, 0.15) || inCamp(x, z, -3)) return null;
     return { x, z, s: 0.55 + r() * 1.3, r: r() * 6, c: pick(cols) };
   };
@@ -135,11 +154,11 @@ export function buildDecor(free: (x: number, z: number, pad: number) => boolean,
     return d > PATH_W * 0.5 + 0.08 && d < PATH_W * 0.5 + 1.1 ? pebble(x, z) : null;
   });
   const loosePebbles = collect(1400, 20000, rand, (x, z) => (offTrail(x, z, 1) ? pebble(x, z) : null));
-  add(GEO.pebble(), mat({ flat: true }), [...trailPebbles, ...loosePebbles], out);
+  add(GEO.pebble(), mat({ flat: true }), [...trailPebbles, ...loosePebbles], out, height);
 
   // flower patches: noise picks the meadows, the zone its colours; each patch is mostly one colour
   const flowers = collect(950, 90000, rand, (x, z) => {
-    const zone = zoneIdAt(x, z);
+    const zone = zoneAt(x, z);
     const dens = FLOWER_DENSITY[zone];
     if (!dens || fbm(x * 0.13 + 3, z * 0.13 - 7) < 0.69 - dens * 0.04 || r() > dens) return null;
     if (!walkable(x, z, 0.6) || !offTrail(x, z, 1.1) || !free(x, z, 0.3) || inCamp(x, z, -4.5)) return null;
@@ -147,38 +166,38 @@ export function buildDecor(free: (x: number, z: number, pad: number) => boolean,
     const main = pal[Math.floor(fbm(x * 0.06 + 9, z * 0.06 - 4) * pal.length * 2.3) % pal.length];
     return { x, z, s: 0.85 + r() * 0.6, r: r() * 6, c: r() < 0.75 ? main : pick(pal) };
   });
-  add(GEO.flowers(), mat({ sway: 60 }), flowers, out);
+  add(GEO.flowers(), mat({ sway: 60 }), flowers, out, height);
 
   // mushrooms and ferns in the shade round the trees
   const shade = (zones: ZoneId[], pad: number) => (x: number, z: number) =>
-    zones.includes(zoneIdAt(x, z)) && walkable(x, z, 0.3) && offTrail(x, z, 1) && free(x, z, pad) && !inCamp(x, z, 1);
+    zones.includes(zoneAt(x, z)) && walkable(x, z, 0.3) && offTrail(x, z, 1) && free(x, z, pad) && !inCamp(x, z, 1);
   if (trees.length) {
     const okShroom = shade(['forest', 'swamp', 'grove'], 0.15);
     const shrooms = collect(260, 4000, () => nearTree(0.7, 2.2), (x, z) => (okShroom(x, z) ? { x, z, s: 0.8 + r() * 0.7, r: r() * 6, c: pick(MUSHROOM_CAPS) } : null));
-    add(GEO.mushrooms(), mat({ vertex: true }), shrooms, out);
+    add(GEO.mushrooms(), mat({ vertex: true }), shrooms, out, height);
     const okFern = shade(['forest', 'swamp', 'grove', 'hills'], 0.25);
     // green ferns, rusty bracken in the autumn grove
-    const fern = (x: number, z: number) => pick(zoneIdAt(x, z) === 'grove' ? [0xb8642a, 0xc8803a, 0x9a5a28] : [0x3f8a36, 0x4c9a3a, 0x357a32, 0x5aa040]);
+    const fern = (x: number, z: number) => pick(zoneAt(x, z) === 'grove' ? [0xb8642a, 0xc8803a, 0x9a5a28] : [0x3f8a36, 0x4c9a3a, 0x357a32, 0x5aa040]);
     const ferns = [
       ...collect(700, 6000, () => nearTree(0.9, 3.2), (x, z) => (okFern(x, z) ? { x, z, s: 0.7 + r() * 0.8, r: r() * 6, c: fern(x, z) } : null)),
       ...collect(300, 20000, rand, (x, z) => (okFern(x, z) && fbm(x * 0.09, z * 0.09 + 11) > 0.6 ? { x, z, s: 0.6 + r() * 0.6, r: r() * 6, c: fern(x, z) } : null)),
     ];
-    add(GEO.fern(), mat({ sway: 25 }), ferns, out);
+    add(GEO.fern(), mat({ sway: 25 }), ferns, out, height);
   }
 
   // cemetery: pale mushrooms that glow a little in the mist
   const okGhost = shade(['cemetery'], 0.2);
   const ghosts = collect(170, 30000, rand, (x, z) => (okGhost(x, z) ? { x, z, s: 0.8 + r() * 0.8, r: r() * 6, c: pick([0x9ef0e0, 0xb8a8ff, 0x8ad8ff]) } : null));
-  add(GEO.mushrooms(), mat({ vertex: true, glow: 0x2a8a80 }), ghosts, out);
+  add(GEO.mushrooms(), mat({ vertex: true, glow: 0x2a8a80 }), ghosts, out, height);
 
   // fallen leaves: thick in the autumn grove, a few under the forest trees
   const leaves = [
-    ...collect(1800, 40000, rand, (x, z) => (zoneIdAt(x, z) === 'grove' && walkable(x, z, 0.2) && free(x, z, 0.1) && offTrail(x, z, 0.6)
+    ...collect(1800, 40000, rand, (x, z) => (zoneAt(x, z) === 'grove' && walkable(x, z, 0.2) && free(x, z, 0.1) && offTrail(x, z, 0.6)
       ? { x, z, s: 0.8 + r() * 0.6, r: r() * 6, c: pick(LEAF_COLS.grove!) } : null)),
-    ...(trees.length ? collect(260, 3000, () => nearTree(0.5, 2.6), (x, z) => (zoneIdAt(x, z) === 'forest' && walkable(x, z, 0.2) && free(x, z, 0.1) && offTrail(x, z, 0.7)
+    ...(trees.length ? collect(260, 3000, () => nearTree(0.5, 2.6), (x, z) => (zoneAt(x, z) === 'forest' && walkable(x, z, 0.2) && free(x, z, 0.1) && offTrail(x, z, 0.7)
       ? { x, z, s: 0.7 + r() * 0.5, r: r() * 6, c: pick(LEAF_COLS.forest!) } : null)) : []),
   ];
-  add(GEO.leaves(), mat({ side: THREE.DoubleSide }), leaves, out);
+  add(GEO.leaves(), mat({ side: THREE.DoubleSide }), leaves, out, height);
   return out;
 }
 
@@ -193,7 +212,7 @@ function mat(o: { flat?: boolean; sway?: number; vertex?: boolean; glow?: number
 
 const TILE = 32;
 /** InstancedMeshes per 32 m tile, coloured per instance, standing on the ground height. */
-function add(geo: THREE.BufferGeometry, material: THREE.Material, bits: Bit[], out: THREE.Object3D[], shadow = false) {
+function add(geo: THREE.BufferGeometry, material: THREE.Material, bits: Bit[], out: THREE.Object3D[], height: (x: number, z: number) => number, shadow = false) {
   const tiles = new Map<number, Bit[]>();
   for (const b of bits) {
     const k = Math.floor(b.x / TILE) * 1000 + Math.floor(b.z / TILE);
@@ -210,7 +229,7 @@ function add(geo: THREE.BufferGeometry, material: THREE.Material, bits: Bit[], o
     const im = new THREE.InstancedMesh(geo, material, list.length);
     list.forEach((b, i) => {
       q.setFromAxisAngle(up, b.r);
-      im.setMatrixAt(i, m.compose(p.set(b.x, heightAt(b.x, b.z), b.z), q, s.setScalar(b.s)));
+      im.setMatrixAt(i, m.compose(p.set(b.x, height(b.x, b.z), b.z), q, s.setScalar(b.s)));
       im.setColorAt(i, c.set(b.c));
     });
     im.castShadow = shadow;

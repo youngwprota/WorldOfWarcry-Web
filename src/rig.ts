@@ -25,6 +25,8 @@ export const WEAPON_GRIPS: Record<string, {
   sword_soldier: { scale: 0.7, grip: 0.12 },
   sword_orc_warrior: { scale: 0.68, grip: 0.12 },
   sword_undead_king: { scale: 0.75, grip: 0.12 },
+  // authored upside down (tip at the model's bottom, hilt on top): `face` π stands it up before the grip is measured
+  sword_elf_warrior: { scale: 0.7, grip: 0.1, face: Math.PI },
   // axes: `roll` turns the blade to face forward-down when the arm hangs (the way the chop lands), measured in
   // viewer.html; π had every axe edge pointing back over the shoulder
   axe_orc_grunt: { scale: 0.7, grip: 0.16, roll: -0.92 },

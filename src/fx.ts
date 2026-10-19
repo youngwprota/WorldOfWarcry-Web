@@ -49,6 +49,11 @@ export class FloatingText {
       p.el.style.opacity = String(k > 0.7 ? (1 - k) / 0.3 : 1);
     }
   }
+
+  dispose() {
+    for (const p of this.pool) p.el.remove();
+    this.pool.length = 0;
+  }
 }
 
 interface Particle { pos: THREE.Vector3; vel: THREE.Vector3; rot: THREE.Euler; spinX: number; spinY: number; s: number; color: THREE.Color; t: number; life: number }
@@ -240,6 +245,20 @@ export class Telegraphs {
         cb(tag);
       }
     }
+  }
+
+  dispose() {
+    this.clear();
+    this.free.length = this.balls.length = 0;
+    this.ringGeo.dispose();
+    this.discGeo.dispose();
+    this.ballGeo.dispose();
+    for (const g of this.sectors.values()) { g.fill.dispose(); g.arc.dispose(); }
+    this.sectors.clear();
+    this.outerMat.dispose();
+    this.fillMat.dispose();
+    this.innerMat.dispose();
+    this.ballMat.dispose();
   }
 }
 
@@ -596,6 +615,17 @@ export class StatAuras {
       a.arc.position.y = 0.3 + x * 1.1;
     }
   }
+
+  dispose() {
+    for (const a of Object.values(this.auras)) {
+      a.group.removeFromParent();
+      // the two geometries are shared by all four auras (disposing twice is harmless)
+      a.column.geometry.dispose();
+      a.arc.geometry.dispose();
+      (a.column.material as THREE.Material).dispose();
+      (a.arc.material as THREE.Material).dispose();
+    }
+  }
 }
 
 /** Expanding ground ring for combo finishers. */
@@ -631,6 +661,15 @@ export class Shockwaves {
         this.items.splice(i, 1);
       }
     }
+  }
+
+  dispose() {
+    for (const m of [...this.items.map((it) => it.mesh), ...this.free]) {
+      m.removeFromParent();
+      (m.material as THREE.Material).dispose();
+    }
+    this.items.length = this.free.length = 0;
+    this.geo.dispose();
   }
 }
 
@@ -807,6 +846,20 @@ export class Spells {
     b.mesh.visible = n > 0;
     if (n) b.mesh.instanceMatrix.needsUpdate = true;
   }
+
+  dispose() {
+    for (const b of this.bolts) b.mesh.removeFromParent();
+    for (const s of this.swirls) s.mesh.removeFromParent();
+    for (const b of this.flames) { b.mesh.removeFromParent(); b.mesh.dispose(); }
+    this.bolts.length = this.swirls.length = this.flames.length = 0;
+    this.ball.dispose();
+    this.shell.dispose();
+    this.flameGeo.dispose();
+    for (const m of this.mats.values()) m.dispose();
+    for (const m of this.boltMats.values()) { m.map?.dispose(); m.dispose(); }
+    this.mats.clear();
+    this.boltMats.clear();
+  }
 }
 
 let puffTex: THREE.Texture | null = null;
@@ -936,6 +989,14 @@ export class FogPuffs {
     this.mesh.instanceColor!.needsUpdate = true;
     this.alpha.needsUpdate = true;
   }
+
+  /** The soft-blob texture is module-level shared and stays. */
+  dispose() {
+    this.mesh.removeFromParent();
+    this.mesh.geometry.dispose();
+    (this.mesh.material as THREE.Material).dispose();
+    this.mesh.dispose();
+  }
 }
 
 /**
@@ -998,5 +1059,11 @@ export class ArenaFog {
     const r = Math.sqrt(Math.random()) * this.radius;
     tmp.set(this.center.x + Math.sin(a) * r, 0.4, this.center.z + Math.cos(a) * r);
     this.puffs.spawn(tmp, this.color, 2 + Math.random() * 2, 2.5, (0.3 + 0.3 * this.boost) * this.k);
+  }
+
+  dispose() {
+    this.mesh.removeFromParent();
+    this.mesh.geometry.dispose();
+    this.mat.dispose();
   }
 }

@@ -12,6 +12,7 @@ import { GEAR_MODELS } from './items';
 import { Game } from './game';
 import { Input } from './input';
 import { Inventory } from './inventory';
+import { installSiege } from './siege';
 import { DebugPanel } from './debug';
 import { Prologue, clearPrologue, prologueDone, savePrologue, type Gains } from './prologue';
 import { MapView } from './mapview';
@@ -167,6 +168,7 @@ function startGame(faction: FactionId, fresh: boolean, gains?: Gains) {
     input.reset();
     gacha.open();
   };
+  installSiege({ ui, input, labels, game: () => game, setActive: (g) => { game = g; }, lowGfx: () => !!save!.lowGfx });
   addEventListener('keydown', (e) => {
     if (gacha.isOpen && (e.code === 'Escape' || e.code === 'KeyG')) gacha.close();
     else if (inv.isOpen && (e.code === 'Escape' || e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyB')) inv.close();

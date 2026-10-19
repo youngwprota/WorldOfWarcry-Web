@@ -173,4 +173,10 @@ export class Ambient {
     u.uSlant.value = gusty > 0 ? rise / Math.max(drift, 0.1) : 0;
     u.uFlicker.value = flicker; u.uAmount.value = amount; u.uGlow.value = glow;
   }
+
+  dispose() {
+    this.points.removeFromParent();
+    this.points.geometry.dispose();
+    (this.points.material as THREE.Material).dispose();
+  }
 }

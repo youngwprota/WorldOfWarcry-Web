@@ -142,7 +142,7 @@ function snowMat(src: THREE.Material) {
 }
 
 /** Foliage tints (multiply the elf texture) so groves are not all the same lime green. */
-const LEAF_TINTS = [0xffffff, 0xd4ecb0, 0xa8d488, 0x8fc47a, 0xc2e09a];
+export const LEAF_TINTS = [0xffffff, 0xd4ecb0, 0xa8d488, 0x8fc47a, 0xc2e09a];
 const leaf = (r: () => number) => LEAF_TINTS[Math.floor(r() * LEAF_TINTS.length)];
 
 /** Position in a local frame: `fwd` along angle a (0 = +Z), `side` to its local +X. */
