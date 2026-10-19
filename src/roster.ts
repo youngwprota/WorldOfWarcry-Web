@@ -6,13 +6,13 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { ATTACK_HIT, MOBS, type MobDef } from './config';
 
 const BASE = import.meta.env.BASE_URL + 'assets/';
-type Faction = 'human' | 'orc' | 'undead';
+type Faction = 'human' | 'orc' | 'undead' | 'elf' | 'wild';
 
 interface Section {
   key: Faction;
   title: string;
   units: [name: string, file: string, web: boolean][];
-  skin: Swatch;
+  skin?: Swatch;
   swatches: Swatch[];
   look: string[];
 }
@@ -48,6 +48,17 @@ const SECTIONS: Section[] = [
     look: ['Exposed ribs, spine and skull, torn rags, curled dark horns, green glowing eyes (emissive map).',
       'Mobs: blue skin with bones sticking out, e.g. the undead boar.', 'Bones are extra mesh parts that only the undead variant shows.'],
   },
+  {
+    key: 'elf', title: 'Elves',
+    units: [['Worker', 'elf_worker', true], ['Warrior', 'elf_warrior', true], ['Assassin', 'elf_assassin', true],
+      ['Priestess', 'elf_priestess', true], ['Queen', 'elf_queen', true]],
+    swatches: [],
+    look: ['Dark blue skin, pointed ears, white hair, green leaf crowns and gold-and-pink trim; priestess and queen have glow maps.'],
+  },
+  {
+    key: 'wild', title: 'Wild', units: [], swatches: [],
+    look: ['Neutral beasts of no faction: natural animal colors, no faction cloth or trim.'],
+  },
 ];
 
 /** Creature mobs grouped by the faction prefix of their GLB (`orc_boar` → orc). */
@@ -55,7 +66,7 @@ const MOB_LIST: { def: MobDef; model: string; faction: Faction }[] = [];
 for (const def of Object.values(MOBS)) {
   if (!def.creature) continue;
   const model = def.model.human[0];
-  const faction = (['human', 'orc', 'undead'] as Faction[]).find((f) => model.startsWith(f + '_')) ?? 'human';
+  const faction = (['human', 'orc', 'undead', 'elf', 'wild'] as Faction[]).find((f) => model.startsWith(f + '_')) ?? 'human';
   MOB_LIST.push({ def, model, faction });
 }
 
@@ -116,8 +127,9 @@ for (const s of SECTIONS) {
   const mobs = MOB_LIST.filter((m) => m.faction === s.key);
   const el = document.createElement('section');
   el.style.setProperty('--c', `var(--${s.key})`);
-  el.innerHTML = `<h2>${s.title} <small>${s.units.length} units${mobs.length ? `, ${mobs.length} mob${mobs.length > 1 ? 's' : ''}` : ''}</small></h2>` +
-    `<div class="rules"><div class="sws">${[s.skin, ...s.swatches].map(chip).join('')}</div><ul>${s.look.map((l) => `<li>${l}</li>`).join('')}</ul></div>` +
+  const counts = [s.units.length ? `${s.units.length} units` : '', mobs.length ? `${mobs.length} mob${mobs.length > 1 ? 's' : ''}` : ''];
+  el.innerHTML = `<h2>${s.title} <small>${counts.filter(Boolean).join(', ')}</small></h2>` +
+    `<div class="rules"><div class="sws">${[...(s.skin ? [s.skin] : []), ...s.swatches].map(chip).join('')}</div><ul>${s.look.map((l) => `<li>${l}</li>`).join('')}</ul></div>` +
     `<div class="grid">` +
     s.units.map(([name, file, web]) => `<div class="card"><img src="${BASE}roster/${file}.png" alt="${s.title} ${name}">` +
       `<span class="name">${name}</span><span class="file">${file}.fbx</span><span class="tag ${web ? 'in' : ''}">${web ? 'in web' : 'Unity only'}</span></div>`).join('') +
